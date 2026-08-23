@@ -1,0 +1,115 @@
+syntax = "proto3";
+
+package ferret.wire.v1;
+
+option go_package = "github.com/MontFerret/wire/gen/ferret/wire/v1;wirev1";
+
+service RuntimeService {
+  rpc Connect(ConnectRequest) returns (stream ConnectResponse);
+  rpc CloseConnection(CloseConnectionRequest) returns (CloseConnectionResponse);
+}
+
+message ConnectionId {
+  string value = 1;
+}
+
+message ClientIdentity {
+  string name = 1;
+  string version = 2;
+}
+
+message RuntimeIdentity {
+  string name = 1;
+  string version = 2;
+  string instance_id = 3;
+}
+
+enum Capability {
+  CAPABILITY_UNSPECIFIED = 0;
+  CAPABILITY_EXECUTION = 1;
+  CAPABILITY_DEBUGGING = 2;
+  CAPABILITY_CANCELLATION = 3;
+}
+
+message RuntimeInfo {
+  string api_identity = 1;
+  string wire_version = 2;
+  string ferret_version = 3;
+  RuntimeIdentity runtime_identity = 4;
+  repeated Capability capabilities = 5;
+}
+
+message ConnectionOpened {
+  ConnectionId connection_id = 1;
+  RuntimeInfo runtime_info = 2;
+}
+
+message ConnectionClosing {}
+
+message ConnectResponse {
+  oneof payload {
+    ConnectionOpened opened = 1;
+    ConnectionClosing closing = 2;
+  }
+}
+
+message ConnectRequest {
+  ClientIdentity client_identity = 1;
+}
+
+message CloseConnectionRequest {
+  ConnectionId connection_id = 1;
+}
+
+message CloseConnectionResponse {}
+
+enum ErrorCategory {
+  ERROR_CATEGORY_UNSPECIFIED = 0;
+  ERROR_CATEGORY_INVALID_REQUEST = 1;
+  ERROR_CATEGORY_COMPILATION_FAILURE = 2;
+  ERROR_CATEGORY_EXECUTION_FAILURE = 3;
+  ERROR_CATEGORY_PLAN_NOT_FOUND = 4;
+  ERROR_CATEGORY_EXECUTION_NOT_FOUND = 5;
+  ERROR_CATEGORY_DEBUG_SESSION_NOT_FOUND = 6;
+  ERROR_CATEGORY_CONNECTION_NOT_FOUND = 7;
+  ERROR_CATEGORY_INVALID_STATE = 8;
+  ERROR_CATEGORY_UNSUPPORTED_CAPABILITY = 9;
+  ERROR_CATEGORY_INTERNAL_RUNTIME_FAILURE = 10;
+  ERROR_CATEGORY_WATCHER_LAGGED = 11;
+  ERROR_CATEGORY_CANCELLED = 12;
+  ERROR_CATEGORY_VALUE_REFERENCE_NOT_FOUND = 13;
+}
+
+enum ResourceKind {
+  RESOURCE_KIND_UNSPECIFIED = 0;
+  RESOURCE_KIND_CONNECTION = 1;
+  RESOURCE_KIND_PLAN = 2;
+  RESOURCE_KIND_EXECUTION = 3;
+  RESOURCE_KIND_DEBUG_SESSION = 4;
+  RESOURCE_KIND_WATCHER = 5;
+  RESOURCE_KIND_VALUE_REFERENCE = 6;
+}
+
+message DiagnosticSpan {
+  uint64 start_byte = 1;
+  uint64 end_byte = 2;
+  string label = 3;
+  bool primary = 4;
+}
+
+message Diagnostic {
+  string kind = 1;
+  string message = 2;
+  string hint = 3;
+  string note = 4;
+  string source_identity = 5;
+  repeated DiagnosticSpan spans = 6;
+}
+
+message ErrorDetail {
+  ErrorCategory category = 1;
+  string message = 2;
+  ResourceKind resource = 3;
+  string resource_id = 4;
+  repeated Diagnostic diagnostics = 5;
+}

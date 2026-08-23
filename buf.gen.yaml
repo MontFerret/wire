@@ -1,0 +1,27 @@
+version: v2
+clean: true
+
+inputs:
+  - directory: .
+    paths:
+      - proto/ferret/wire/v1/runtime.proto
+      - proto/ferret/wire/v1/value.proto
+      - proto/ferret/wire/v1/plan.proto
+      - proto/ferret/wire/v1/execution.proto
+      - proto/ferret/wire/v1/debug.proto
+
+plugins:
+  - local:
+      - go
+      - run
+      - google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.12
+    out: gen
+    opt:
+      - paths=source_relative
+  - local:
+      - go
+      - run
+      - google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.6.2
+    out: gen
+    opt:
+      - paths=source_relative

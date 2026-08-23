@@ -1,0 +1,111 @@
+syntax = "proto3";
+
+package ferret.wire.v1;
+
+import "ferret/wire/v1/plan.proto";
+import "ferret/wire/v1/runtime.proto";
+import "ferret/wire/v1/value.proto";
+
+option go_package = "github.com/MontFerret/wire/gen/ferret/wire/v1;wirev1";
+
+service ExecutionService {
+  rpc Execute(ExecuteRequest) returns (ExecuteResponse);
+  rpc CancelExecution(CancelExecutionRequest) returns (CancelExecutionResponse);
+  rpc ReleaseExecution(ReleaseExecutionRequest) returns (ReleaseExecutionResponse);
+  rpc WatchExecution(WatchExecutionRequest) returns (stream WatchExecutionResponse);
+}
+
+message ExecutionId {
+  string value = 1;
+}
+
+enum ExecutionState {
+  EXECUTION_STATE_UNSPECIFIED = 0;
+  EXECUTION_STATE_RUNNING = 1;
+  EXECUTION_STATE_COMPLETED = 2;
+  EXECUTION_STATE_FAILED = 3;
+  EXECUTION_STATE_CANCELLED = 4;
+}
+
+message Output {
+  string content_type = 1;
+  bytes data = 2;
+}
+
+message Failure {
+  ErrorCategory category = 1;
+  string message = 2;
+  repeated Diagnostic diagnostics = 3;
+}
+
+message Execution {
+  ExecutionId id = 1;
+  PlanId plan_id = 2;
+  ExecutionState state = 3;
+  Output output = 4;
+  Failure failure = 5;
+}
+
+message ExecutionStarted {
+  Execution execution = 1;
+}
+
+message ExecutionOutput {
+  Output output = 1;
+}
+
+message ExecutionCompleted {
+  Execution execution = 1;
+}
+
+message ExecutionFailed {
+  Execution execution = 1;
+}
+
+message ExecutionCancelled {
+  Execution execution = 1;
+}
+
+message WatchExecutionResponse {
+  ExecutionId execution_id = 1;
+  uint64 sequence = 2;
+  oneof payload {
+    ExecutionStarted started = 3;
+    ExecutionOutput output = 4;
+    ExecutionCompleted completed = 5;
+    ExecutionFailed failed = 6;
+    ExecutionCancelled cancelled = 7;
+  }
+}
+
+message ExecuteRequest {
+  ConnectionId connection_id = 1;
+  PlanId plan_id = 2;
+  Parameters parameters = 3;
+  string output_content_type = 4;
+}
+
+message ExecuteResponse {
+  Execution execution = 1;
+}
+
+message CancelExecutionRequest {
+  ConnectionId connection_id = 1;
+  ExecutionId execution_id = 2;
+}
+
+message CancelExecutionResponse {
+  Execution execution = 1;
+}
+
+message ReleaseExecutionRequest {
+  ConnectionId connection_id = 1;
+  ExecutionId execution_id = 2;
+}
+
+message ReleaseExecutionResponse {}
+
+message WatchExecutionRequest {
+  ConnectionId connection_id = 1;
+  ExecutionId execution_id = 2;
+}

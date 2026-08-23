@@ -1,0 +1,49 @@
+syntax = "proto3";
+
+package ferret.wire.v1;
+
+import "ferret/wire/v1/runtime.proto";
+
+option go_package = "github.com/MontFerret/wire/gen/ferret/wire/v1;wirev1";
+
+service PlanService {
+  rpc Compile(CompileRequest) returns (CompileResponse);
+  rpc ReleasePlan(ReleasePlanRequest) returns (ReleasePlanResponse);
+}
+
+message PlanId {
+  string value = 1;
+}
+
+message Source {
+  string content = 1;
+  string identity = 2;
+}
+
+message CompileOptions {
+  bool debuggable = 1;
+}
+
+message Plan {
+  PlanId id = 1;
+  repeated string parameters = 2;
+  bool debuggable = 3;
+}
+
+message CompileRequest {
+  ConnectionId connection_id = 1;
+  Source source = 2;
+  CompileOptions options = 3;
+}
+
+message CompileResponse {
+  Plan plan = 1;
+  repeated Diagnostic diagnostics = 2;
+}
+
+message ReleasePlanRequest {
+  ConnectionId connection_id = 1;
+  PlanId plan_id = 2;
+}
+
+message ReleasePlanResponse {}

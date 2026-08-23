@@ -1,0 +1,35 @@
+syntax = "proto3";
+
+package ferret.wire.v1;
+
+import "google/protobuf/struct.proto";
+
+option go_package = "github.com/MontFerret/wire/gen/ferret/wire/v1;wirev1";
+
+message Value {
+  oneof value {
+    google.protobuf.NullValue none_value = 1;
+    bool boolean_value = 2;
+    sint64 integer_value = 3;
+    double float_value = 4;
+    string string_value = 5;
+    bytes binary_value = 6;
+    sint64 duration_nanos = 7;
+    string datetime_value = 8;
+    string regexp_value = 9;
+    ArrayValue array_value = 10;
+    ObjectValue object_value = 11;
+  }
+}
+
+message ArrayValue {
+  repeated Value values = 1;
+}
+
+message ObjectValue {
+  map<string, Value> fields = 1;
+}
+
+message Parameters {
+  map<string, Value> values = 1;
+}
