@@ -10,6 +10,33 @@ import (
 )
 
 type (
+	// ExecuteOptions controls encoded execution output.
+	ExecuteOptions struct {
+		OutputContentType string
+	}
+
+	// Output preserves Ferret's encoded content-type and byte abstraction.
+	Output struct {
+		ContentType string
+		Content     []byte
+	}
+
+	// ExecutionState describes the lifecycle state in an ExecutionSnapshot.
+	ExecutionState uint8
+
+	// ExecutionSnapshot is the state published for one remote execution event.
+	ExecutionSnapshot struct {
+		State   ExecutionState
+		Output  *Output
+		Failure *Failure
+	}
+
+	// ExecutionEvent carries an ordered execution snapshot.
+	ExecutionEvent struct {
+		Sequence uint64
+		Snapshot ExecutionSnapshot
+	}
+
 	// Execution is one remote execution owned by its Plan.
 	Execution struct {
 		client *Client
@@ -24,6 +51,14 @@ type (
 		stream wirev1.ExecutionService_WatchExecutionClient
 		cancel context.CancelFunc
 	}
+)
+
+// Execution lifecycle states.
+const (
+	ExecutionRunning ExecutionState = iota + 1
+	ExecutionCompleted
+	ExecutionFailed
+	ExecutionCancelled
 )
 
 // Execute publishes a remote execution of this plan. Output remains Ferret's
@@ -56,14 +91,6 @@ func (p *Plan) Execute(ctx context.Context, parameters Parameters, options Execu
 	return &Execution{client: p.client, plan: p, id: value.GetId().GetValue(), close: &lifecycle.Close{}}, nil
 }
 
-func (e *Execution) checkOpen() error {
-	if e == nil || e.client == nil || e.plan == nil || e.id == "" || e.close == nil || e.close.Started() {
-		return ErrClosed
-	}
-
-	return e.plan.checkOpen()
-}
-
 // Cancel requests execution cancellation. The ordered terminal cancellation
 // snapshot remains observable through Watch.
 func (e *Execution) Cancel(ctx context.Context) error {
@@ -74,41 +101,6 @@ func (e *Execution) Cancel(ctx context.Context) error {
 	_, err := e.client.executionClient.CancelExecution(ctx, &wirev1.CancelExecutionRequest{
 		ConnectionId: e.client.connectionProto(),
 		ExecutionId:  &wirev1.ExecutionId{Value: e.id},
-	})
-
-	return decodeError(err)
-}
-
-// Close commits cancellation and remote execution cleanup. Concurrent and
-// repeated calls observe one retained release result.
-func (e *Execution) Close(ctx context.Context) error {
-	if e == nil || e.client == nil || e.plan == nil || e.id == "" || e.close == nil {
-		return ErrClosed
-	}
-
-	if e.close.Begin() {
-		go settleHandleClose(ctx, "execution", e.close, e.release)
-	}
-
-	return e.close.Wait(ctx)
-}
-
-func (e *Execution) release(ctx context.Context) error {
-	if closing, err := e.plan.ancestorCloseResult(ctx); closing {
-		return err
-	}
-
-	return e.client.releaseExecution(ctx, e.id)
-}
-
-func (c *Client) releaseExecution(ctx context.Context, id string) error {
-	if err := c.checkOpen(); err != nil {
-		return err
-	}
-
-	_, err := c.executionClient.ReleaseExecution(ctx, &wirev1.ReleaseExecutionRequest{
-		ConnectionId: c.connectionProto(),
-		ExecutionId:  &wirev1.ExecutionId{Value: id},
 	})
 
 	return decodeError(err)
@@ -159,7 +151,7 @@ func (e *Execution) Wait(ctx context.Context) (Output, error) {
 			return Output{}, receiveErr
 		}
 
-		if !event.Snapshot.State.terminal() {
+		if !event.Snapshot.State.Terminal() {
 			continue
 		}
 
@@ -183,6 +175,20 @@ func (e *Execution) Wait(ctx context.Context) (Output, error) {
 	}
 }
 
+// Close commits cancellation and remote execution cleanup. Concurrent and
+// repeated calls observe one retained release result.
+func (e *Execution) Close(ctx context.Context) error {
+	if e == nil || e.client == nil || e.plan == nil || e.id == "" || e.close == nil {
+		return ErrClosed
+	}
+
+	if e.close.Begin() {
+		go settleHandleClose(ctx, "execution", e.close, e.release)
+	}
+
+	return e.close.Wait(ctx)
+}
+
 // Recv blocks for the next ordered execution event. It releases the local
 // stream when a terminal event or error is observed.
 func (events *ExecutionEvents) Recv() (ExecutionEvent, error) {
@@ -204,20 +210,37 @@ func (events *ExecutionEvents) Recv() (ExecutionEvent, error) {
 	}
 
 	event := convertExecutionEvent(value)
-	if event.Snapshot.State.terminal() {
+	if event.Snapshot.State.Terminal() {
 		events.cancel()
 	}
 
 	return event, nil
 }
 
-func (state ExecutionState) terminal() bool {
+// Terminal reports whether the execution has reached a final state.
+func (state ExecutionState) Terminal() bool {
 	switch state {
 	case ExecutionCompleted, ExecutionFailed, ExecutionCancelled:
 		return true
 	default:
 		return false
 	}
+}
+
+func (e *Execution) checkOpen() error {
+	if e == nil || e.client == nil || e.plan == nil || e.id == "" || e.close == nil || e.close.Started() {
+		return ErrClosed
+	}
+
+	return e.plan.checkOpen()
+}
+
+func (e *Execution) release(ctx context.Context) error {
+	if closing, err := e.plan.ancestorCloseResult(ctx); closing {
+		return err
+	}
+
+	return e.client.releaseExecution(ctx, e.id)
 }
 
 func (snapshot ExecutionSnapshot) output() Output {
@@ -229,4 +252,17 @@ func (snapshot ExecutionSnapshot) output() Output {
 		ContentType: snapshot.Output.ContentType,
 		Content:     append([]byte(nil), snapshot.Output.Content...),
 	}
+}
+
+func (c *Client) releaseExecution(ctx context.Context, id string) error {
+	if err := c.checkOpen(); err != nil {
+		return err
+	}
+
+	_, err := c.executionClient.ReleaseExecution(ctx, &wirev1.ReleaseExecutionRequest{
+		ConnectionId: c.connectionProto(),
+		ExecutionId:  &wirev1.ExecutionId{Value: id},
+	})
+
+	return decodeError(err)
 }

@@ -286,7 +286,7 @@ func TestClientRunOwnsCreatedResources(t *testing.T) {
 
 		_, err := client.Run(testClientContext(t), Source{Content: "RETURN 1"}, nil, RunOptions{})
 		var wireErr *Error
-		if !errors.As(err, &wireErr) || wireErr.Code != codes.Unavailable || wireErr.Message != "watch transport failed" {
+		if !errors.As(err, &wireErr) || status.Code(err) != codes.Unavailable || wireErr.Message != "watch transport failed" {
 			t.Fatalf("Client.Run lost the stream failure: %v", err)
 		}
 		_, _, releaseExecutionCalls, releasePlanCalls := server.callSnapshot()

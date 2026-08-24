@@ -11,6 +11,25 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+func TestExecutionStateTerminal(t *testing.T) {
+	tests := []struct {
+		state    ExecutionState
+		terminal bool
+	}{
+		{state: 0},
+		{state: ExecutionRunning},
+		{state: ExecutionCompleted, terminal: true},
+		{state: ExecutionFailed, terminal: true},
+		{state: ExecutionCancelled, terminal: true},
+	}
+
+	for _, test := range tests {
+		if got := test.state.Terminal(); got != test.terminal {
+			t.Errorf("ExecutionState(%d).Terminal() = %v, want %v", test.state, got, test.terminal)
+		}
+	}
+}
+
 func TestExecutionWaitTerminalStates(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -150,7 +169,7 @@ func TestExecutionWaitPropagatesContextAndStreamErrors(t *testing.T) {
 
 		_, err := execution.Wait(testClientContext(t))
 		var wireErr *Error
-		if !errors.As(err, &wireErr) || wireErr.Code != codes.Unavailable || wireErr.Message != "watch transport failed" {
+		if !errors.As(err, &wireErr) || status.Code(err) != codes.Unavailable || wireErr.Message != "watch transport failed" {
 			t.Fatalf("unexpected stream failure: %#v", err)
 		}
 	})

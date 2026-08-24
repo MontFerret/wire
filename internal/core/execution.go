@@ -12,7 +12,8 @@ import (
 )
 
 type (
-	ExecutionState     uint8
+	ExecutionState uint8
+
 	ExecutionEventKind uint8
 
 	Output struct {
@@ -244,49 +245,6 @@ func (e *Execution) snapshotLocked() ExecutionSnapshot {
 	return result
 }
 
-func cloneDiagnostics(values []Diagnostic) []Diagnostic {
-	result := make([]Diagnostic, len(values))
-	for i, value := range values {
-		result[i] = value
-		result[i].Spans = append([]DiagnosticSpan(nil), value.Spans...)
-	}
-
-	return result
-}
-
-func (c *Connection) execution(id ExecutionID) (*Execution, error) {
-	if err := validateID(id, "execution ID"); err != nil {
-		return nil, err
-	}
-	c.mu.RLock()
-	execution := c.executions[id]
-	c.mu.RUnlock()
-	if execution == nil {
-		return nil, notFound(ErrorExecutionNotFound, string(id))
-	}
-
-	return execution, nil
-}
-
-func (c *Connection) CancelExecution(id ExecutionID) (ExecutionSnapshot, error) {
-	execution, err := c.execution(id)
-	if err != nil {
-		return ExecutionSnapshot{}, err
-	}
-	execution.cancel(context.Canceled)
-
-	return execution.snapshot(), nil
-}
-
-func (c *Connection) WatchExecution(id ExecutionID) (ExecutionSubscription, error) {
-	execution, err := c.execution(id)
-	if err != nil {
-		return ExecutionSubscription{}, err
-	}
-
-	return execution.subscribe()
-}
-
 func (e *Execution) subscribe() (ExecutionSubscription, error) {
 	e.mu.Lock()
 	if e.subscriptions >= e.maxWatchers {
@@ -379,58 +337,4 @@ func (e *Execution) closeWatcherLocked(id uint64, watcher *executionWatcher, err
 	close(watcher.events)
 	close(watcher.errors)
 	delete(e.watchers, id)
-}
-
-func (c *Connection) ReleaseExecution(ctx context.Context, id ExecutionID) error {
-	if err := validateID(id, "execution ID"); err != nil {
-		return err
-	}
-	c.mu.Lock()
-	execution := c.executions[id]
-	if execution != nil {
-		delete(c.executions, id)
-		c.closingExecutions[id] = execution
-	} else {
-		execution = c.closingExecutions[id]
-	}
-
-	if execution != nil {
-		execution.plan.mu.Lock()
-		delete(execution.plan.executions, id)
-		execution.plan.mu.Unlock()
-	}
-	c.mu.Unlock()
-	if execution == nil {
-		return notFound(ErrorExecutionNotFound, string(id))
-	}
-
-	if execution.close.Begin() {
-		go c.settleExecutionRelease(execution)
-	}
-
-	return execution.close.Wait(ctx)
-}
-
-func (c *Connection) settleExecutionRelease(execution *Execution) {
-	var err error
-	defer func() {
-		if recover() != nil {
-			err = errors.Join(err, internalError(errors.New("execution cleanup panicked")))
-		}
-
-		c.mu.Lock()
-		if c.closingExecutions[execution.id] == execution {
-			delete(c.closingExecutions, execution.id)
-		}
-		c.mu.Unlock()
-		execution.close.Finish(err)
-	}()
-
-	execution.cancel(context.Canceled)
-	<-execution.done
-	execution.mu.Lock()
-	for id, watcher := range execution.watchers {
-		execution.closeWatcherLocked(id, watcher, nil)
-	}
-	execution.mu.Unlock()
 }

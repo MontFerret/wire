@@ -8,14 +8,27 @@ import (
 	"github.com/MontFerret/wire/internal/lifecycle"
 )
 
-// Plan is a compiled remote Ferret program owned by one Client.
-type Plan struct {
-	client     *Client
-	id         string
-	parameters []string
-	debuggable bool
-	close      *lifecycle.Close
-}
+type (
+	// Source is FQL content plus its diagnostic and debugger identity.
+	Source struct {
+		Content  string
+		Identity string
+	}
+
+	// CompileOptions controls Ferret plan construction.
+	CompileOptions struct {
+		Debuggable bool
+	}
+
+	// Plan is a compiled remote Ferret program owned by one Client.
+	Plan struct {
+		client     *Client
+		id         string
+		parameters []string
+		debuggable bool
+		close      *lifecycle.Close
+	}
+)
 
 // Compile creates a connection-owned plan through Ferret's public compiler.
 // Compilation diagnostics are returned through Error.
@@ -76,6 +89,20 @@ func (p *Plan) Run(ctx context.Context, parameters Parameters, options ExecuteOp
 	return output, errors.Join(waitErr, closeErr)
 }
 
+// Close releases the plan and its remote executions and debug sessions.
+// Concurrent and repeated calls observe one retained release result.
+func (p *Plan) Close(ctx context.Context) error {
+	if p == nil || p.client == nil || p.id == "" || p.close == nil {
+		return ErrClosed
+	}
+
+	if p.close.Begin() {
+		go settleHandleClose(ctx, "plan", p.close, p.release)
+	}
+
+	return p.close.Wait(ctx)
+}
+
 func (p *Plan) checkOpen() error {
 	if p == nil || p.client == nil || p.id == "" || p.close == nil || p.close.Started() {
 		return ErrClosed
@@ -94,20 +121,6 @@ func (p *Plan) ancestorCloseResult(ctx context.Context) (bool, error) {
 	}
 
 	return p.client.closeResult(ctx)
-}
-
-// Close releases the plan and its remote executions and debug sessions.
-// Concurrent and repeated calls observe one retained release result.
-func (p *Plan) Close(ctx context.Context) error {
-	if p == nil || p.client == nil || p.id == "" || p.close == nil {
-		return ErrClosed
-	}
-
-	if p.close.Begin() {
-		go settleHandleClose(ctx, "plan", p.close, p.release)
-	}
-
-	return p.close.Wait(ctx)
 }
 
 func (p *Plan) release(ctx context.Context) error {

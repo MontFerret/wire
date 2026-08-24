@@ -9,6 +9,10 @@ import (
 	"github.com/MontFerret/ferret/v2/pkg/vm"
 )
 
+type runtimeErrorSet interface {
+	Errors() iter.Seq2[int, *vm.RuntimeError]
+}
+
 func failureFromError(err error, identity string) *Failure {
 	diagnostics := diagnosticsFromError(err, identity)
 	if len(diagnostics) > 0 {
@@ -28,10 +32,6 @@ func failureFromError(err error, identity string) *Failure {
 
 func unsupportedOutputCodec(err error) bool {
 	return errors.Is(err, ferretencoding.ErrCodecNotFound) || errors.Is(err, ferretencoding.ErrEmptyContentType)
-}
-
-type runtimeErrorSet interface {
-	Errors() iter.Seq2[int, *vm.RuntimeError]
 }
 
 func diagnosticsFromError(err error, identity string) []Diagnostic {
@@ -104,4 +104,14 @@ func extractDiagnostics(err error) []*ferretdiagnostics.Diagnostic {
 	}
 
 	return nil
+}
+
+func cloneDiagnostics(values []Diagnostic) []Diagnostic {
+	result := make([]Diagnostic, len(values))
+	for i, value := range values {
+		result[i] = value
+		result[i].Spans = append([]DiagnosticSpan(nil), value.Spans...)
+	}
+
+	return result
 }

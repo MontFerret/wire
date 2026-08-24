@@ -10,29 +10,39 @@ import (
 	"google.golang.org/grpc"
 )
 
-// Client owns one logical Wire connection while borrowing its gRPC transport.
-type Client struct {
-	runtimeClient   wirev1.RuntimeServiceClient
-	planClient      wirev1.PlanServiceClient
-	executionClient wirev1.ExecutionServiceClient
-	debugClient     wirev1.DebugServiceClient
+type (
+	// Client owns one logical Wire connection while borrowing its gRPC transport.
+	Client struct {
+		runtimeClient   wirev1.RuntimeServiceClient
+		planClient      wirev1.PlanServiceClient
+		executionClient wirev1.ExecutionServiceClient
+		debugClient     wirev1.DebugServiceClient
 
-	connectionID    string
-	info            RuntimeInfo
-	stream          wirev1.RuntimeService_ConnectClient
-	streamCancel    context.CancelFunc
-	streamDone      chan struct{}
-	streamMu        sync.Mutex
-	streamErr       error
-	lifecycleCtx    context.Context
-	lifecycleCancel context.CancelFunc
+		connectionID    string
+		info            RuntimeInfo
+		stream          wirev1.RuntimeService_ConnectClient
+		streamCancel    context.CancelFunc
+		streamDone      chan struct{}
+		streamMu        sync.Mutex
+		streamErr       error
+		lifecycleCtx    context.Context
+		lifecycleCancel context.CancelFunc
 
-	closeOnce sync.Once
-	closeDone chan struct{}
-	closeMu   sync.Mutex
-	closeErr  error
-	closing   bool
-}
+		closeOnce sync.Once
+		closeDone chan struct{}
+		closeMu   sync.Mutex
+		closeErr  error
+		closing   bool
+	}
+
+	// RunOptions composes plan compilation and execution options for Client.Run.
+	RunOptions struct {
+		// Compile controls construction of the temporary plan.
+		Compile CompileOptions
+		// Execute controls the temporary execution and its encoded output.
+		Execute ExecuteOptions
+	}
+)
 
 // New opens one logical Wire connection over a caller-owned gRPC connection.
 // The construction context bounds the Connect handshake; Close owns the
