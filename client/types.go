@@ -1,5 +1,6 @@
 // Package client provides a domain-oriented Ferret Wire client over a
-// caller-owned gRPC connection.
+// caller-owned gRPC connection. Client owns Plan handles, and each Plan owns
+// its Execution and DebugSession handles; protocol resource IDs remain private.
 package client
 
 import (
@@ -7,15 +8,6 @@ import (
 )
 
 type (
-	// PlanID is an opaque server-issued plan identifier scoped to one Client.
-	PlanID string
-
-	// ExecutionID is an opaque server-issued execution identifier scoped to one Client.
-	ExecutionID string
-
-	// DebugSessionID is an opaque server-issued debug identifier scoped to one Client.
-	DebugSessionID string
-
 	// RuntimeIdentity describes the optional host application identity published
 	// by the server.
 	RuntimeIdentity struct {
@@ -51,13 +43,6 @@ type (
 		Debuggable bool
 	}
 
-	// Plan is a compiled, connection-owned Ferret plan snapshot.
-	Plan struct {
-		ID         PlanID
-		Parameters []string
-		Debuggable bool
-	}
-
 	// ExecuteOptions controls encoded execution output.
 	ExecuteOptions struct {
 		OutputContentType string
@@ -68,8 +53,8 @@ type (
 		OutputContentType string
 	}
 
-	// Parameters is the explicit Wire parameter model accepted by Execute and
-	// OpenDebugSession. Unsupported Go values are rejected locally.
+	// Parameters is the explicit Wire parameter model accepted by Plan.Execute
+	// and Plan.NewDebugSession. Unsupported Go values are rejected locally.
 	Parameters map[string]any
 
 	// Output preserves Ferret's encoded content-type and byte abstraction.
@@ -103,13 +88,11 @@ type (
 		Diagnostics []Diagnostic
 	}
 
-	// ExecutionState describes the lifecycle state in an Execution snapshot.
+	// ExecutionState describes the lifecycle state in an ExecutionSnapshot.
 	ExecutionState uint8
 
-	// Execution is the current snapshot of one published execution.
-	Execution struct {
-		ID      ExecutionID
-		PlanID  PlanID
+	// ExecutionSnapshot is the state published for one remote execution event.
+	ExecutionSnapshot struct {
 		State   ExecutionState
 		Output  *Output
 		Failure *Failure
@@ -120,13 +103,12 @@ type (
 
 	// ExecutionEvent carries an ordered execution snapshot.
 	ExecutionEvent struct {
-		ExecutionID ExecutionID
-		Sequence    uint64
-		Kind        ExecutionEventKind
-		Execution   Execution
+		Sequence uint64
+		Kind     ExecutionEventKind
+		Snapshot ExecutionSnapshot
 	}
 
-	// DebugState describes the lifecycle state in a DebugSession snapshot.
+	// DebugState describes the lifecycle state in a DebugSessionSnapshot.
 	DebugState uint8
 
 	// DebugStopReason identifies why a running session became stopped.
@@ -142,10 +124,8 @@ type (
 		Column int
 	}
 
-	// DebugSession is the current snapshot of one Ferret debug session.
-	DebugSession struct {
-		ID               DebugSessionID
-		PlanID           PlanID
+	// DebugSessionSnapshot is the state published for one remote debug event.
+	DebugSessionSnapshot struct {
 		State            DebugState
 		StopReason       DebugStopReason
 		Location         *Location
@@ -156,10 +136,9 @@ type (
 
 	// DebugEvent carries an ordered debug-session snapshot.
 	DebugEvent struct {
-		SessionID DebugSessionID
-		Sequence  uint64
-		Kind      DebugEventKind
-		Session   DebugSession
+		Sequence uint64
+		Kind     DebugEventKind
+		Snapshot DebugSessionSnapshot
 	}
 
 	// Breakpoint describes the requested and bound Ferret breakpoint locations.

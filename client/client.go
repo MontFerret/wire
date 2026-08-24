@@ -134,14 +134,16 @@ func (c *Client) Close(ctx context.Context) error {
 	})
 
 	select {
+	case <-c.closeDone:
+		return c.retainedCloseResult()
+	default:
+	}
+
+	select {
 	case <-ctx.Done():
 		return ctx.Err()
 	case <-c.closeDone:
-		c.closeMu.Lock()
-		err := c.closeErr
-		c.closeMu.Unlock()
-
-		return err
+		return c.retainedCloseResult()
 	}
 }
 
@@ -161,11 +163,15 @@ func (c *Client) monitorConnect() {
 }
 
 func (c *Client) checkOpen() error {
+	if c == nil {
+		return ErrClosed
+	}
+
 	c.closeMu.Lock()
 	closing := c.closing
 	c.closeMu.Unlock()
 	if closing {
-		return errors.New("Wire logical connection is closed")
+		return ErrClosed
 	}
 
 	select {
@@ -177,10 +183,43 @@ func (c *Client) checkOpen() error {
 			return err
 		}
 
-		return errors.New("Wire logical connection is closed")
+		return ErrClosed
 	default:
 		return nil
 	}
+}
+
+func (c *Client) closeResult(ctx context.Context) (bool, error) {
+	if c == nil {
+		return true, ErrClosed
+	}
+
+	c.closeMu.Lock()
+	closing := c.closing
+	c.closeMu.Unlock()
+	if !closing {
+		return false, nil
+	}
+
+	select {
+	case <-c.closeDone:
+		return true, c.retainedCloseResult()
+	default:
+	}
+
+	select {
+	case <-ctx.Done():
+		return true, ctx.Err()
+	case <-c.closeDone:
+		return true, c.retainedCloseResult()
+	}
+}
+
+func (c *Client) retainedCloseResult() error {
+	c.closeMu.Lock()
+	defer c.closeMu.Unlock()
+
+	return c.closeErr
 }
 
 func (c *Client) connectionProto() *wirev1.ConnectionId {

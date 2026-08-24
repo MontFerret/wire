@@ -140,12 +140,13 @@ func TestHandshakeCompileExecuteAndCanonicalOutput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sort.Strings(plan.Parameters)
-	if !reflect.DeepEqual(plan.Parameters, []string{"nested", "value"}) {
-		t.Fatalf("unexpected declared parameters: %v", plan.Parameters)
+	parameters := plan.Parameters()
+	sort.Strings(parameters)
+	if !reflect.DeepEqual(parameters, []string{"nested", "value"}) {
+		t.Fatalf("unexpected declared parameters: %v", parameters)
 	}
 
-	execution, err := env.client.Execute(context.Background(), plan.ID, map[string]any{
+	execution, err := plan.Execute(context.Background(), map[string]any{
 		"value": int64(42),
 		"nested": map[string]any{
 			"array": []any{true, "wire", nil},
@@ -154,11 +155,11 @@ func TestHandshakeCompileExecuteAndCanonicalOutput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	events, err := env.client.WatchExecution(testContext(t), execution.ID)
+	events, err := execution.Watch(testContext(t))
 	if err != nil {
 		t.Fatal(err)
 	}
-	var completed client.Execution
+	var completed client.ExecutionSnapshot
 	var previous uint64
 	for completed.State != client.ExecutionCompleted {
 		event, recvErr := events.Recv()
@@ -171,11 +172,11 @@ func TestHandshakeCompileExecuteAndCanonicalOutput(t *testing.T) {
 		}
 		previous = event.Sequence
 		if event.Kind == client.ExecutionEventFailed || event.Kind == client.ExecutionEventCancelled {
-			t.Fatalf("execution did not complete: %#v", event.Execution)
+			t.Fatalf("execution did not complete: %#v", event.Snapshot)
 		}
 
 		if event.Kind == client.ExecutionEventCompleted {
-			completed = event.Execution
+			completed = event.Snapshot
 		}
 	}
 
@@ -191,20 +192,19 @@ func TestHandshakeCompileExecuteAndCanonicalOutput(t *testing.T) {
 		t.Fatalf("unexpected output: %s", completed.Output.Content)
 	}
 
-	if err := env.client.ReleaseExecution(context.Background(), execution.ID); err != nil {
+	if err := execution.Close(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	var wireErr *client.Error
-	if err := env.client.ReleaseExecution(context.Background(), execution.ID); !errors.As(err, &wireErr) || wireErr.Category != client.ErrorExecutionNotFound {
-		t.Fatalf("released execution did not become stale: %v", err)
+	if err := execution.Close(context.Background()); err != nil {
+		t.Fatalf("repeated execution close changed its result: %v", err)
 	}
 
-	if err := env.client.ReleasePlan(context.Background(), plan.ID); err != nil {
+	if err := plan.Close(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func TestCompilationDiagnosticsAndConnectionIsolation(t *testing.T) {
+func TestCompilationDiagnosticsAndHandleOwnership(t *testing.T) {
 	env := newIntegrationEnv(t)
 	_, err := env.client.Compile(context.Background(), client.Source{Identity: "broken.fql", Content: "RETURN ("}, client.CompileOptions{})
 	var wireErr *client.Error
@@ -231,17 +231,21 @@ func TestCompilationDiagnosticsAndConnectionIsolation(t *testing.T) {
 			t.Errorf("secondary client cleanup failed: %v", err)
 		}
 	})
-	_, err = other.Execute(context.Background(), plan.ID, nil, client.ExecuteOptions{})
-	if !errors.As(err, &wireErr) || wireErr.Category != client.ErrorPlanNotFound || wireErr.ResourceID != string(plan.ID) {
-		t.Fatalf("cross-connection plan was not concealed: %#v", err)
+	if err := other.Close(context.Background()); err != nil {
+		t.Fatal(err)
 	}
 
-	if err := other.ReleasePlan(context.Background(), plan.ID); !errors.As(err, &wireErr) || wireErr.Category != client.ErrorPlanNotFound {
-		t.Fatalf("cross-connection release was not concealed: %#v", err)
+	execution, err := plan.Execute(context.Background(), nil, client.ExecuteOptions{})
+	if err != nil {
+		t.Fatalf("plan did not remain bound to its originating client: %v", err)
 	}
 
-	if err := env.client.ReleasePlan(context.Background(), client.PlanID("not-a-uuid")); !errors.As(err, &wireErr) || wireErr.Category != client.ErrorInvalidRequest {
-		t.Fatalf("malformed ID was not rejected: %#v", err)
+	if err := execution.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := plan.Close(context.Background()); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -259,11 +263,11 @@ func TestExecutionCancellationIsATerminalEvent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	execution, err := env.client.Execute(context.Background(), plan.ID, nil, client.ExecuteOptions{})
+	execution, err := plan.Execute(context.Background(), nil, client.ExecuteOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	events, err := env.client.WatchExecution(testContext(t), execution.ID)
+	events, err := execution.Watch(testContext(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -273,7 +277,7 @@ func TestExecutionCancellationIsATerminalEvent(t *testing.T) {
 		t.Fatal("host function did not start")
 	}
 
-	if _, err := env.client.CancelExecution(context.Background(), execution.ID); err != nil {
+	if err := execution.Cancel(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -284,8 +288,8 @@ func TestExecutionCancellationIsATerminalEvent(t *testing.T) {
 		}
 
 		if event.Kind == client.ExecutionEventCancelled {
-			if event.Execution.State != client.ExecutionCancelled {
-				t.Fatalf("unexpected cancellation snapshot: %#v", event.Execution)
+			if event.Snapshot.State != client.ExecutionCancelled {
+				t.Fatalf("unexpected cancellation snapshot: %#v", event.Snapshot)
 			}
 
 			break
@@ -306,12 +310,12 @@ func TestConcurrentExecutionsShareAPlan(t *testing.T) {
 	for index := range count {
 		go func(value int) {
 			<-start
-			execution, executeErr := env.client.Execute(context.Background(), plan.ID, client.Parameters{"value": value}, client.ExecuteOptions{})
+			execution, executeErr := plan.Execute(context.Background(), client.Parameters{"value": value}, client.ExecuteOptions{})
 			if executeErr != nil {
 				errs <- executeErr
 				return
 			}
-			events, watchErr := env.client.WatchExecution(watchCtx, execution.ID)
+			events, watchErr := execution.Watch(watchCtx)
 			if watchErr != nil {
 				errs <- watchErr
 				return
@@ -326,7 +330,7 @@ func TestConcurrentExecutionsShareAPlan(t *testing.T) {
 
 				if event.Kind == client.ExecutionEventCompleted {
 					var decoded int
-					if jsonErr := json.Unmarshal(event.Execution.Output.Content, &decoded); jsonErr != nil || decoded != value {
+					if jsonErr := json.Unmarshal(event.Snapshot.Output.Content, &decoded); jsonErr != nil || decoded != value {
 						errs <- errors.New("concurrent execution returned the wrong output")
 						return
 					}
@@ -350,11 +354,11 @@ func TestExecutionFailureAndPlanReleaseCascade(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	execution, err := env.client.Execute(context.Background(), failingPlan.ID, nil, client.ExecuteOptions{})
+	execution, err := failingPlan.Execute(context.Background(), nil, client.ExecuteOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	events, err := env.client.WatchExecution(testContext(t), execution.ID)
+	events, err := execution.Watch(testContext(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -366,8 +370,8 @@ func TestExecutionFailureAndPlanReleaseCascade(t *testing.T) {
 		}
 
 		if event.Kind == client.ExecutionEventFailed {
-			if event.Execution.Failure == nil || len(event.Execution.Failure.Diagnostics) == 0 {
-				t.Fatalf("execution failure lost diagnostics: %#v", event.Execution)
+			if event.Snapshot.Failure == nil || len(event.Snapshot.Failure.Diagnostics) == 0 {
+				t.Fatalf("execution failure lost diagnostics: %#v", event.Snapshot)
 			}
 
 			break
@@ -389,15 +393,15 @@ func TestExecutionFailureAndPlanReleaseCascade(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	debugSession, err := blockingEnv.client.OpenDebugSession(context.Background(), plan.ID, nil, client.DebugSessionOptions{})
+	debugSession, err := plan.NewDebugSession(context.Background(), nil, client.DebugSessionOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	running, err := blockingEnv.client.Execute(context.Background(), plan.ID, nil, client.ExecuteOptions{})
+	running, err := plan.Execute(context.Background(), nil, client.ExecuteOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	runningEvents, err := blockingEnv.client.WatchExecution(testContext(t), running.ID)
+	runningEvents, err := running.Watch(testContext(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -411,7 +415,7 @@ func TestExecutionFailureAndPlanReleaseCascade(t *testing.T) {
 		t.Fatal("cascaded execution did not start")
 	}
 
-	if err := blockingEnv.client.ReleasePlan(context.Background(), plan.ID); err != nil {
+	if err := plan.Close(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -430,13 +434,16 @@ func TestExecutionFailureAndPlanReleaseCascade(t *testing.T) {
 			break
 		}
 	}
-	var wireErr *client.Error
-	if err := blockingEnv.client.ReleaseDebugSession(context.Background(), debugSession.ID); !errors.As(err, &wireErr) || wireErr.Category != client.ErrorDebugSessionNotFound {
-		t.Fatalf("plan release did not remove its debug session: %v", err)
+	if err := debugSession.Close(context.Background()); err != nil {
+		t.Fatalf("debug close did not observe successful plan cleanup: %v", err)
 	}
 
-	if err := blockingEnv.client.ReleasePlan(context.Background(), plan.ID); !errors.As(err, &wireErr) || wireErr.Category != client.ErrorPlanNotFound {
-		t.Fatalf("released plan did not become stale: %v", err)
+	if err := running.Close(context.Background()); err != nil {
+		t.Fatalf("execution close did not observe successful plan cleanup: %v", err)
+	}
+
+	if err := plan.Close(context.Background()); err != nil {
+		t.Fatalf("repeated plan close changed its result: %v", err)
 	}
 }
 
@@ -461,11 +468,11 @@ func TestFailureCategoriesAreStructuredAndSanitized(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			execution, err := env.client.Execute(context.Background(), plan.ID, nil, client.ExecuteOptions{OutputContentType: test.contentType})
+			execution, err := plan.Execute(context.Background(), nil, client.ExecuteOptions{OutputContentType: test.contentType})
 			if err != nil {
 				t.Fatal(err)
 			}
-			events, err := env.client.WatchExecution(testContext(t), execution.ID)
+			events, err := execution.Watch(testContext(t))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -480,8 +487,8 @@ func TestFailureCategoriesAreStructuredAndSanitized(t *testing.T) {
 					continue
 				}
 
-				if event.Execution.Failure == nil || event.Execution.Failure.Category != test.category || event.Execution.Failure.Message != test.message {
-					t.Fatalf("unexpected structured failure: %#v", event.Execution.Failure)
+				if event.Snapshot.Failure == nil || event.Snapshot.Failure.Category != test.category || event.Snapshot.Failure.Message != test.message {
+					t.Fatalf("unexpected structured failure: %#v", event.Snapshot.Failure)
 				}
 
 				break
@@ -494,21 +501,21 @@ func TestFailureCategoriesAreStructuredAndSanitized(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	debugSession, err := debugEnv.client.OpenDebugSession(context.Background(), debugPlan.ID, nil, client.DebugSessionOptions{
+	debugSession, err := debugPlan.NewDebugSession(context.Background(), nil, client.DebugSessionOptions{
 		OutputContentType: "application/x-missing",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	debugEvents, err := debugEnv.client.WatchDebug(testContext(t), debugSession.ID)
+	debugEvents, err := debugSession.Watch(testContext(t))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := debugEnv.client.StartDebug(context.Background(), debugSession.ID); err != nil {
+	if err := debugSession.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	waitDebugStop(t, debugEvents)
-	if _, err := debugEnv.client.Continue(context.Background(), debugSession.ID); err != nil {
+	if err := debugSession.Continue(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	for {
@@ -519,8 +526,8 @@ func TestFailureCategoriesAreStructuredAndSanitized(t *testing.T) {
 		if event.Kind != client.DebugEventFailed {
 			continue
 		}
-		if event.Session.Failure == nil || event.Session.Failure.Category != client.ErrorUnsupported || event.Session.Failure.Message != "output content type is not supported" {
-			t.Fatalf("unexpected debug output codec failure: %#v", event.Session.Failure)
+		if event.Snapshot.Failure == nil || event.Snapshot.Failure.Category != client.ErrorUnsupported || event.Snapshot.Failure.Message != "output content type is not supported" {
+			t.Fatalf("unexpected debug output codec failure: %#v", event.Snapshot.Failure)
 		}
 
 		break
@@ -535,15 +542,12 @@ func TestDebugPreStartBreakpointsInspectionAndCompletion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	session, err := env.client.OpenDebugSession(context.Background(), plan.ID, map[string]any{"input": 2}, client.DebugSessionOptions{})
+	session, err := plan.NewDebugSession(context.Background(), map[string]any{"input": 2}, client.DebugSessionOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if session.State != client.DebugCreated {
-		t.Fatalf("unexpected pre-start state: %#v", session)
-	}
-	breakpoint, err := env.client.SetBreakpoint(context.Background(), session.ID, client.Location{File: "debug.fql", Line: 2, Column: 0})
+	breakpoint, err := session.SetBreakpoint(context.Background(), client.Location{File: "debug.fql", Line: 2, Column: 0})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -551,12 +555,12 @@ func TestDebugPreStartBreakpointsInspectionAndCompletion(t *testing.T) {
 	if !breakpoint.Verified || breakpoint.Line != 3 || breakpoint.RequestedColumn != 0 {
 		t.Fatalf("unexpected breakpoint binding: %#v", breakpoint)
 	}
-	events, err := env.client.WatchDebug(testContext(t), session.ID)
+	events, err := session.Watch(testContext(t))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := env.client.StartDebug(context.Background(), session.ID); err != nil {
+	if err := session.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	entry := waitDebugStop(t, events)
@@ -564,18 +568,18 @@ func TestDebugPreStartBreakpointsInspectionAndCompletion(t *testing.T) {
 		t.Fatalf("unexpected entry stop: %#v", entry)
 	}
 
-	if _, err := env.client.Continue(context.Background(), session.ID); err != nil {
+	if err := session.Continue(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	stopped := waitDebugStop(t, events)
 	if stopped.StopReason != client.DebugStopBreakpoint || len(stopped.HitBreakpointIDs) != 1 {
 		t.Fatalf("unexpected breakpoint stop: %#v", stopped)
 	}
-	frames, err := env.client.Frames(context.Background(), session.ID)
+	frames, err := session.Frames(context.Background())
 	if err != nil || len(frames) == 0 || frames[0].Index != 0 {
 		t.Fatalf("unexpected frames: %#v, %v", frames, err)
 	}
-	locals, err := env.client.FrameLocals(context.Background(), session.ID, 0)
+	locals, err := session.FrameLocals(context.Background(), 0)
 	if err != nil || len(locals) == 0 {
 		t.Fatalf("unexpected frame locals: %#v, %v", locals, err)
 	}
@@ -590,27 +594,27 @@ func TestDebugPreStartBreakpointsInspectionAndCompletion(t *testing.T) {
 		t.Fatalf("frame parameters were not marked: %#v", locals)
 	}
 	var wireErr *client.Error
-	if _, err := env.client.FrameLocals(context.Background(), session.ID, 999); !errors.As(err, &wireErr) || wireErr.Category != client.ErrorInvalidRequest {
+	if _, err := session.FrameLocals(context.Background(), 999); !errors.As(err, &wireErr) || wireErr.Category != client.ErrorInvalidRequest {
 		t.Fatalf("missing frame was not mapped as an invalid request: %v", err)
 	}
-	value, err := env.client.EvaluateFrame(context.Background(), session.ID, 0, "x + @input")
+	value, err := session.EvaluateFrame(context.Background(), 0, "x + @input")
 	if err != nil || value.Display != "3" {
 		t.Fatalf("unexpected evaluation: %#v, %v", value, err)
 	}
 
-	if _, err := env.client.Pause(context.Background(), session.ID); !errors.As(err, &wireErr) || wireErr.Category != client.ErrorInvalidState {
+	if err := session.Pause(context.Background()); !errors.As(err, &wireErr) || wireErr.Category != client.ErrorInvalidState {
 		t.Fatalf("pause while stopped did not fail consistently: %v", err)
 	}
 
-	if err := env.client.DeleteBreakpoint(context.Background(), session.ID, breakpoint.ID); err != nil {
+	if err := session.DeleteBreakpoint(context.Background(), breakpoint.ID); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := env.client.DeleteBreakpoint(context.Background(), session.ID, breakpoint.ID); !errors.As(err, &wireErr) || wireErr.Category != client.ErrorBreakpointNotFound || wireErr.ResourceID == "" {
+	if err := session.DeleteBreakpoint(context.Background(), breakpoint.ID); !errors.As(err, &wireErr) || wireErr.Category != client.ErrorBreakpointNotFound || wireErr.ResourceID == "" {
 		t.Fatalf("missing breakpoint was not mapped with resource metadata: %v", err)
 	}
 
-	if _, err := env.client.Continue(context.Background(), session.ID); err != nil {
+	if err := session.Continue(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -621,8 +625,8 @@ func TestDebugPreStartBreakpointsInspectionAndCompletion(t *testing.T) {
 		}
 
 		if event.Kind == client.DebugEventCompleted {
-			if event.Session.Output == nil || string(event.Session.Output.Content) != "3" {
-				t.Fatalf("unexpected debug output: %#v", event.Session.Output)
+			if event.Snapshot.Output == nil || string(event.Snapshot.Output.Content) != "3" {
+				t.Fatalf("unexpected debug output: %#v", event.Snapshot.Output)
 			}
 
 			break
@@ -641,16 +645,16 @@ RETURN x`}, client.CompileOptions{Debuggable: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	session, err := env.client.OpenDebugSession(context.Background(), udfPlan.ID, nil, client.DebugSessionOptions{})
+	session, err := udfPlan.NewDebugSession(context.Background(), nil, client.DebugSessionOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	events, err := env.client.WatchDebug(testContext(t), session.ID)
+	events, err := session.Watch(testContext(t))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := env.client.StartDebug(context.Background(), session.ID); err != nil {
+	if err := session.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -658,19 +662,19 @@ RETURN x`}, client.CompileOptions{Debuggable: true})
 		t.Fatalf("unexpected UDF entry: %#v", entry)
 	}
 
-	if _, err := env.client.Step(context.Background(), session.ID); err != nil {
+	if err := session.Step(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	inside := waitDebugStop(t, events)
 	if inside.Location == nil || inside.Location.Line != 2 {
 		t.Fatalf("step-in did not enter UDF: %#v", inside)
 	}
-	frames, err := env.client.Frames(context.Background(), session.ID)
+	frames, err := session.Frames(context.Background())
 	if err != nil || len(frames) != 2 {
 		t.Fatalf("unexpected UDF frames: %#v, %v", frames, err)
 	}
 
-	if _, err := env.client.Out(context.Background(), session.ID); err != nil {
+	if err := session.Out(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -678,20 +682,20 @@ RETURN x`}, client.CompileOptions{Debuggable: true})
 		t.Fatalf("step-out did not return to main: %#v", outside)
 	}
 
-	nextSession, err := env.client.OpenDebugSession(context.Background(), udfPlan.ID, nil, client.DebugSessionOptions{})
+	nextSession, err := udfPlan.NewDebugSession(context.Background(), nil, client.DebugSessionOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	nextEvents, err := env.client.WatchDebug(testContext(t), nextSession.ID)
+	nextEvents, err := nextSession.Watch(testContext(t))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := env.client.StartDebug(context.Background(), nextSession.ID); err != nil {
+	if err := nextSession.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	waitDebugStop(t, nextEvents)
-	if _, err := env.client.Next(context.Background(), nextSession.ID); err != nil {
+	if err := nextSession.Next(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -699,7 +703,7 @@ RETURN x`}, client.CompileOptions{Debuggable: true})
 		t.Fatalf("next did not step over UDF: %#v", stopped)
 	}
 
-	if _, err := env.client.StopDebug(context.Background(), nextSession.ID); err != nil {
+	if err := nextSession.Stop(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -707,24 +711,24 @@ RETURN x`}, client.CompileOptions{Debuggable: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	objectSession, err := env.client.OpenDebugSession(context.Background(), objectPlan.ID, nil, client.DebugSessionOptions{})
+	objectSession, err := objectPlan.NewDebugSession(context.Background(), nil, client.DebugSessionOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	objectEvents, err := env.client.WatchDebug(testContext(t), objectSession.ID)
+	objectEvents, err := objectSession.Watch(testContext(t))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := env.client.StartDebug(context.Background(), objectSession.ID); err != nil {
+	if err := objectSession.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	waitDebugStop(t, objectEvents)
-	if _, err := env.client.Next(context.Background(), objectSession.ID); err != nil {
+	if err := objectSession.Next(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	waitDebugStop(t, objectEvents)
-	locals, err := env.client.FrameLocals(context.Background(), objectSession.ID, 0)
+	locals, err := objectSession.FrameLocals(context.Background(), 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -739,15 +743,15 @@ RETURN x`}, client.CompileOptions{Debuggable: true})
 		t.Fatalf("expandable object reference was not exposed: %#v", locals)
 	}
 
-	if variables, err := env.client.Variables(context.Background(), objectSession.ID, reference); err != nil || len(variables) != 1 {
+	if variables, err := objectSession.Variables(context.Background(), reference); err != nil || len(variables) != 1 {
 		t.Fatalf("object expansion failed: %#v, %v", variables, err)
 	}
 
-	if _, err := env.client.Next(context.Background(), objectSession.ID); err != nil {
+	if err := objectSession.Next(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	waitDebugStop(t, objectEvents)
-	_, err = env.client.Variables(context.Background(), objectSession.ID, reference)
+	_, err = objectSession.Variables(context.Background(), reference)
 	var wireErr *client.Error
 	if !errors.As(err, &wireErr) || wireErr.Code != codes.NotFound || wireErr.Category != client.ErrorValueReferenceNotFound {
 		t.Fatalf("stale value reference was not mapped to NotFound: %#v", err)
@@ -760,20 +764,20 @@ func TestDebugRuntimeErrorStopAndTermination(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	session, err := env.client.OpenDebugSession(context.Background(), plan.ID, nil, client.DebugSessionOptions{})
+	session, err := plan.NewDebugSession(context.Background(), nil, client.DebugSessionOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	events, err := env.client.WatchDebug(testContext(t), session.ID)
+	events, err := session.Watch(testContext(t))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := env.client.StartDebug(context.Background(), session.ID); err != nil {
+	if err := session.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	waitDebugStop(t, events)
-	if _, err := env.client.Continue(context.Background(), session.ID); err != nil {
+	if err := session.Continue(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	stopped := waitDebugStop(t, events)
@@ -781,7 +785,7 @@ func TestDebugRuntimeErrorStopAndTermination(t *testing.T) {
 		t.Fatalf("runtime error was not preserved as an inspectable stop: %#v", stopped)
 	}
 
-	if _, err := env.client.Continue(context.Background(), session.ID); err != nil {
+	if err := session.Continue(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -817,20 +821,20 @@ func TestDebugPause(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	session, err := env.client.OpenDebugSession(context.Background(), plan.ID, nil, client.DebugSessionOptions{})
+	session, err := plan.NewDebugSession(context.Background(), nil, client.DebugSessionOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	events, err := env.client.WatchDebug(testContext(t), session.ID)
+	events, err := session.Watch(testContext(t))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := env.client.StartDebug(context.Background(), session.ID); err != nil {
+	if err := session.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	waitDebugStop(t, events)
-	if _, err := env.client.Continue(context.Background(), session.ID); err != nil {
+	if err := session.Continue(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -839,7 +843,7 @@ func TestDebugPause(t *testing.T) {
 		t.Fatal("debug execution did not enter the host function")
 	}
 
-	if _, err := env.client.Pause(context.Background(), session.ID); err != nil {
+	if err := session.Pause(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	releaseOnce.Do(func() { close(release) })
@@ -857,16 +861,16 @@ func TestEvaluateFrameRejectsCancelledRequestWithoutChangingState(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	session, err := env.client.OpenDebugSession(context.Background(), plan.ID, nil, client.DebugSessionOptions{})
+	session, err := plan.NewDebugSession(context.Background(), nil, client.DebugSessionOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	events, err := env.client.WatchDebug(testContext(t), session.ID)
+	events, err := session.Watch(testContext(t))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := env.client.StartDebug(context.Background(), session.ID); err != nil {
+	if err := session.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	waitDebugStop(t, events)
@@ -874,16 +878,16 @@ func TestEvaluateFrameRejectsCancelledRequestWithoutChangingState(t *testing.T) 
 	evaluateCtx, cancel := context.WithCancel(context.Background())
 	cancel()
 	var wireErr *client.Error
-	if _, err := env.client.EvaluateFrame(evaluateCtx, session.ID, 0, "value + 1"); !errors.As(err, &wireErr) || wireErr.Category != client.ErrorCancelled {
+	if _, err := session.EvaluateFrame(evaluateCtx, 0, "value + 1"); !errors.As(err, &wireErr) || wireErr.Category != client.ErrorCancelled {
 		t.Fatalf("evaluation cancellation was not mapped: %v", err)
 	}
 
-	if frames, err := env.client.Frames(context.Background(), session.ID); err != nil || len(frames) == 0 {
+	if frames, err := session.Frames(context.Background()); err != nil || len(frames) == 0 {
 		t.Fatalf("cancelled evaluation changed the stopped session: %#v, %v", frames, err)
 	}
 }
 
-func waitDebugStop(t *testing.T, events *client.DebugEvents) client.DebugSession {
+func waitDebugStop(t *testing.T, events *client.DebugEvents) client.DebugSessionSnapshot {
 	t.Helper()
 	for {
 		event, err := events.Recv()
@@ -892,7 +896,7 @@ func waitDebugStop(t *testing.T, events *client.DebugEvents) client.DebugSession
 		}
 
 		if event.Kind == client.DebugEventStopped {
-			return event.Session
+			return event.Snapshot
 		}
 	}
 }
@@ -943,11 +947,11 @@ func TestOutboundMessageLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	execution, err := env.client.Execute(context.Background(), plan.ID, nil, client.ExecuteOptions{})
+	execution, err := plan.Execute(context.Background(), nil, client.ExecuteOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	events, err := env.client.WatchExecution(testContext(t), execution.ID)
+	events, err := execution.Watch(testContext(t))
 	if err != nil {
 		t.Fatal(err)
 	}

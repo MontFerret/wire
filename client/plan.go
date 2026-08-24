@@ -5,13 +5,23 @@ import (
 	"errors"
 
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
+	"github.com/MontFerret/wire/internal/lifecycle"
 )
+
+// Plan is a compiled remote Ferret program owned by one Client.
+type Plan struct {
+	client     *Client
+	id         string
+	parameters []string
+	debuggable bool
+	close      *lifecycle.Close
+}
 
 // Compile creates a connection-owned plan through Ferret's public compiler.
 // Compilation diagnostics are returned through Error.
-func (c *Client) Compile(ctx context.Context, source Source, options CompileOptions) (Plan, error) {
+func (c *Client) Compile(ctx context.Context, source Source, options CompileOptions) (*Plan, error) {
 	if err := c.checkOpen(); err != nil {
-		return Plan{}, err
+		return nil, err
 	}
 
 	response, err := c.planClient.Compile(ctx, &wirev1.CompileRequest{
@@ -20,26 +30,87 @@ func (c *Client) Compile(ctx context.Context, source Source, options CompileOpti
 		Options:      &wirev1.CompileOptions{Debuggable: options.Debuggable},
 	})
 	if err != nil {
-		return Plan{}, decodeError(err)
+		return nil, decodeError(err)
 	}
 
-	if response.GetPlan() == nil {
-		return Plan{}, errors.New("Wire server returned no compiled plan")
+	value := response.GetPlan()
+	if value == nil || value.GetId().GetValue() == "" {
+		return nil, errors.New("Wire server returned an invalid compiled plan")
 	}
 
-	return convertPlan(response.GetPlan()), nil
+	return &Plan{
+		client:     c,
+		id:         value.GetId().GetValue(),
+		parameters: append([]string(nil), value.GetParameters()...),
+		debuggable: value.GetDebuggable(),
+		close:      &lifecycle.Close{},
+	}, nil
 }
 
-// ReleasePlan releases a plan and cascades through its executions and debug
-// sessions. The ID becomes stale after cleanup completes.
-func (c *Client) ReleasePlan(ctx context.Context, id PlanID) error {
+// Parameters returns a copy of the FQL parameters declared by this plan.
+func (p *Plan) Parameters() []string {
+	if p == nil {
+		return nil
+	}
+
+	return append([]string(nil), p.parameters...)
+}
+
+// Debuggable reports whether this plan was compiled for debugging.
+func (p *Plan) Debuggable() bool {
+	return p != nil && p.debuggable
+}
+
+func (p *Plan) checkOpen() error {
+	if p == nil || p.client == nil || p.id == "" || p.close == nil || p.close.Started() {
+		return ErrClosed
+	}
+
+	return p.client.checkOpen()
+}
+
+func (p *Plan) ancestorCloseResult(ctx context.Context) (bool, error) {
+	if p == nil || p.client == nil || p.close == nil {
+		return true, ErrClosed
+	}
+
+	if p.close.Started() {
+		return true, p.close.Wait(ctx)
+	}
+
+	return p.client.closeResult(ctx)
+}
+
+// Close releases the plan and its remote executions and debug sessions.
+// Concurrent and repeated calls observe one retained release result.
+func (p *Plan) Close(ctx context.Context) error {
+	if p == nil || p.client == nil || p.id == "" || p.close == nil {
+		return ErrClosed
+	}
+
+	if p.close.Begin() {
+		go settleHandleClose(ctx, "plan", p.close, p.release)
+	}
+
+	return p.close.Wait(ctx)
+}
+
+func (p *Plan) release(ctx context.Context) error {
+	if closing, err := p.client.closeResult(ctx); closing {
+		return err
+	}
+
+	return p.client.releasePlan(ctx, p.id)
+}
+
+func (c *Client) releasePlan(ctx context.Context, id string) error {
 	if err := c.checkOpen(); err != nil {
 		return err
 	}
 
 	_, err := c.planClient.ReleasePlan(ctx, &wirev1.ReleasePlanRequest{
 		ConnectionId: c.connectionProto(),
-		PlanId:       &wirev1.PlanId{Value: string(id)},
+		PlanId:       &wirev1.PlanId{Value: id},
 	})
 
 	return decodeError(err)

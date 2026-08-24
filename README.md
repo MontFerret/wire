@@ -78,7 +78,8 @@ if err := server.Serve(ctx, listener); err != nil {
 }
 ```
 
-The client owns its gRPC transport. Closing the Wire client closes only its logical connection.
+The caller owns the gRPC transport. Closing the Wire client closes only its
+logical connection and the remote resources created through it.
 
 ```go
 const socket = "/var/run/my-app/ferret-wire.sock"
@@ -98,7 +99,11 @@ wireClient, err := client.New(ctx, conn)
 if err != nil {
     log.Fatal(err)
 }
-defer wireClient.Close(context.Background())
+defer func() {
+    if err := wireClient.Close(context.Background()); err != nil {
+        log.Printf("close Wire client: %v", err)
+    }
+}()
 
 plan, err := wireClient.Compile(ctx, client.Source{
     Identity: "example.fql",
@@ -107,11 +112,23 @@ plan, err := wireClient.Compile(ctx, client.Source{
 if err != nil {
     log.Fatal(err)
 }
-execution, err := wireClient.Execute(ctx, plan.ID, map[string]any{"input": "hello"}, client.ExecuteOptions{})
+defer func() {
+    if err := plan.Close(context.Background()); err != nil {
+        log.Printf("close plan: %v", err)
+    }
+}()
+
+execution, err := plan.Execute(ctx, map[string]any{"input": "hello"}, client.ExecuteOptions{})
 if err != nil {
     log.Fatal(err)
 }
-events, err := wireClient.WatchExecution(ctx, execution.ID)
+defer func() {
+    if err := execution.Close(context.Background()); err != nil {
+        log.Printf("close execution: %v", err)
+    }
+}()
+
+events, err := execution.Watch(ctx)
 if err != nil {
     log.Fatal(err)
 }
@@ -121,7 +138,7 @@ for {
         log.Fatal(err)
     }
     if event.Kind == client.ExecutionEventCompleted {
-        fmt.Printf("%s: %s\n", event.Execution.Output.ContentType, event.Execution.Output.Content)
+        fmt.Printf("%s: %s\n", event.Snapshot.Output.ContentType, event.Snapshot.Output.Content)
         break
     }
 }

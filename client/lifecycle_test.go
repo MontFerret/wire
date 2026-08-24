@@ -9,6 +9,7 @@ import (
 	"time"
 
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
+	"github.com/MontFerret/wire/internal/lifecycle"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -97,6 +98,11 @@ func TestCloseAfterServerDisconnectTreatsMissingConnectionAsSettled(t *testing.T
 	if err := client.Close(testClientContext(t)); err != nil {
 		t.Fatalf("close-after-disconnect did not settle successfully: %v", err)
 	}
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := client.Close(cancelled); err != nil {
+		t.Fatalf("completed close did not retain its result: %v", err)
+	}
 }
 
 func TestCloseRejectsNewOperationsAndCancelsFacadeWatchers(t *testing.T) {
@@ -106,7 +112,9 @@ func TestCloseRejectsNewOperationsAndCancelsFacadeWatchers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	events, err := client.WatchExecution(testClientContext(t), ExecutionID("execution"))
+	plan := &Plan{client: client, id: "plan", close: &lifecycle.Close{}}
+	execution := &Execution{client: client, plan: plan, id: "execution", close: &lifecycle.Close{}}
+	events, err := execution.Watch(testClientContext(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,8 +132,8 @@ func TestCloseRejectsNewOperationsAndCancelsFacadeWatchers(t *testing.T) {
 		t.Fatal("client close did not reach the server")
 	}
 
-	if _, err := client.Compile(context.Background(), Source{Content: "RETURN 1"}, CompileOptions{}); err == nil {
-		t.Fatal("client accepted a new operation after close started")
+	if _, err := client.Compile(context.Background(), Source{Content: "RETURN 1"}, CompileOptions{}); !errors.Is(err, ErrClosed) {
+		t.Fatalf("client accepted a new operation after close started: %v", err)
 	}
 	close(server.allowClose)
 	if err := <-closeResult; err != nil {

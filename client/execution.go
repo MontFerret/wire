@@ -6,88 +6,125 @@ import (
 	"fmt"
 
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
+	"github.com/MontFerret/wire/internal/lifecycle"
 )
 
-// ExecutionEvents receives the current execution snapshot followed by ordered
-// state changes until the terminal event or stream cancellation.
-type ExecutionEvents struct {
-	stream wirev1.ExecutionService_WatchExecutionClient
-	cancel context.CancelFunc
-}
+type (
+	// Execution is one remote execution owned by its Plan.
+	Execution struct {
+		client *Client
+		plan   *Plan
+		id     string
+		close  *lifecycle.Close
+	}
 
-// Execute publishes a connection-owned execution. Output remains Ferret's
+	// ExecutionEvents receives the current execution snapshot followed by ordered
+	// state changes until the terminal event or stream cancellation.
+	ExecutionEvents struct {
+		stream wirev1.ExecutionService_WatchExecutionClient
+		cancel context.CancelFunc
+	}
+)
+
+// Execute publishes a remote execution of this plan. Output remains Ferret's
 // encoded content-type and byte contract.
-func (c *Client) Execute(ctx context.Context, id PlanID, parameters Parameters, options ExecuteOptions) (Execution, error) {
-	if err := c.checkOpen(); err != nil {
-		return Execution{}, err
+func (p *Plan) Execute(ctx context.Context, parameters Parameters, options ExecuteOptions) (*Execution, error) {
+	if err := p.checkOpen(); err != nil {
+		return nil, err
 	}
 
 	converted, err := encodeParameters(parameters)
 	if err != nil {
-		return Execution{}, err
+		return nil, err
 	}
 
-	response, err := c.executionClient.Execute(ctx, &wirev1.ExecuteRequest{
-		ConnectionId:      c.connectionProto(),
-		PlanId:            &wirev1.PlanId{Value: string(id)},
+	response, err := p.client.executionClient.Execute(ctx, &wirev1.ExecuteRequest{
+		ConnectionId:      p.client.connectionProto(),
+		PlanId:            &wirev1.PlanId{Value: p.id},
 		Parameters:        converted,
 		OutputContentType: options.OutputContentType,
 	})
 	if err != nil {
-		return Execution{}, decodeError(err)
+		return nil, decodeError(err)
 	}
 
-	if response.GetExecution() == nil {
-		return Execution{}, errors.New("Wire server returned no execution")
+	value := response.GetExecution()
+	if value == nil || value.GetId().GetValue() == "" {
+		return nil, errors.New("Wire server returned an invalid execution")
 	}
 
-	return convertExecution(response.GetExecution()), nil
+	return &Execution{client: p.client, plan: p, id: value.GetId().GetValue(), close: &lifecycle.Close{}}, nil
 }
 
-// CancelExecution requests cancellation and returns the current snapshot. The
-// ordered terminal cancellation is observable through WatchExecution.
-func (c *Client) CancelExecution(ctx context.Context, id ExecutionID) (Execution, error) {
-	if err := c.checkOpen(); err != nil {
-		return Execution{}, err
+func (e *Execution) checkOpen() error {
+	if e == nil || e.client == nil || e.plan == nil || e.id == "" || e.close == nil || e.close.Started() {
+		return ErrClosed
 	}
 
-	response, err := c.executionClient.CancelExecution(ctx, &wirev1.CancelExecutionRequest{
-		ConnectionId: c.connectionProto(),
-		ExecutionId:  &wirev1.ExecutionId{Value: string(id)},
+	return e.plan.checkOpen()
+}
+
+// Cancel requests execution cancellation. The ordered terminal cancellation
+// snapshot remains observable through Watch.
+func (e *Execution) Cancel(ctx context.Context) error {
+	if err := e.checkOpen(); err != nil {
+		return err
+	}
+
+	_, err := e.client.executionClient.CancelExecution(ctx, &wirev1.CancelExecutionRequest{
+		ConnectionId: e.client.connectionProto(),
+		ExecutionId:  &wirev1.ExecutionId{Value: e.id},
 	})
-	if err != nil {
-		return Execution{}, decodeError(err)
-	}
 
-	return convertExecution(response.GetExecution()), nil
+	return decodeError(err)
 }
 
-// ReleaseExecution commits cancellation and cleanup. The ID becomes stale when
-// cleanup completes.
-func (c *Client) ReleaseExecution(ctx context.Context, id ExecutionID) error {
+// Close commits cancellation and remote execution cleanup. Concurrent and
+// repeated calls observe one retained release result.
+func (e *Execution) Close(ctx context.Context) error {
+	if e == nil || e.client == nil || e.plan == nil || e.id == "" || e.close == nil {
+		return ErrClosed
+	}
+
+	if e.close.Begin() {
+		go settleHandleClose(ctx, "execution", e.close, e.release)
+	}
+
+	return e.close.Wait(ctx)
+}
+
+func (e *Execution) release(ctx context.Context) error {
+	if closing, err := e.plan.ancestorCloseResult(ctx); closing {
+		return err
+	}
+
+	return e.client.releaseExecution(ctx, e.id)
+}
+
+func (c *Client) releaseExecution(ctx context.Context, id string) error {
 	if err := c.checkOpen(); err != nil {
 		return err
 	}
 
 	_, err := c.executionClient.ReleaseExecution(ctx, &wirev1.ReleaseExecutionRequest{
 		ConnectionId: c.connectionProto(),
-		ExecutionId:  &wirev1.ExecutionId{Value: string(id)},
+		ExecutionId:  &wirev1.ExecutionId{Value: id},
 	})
 
 	return decodeError(err)
 }
 
-// WatchExecution opens an ordered watch tied to both ctx and the Client's
-// logical lifecycle.
-func (c *Client) WatchExecution(ctx context.Context, id ExecutionID) (*ExecutionEvents, error) {
-	if err := c.checkOpen(); err != nil {
+// Watch opens an ordered event stream tied to both ctx and the Client's
+// logical lifecycle. Its first event contains the current remote snapshot.
+func (e *Execution) Watch(ctx context.Context) (*ExecutionEvents, error) {
+	if err := e.checkOpen(); err != nil {
 		return nil, err
 	}
 
-	watchCtx, cancel := c.watchContext(ctx)
-	stream, err := c.executionClient.WatchExecution(watchCtx, &wirev1.WatchExecutionRequest{
-		ConnectionId: c.connectionProto(),
-		ExecutionId:  &wirev1.ExecutionId{Value: string(id)},
+	watchCtx, cancel := e.client.watchContext(ctx)
+	stream, err := e.client.executionClient.WatchExecution(watchCtx, &wirev1.WatchExecutionRequest{
+		ConnectionId: e.client.connectionProto(),
+		ExecutionId:  &wirev1.ExecutionId{Value: e.id},
 	})
 	if err != nil {
 		cancel()

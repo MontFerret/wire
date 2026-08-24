@@ -8,6 +8,10 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+// ErrClosed reports an operation attempted through a closed Client or resource
+// handle. Closing begins when the first Close call commits teardown.
+var ErrClosed = errors.New("Wire client or resource is closed")
+
 // Error returns the sanitized Wire error message.
 func (e *Error) Error() string {
 	if e == nil {
