@@ -119,7 +119,7 @@ func TestCloseRejectsNewOperationsAndCancelsFacadeWatchers(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if event, err := events.Recv(); err != nil || event.Kind != ExecutionEventStarted {
+	if event, err := events.Recv(); err != nil || event.Snapshot.State != ExecutionRunning {
 		t.Fatalf("watcher did not attach: %#v, %v", event, err)
 	}
 

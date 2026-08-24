@@ -171,11 +171,11 @@ func TestHandshakeCompileExecuteAndCanonicalOutput(t *testing.T) {
 			t.Fatalf("non-monotonic event sequence: %d after %d", event.Sequence, previous)
 		}
 		previous = event.Sequence
-		if event.Kind == client.ExecutionEventFailed || event.Kind == client.ExecutionEventCancelled {
+		if event.Snapshot.State == client.ExecutionFailed || event.Snapshot.State == client.ExecutionCancelled {
 			t.Fatalf("execution did not complete: %#v", event.Snapshot)
 		}
 
-		if event.Kind == client.ExecutionEventCompleted {
+		if event.Snapshot.State == client.ExecutionCompleted {
 			completed = event.Snapshot
 		}
 	}
@@ -208,7 +208,7 @@ func TestCompilationDiagnosticsAndHandleOwnership(t *testing.T) {
 	env := newIntegrationEnv(t)
 	_, err := env.client.Compile(context.Background(), client.Source{Identity: "broken.fql", Content: "RETURN ("}, client.CompileOptions{})
 	var wireErr *client.Error
-	if !errors.As(err, &wireErr) || wireErr.Category != client.ErrorCompilation || wireErr.Code != codes.InvalidArgument {
+	if !errors.As(err, &wireErr) || wireErr.Category != client.ErrorCompilation || status.Code(err) != codes.InvalidArgument {
 		t.Fatalf("unexpected compilation error: %#v", err)
 	}
 
@@ -287,11 +287,7 @@ func TestExecutionCancellationIsATerminalEvent(t *testing.T) {
 			t.Fatal(recvErr)
 		}
 
-		if event.Kind == client.ExecutionEventCancelled {
-			if event.Snapshot.State != client.ExecutionCancelled {
-				t.Fatalf("unexpected cancellation snapshot: %#v", event.Snapshot)
-			}
-
+		if event.Snapshot.State == client.ExecutionCancelled {
 			break
 		}
 	}
@@ -374,7 +370,7 @@ func TestConcurrentExecutionsShareAPlan(t *testing.T) {
 					return
 				}
 
-				if event.Kind == client.ExecutionEventCompleted {
+				if event.Snapshot.State == client.ExecutionCompleted {
 					var decoded int
 					if jsonErr := json.Unmarshal(event.Snapshot.Output.Content, &decoded); jsonErr != nil || decoded != value {
 						errs <- errors.New("concurrent execution returned the wrong output")
@@ -415,7 +411,7 @@ func TestExecutionFailureAndPlanReleaseCascade(t *testing.T) {
 			t.Fatal(recvErr)
 		}
 
-		if event.Kind == client.ExecutionEventFailed {
+		if event.Snapshot.State == client.ExecutionFailed {
 			if event.Snapshot.Failure == nil || len(event.Snapshot.Failure.Diagnostics) == 0 {
 				t.Fatalf("execution failure lost diagnostics: %#v", event.Snapshot)
 			}
@@ -461,7 +457,7 @@ func TestExecutionFailureAndPlanReleaseCascade(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if event, err := runningEvents.Recv(); err != nil || event.Kind != client.ExecutionEventStarted {
+	if event, err := runningEvents.Recv(); err != nil || event.Snapshot.State != client.ExecutionRunning {
 		t.Fatalf("execution watcher did not attach before cascade: %#v, %v", event, err)
 	}
 	select {
@@ -485,7 +481,7 @@ func TestExecutionFailureAndPlanReleaseCascade(t *testing.T) {
 			t.Fatal(recvErr)
 		}
 
-		if event.Kind == client.ExecutionEventCancelled {
+		if event.Snapshot.State == client.ExecutionCancelled {
 			break
 		}
 	}
@@ -538,7 +534,7 @@ func TestFailureCategoriesAreStructuredAndSanitized(t *testing.T) {
 					t.Fatal(recvErr)
 				}
 
-				if event.Kind != client.ExecutionEventFailed {
+				if event.Snapshot.State != client.ExecutionFailed {
 					continue
 				}
 
@@ -665,8 +661,8 @@ func TestDebugPreStartBreakpointsInspectionAndCompletion(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := session.DeleteBreakpoint(context.Background(), breakpoint.ID); !errors.As(err, &wireErr) || wireErr.Category != client.ErrorBreakpointNotFound || wireErr.ResourceID == "" {
-		t.Fatalf("missing breakpoint was not mapped with resource metadata: %v", err)
+	if err := session.DeleteBreakpoint(context.Background(), breakpoint.ID); !errors.As(err, &wireErr) || wireErr.Category != client.ErrorBreakpointNotFound || status.Code(err) != codes.NotFound {
+		t.Fatalf("missing breakpoint was not mapped to a structured NotFound error: %v", err)
 	}
 
 	if err := session.Continue(context.Background()); err != nil {
@@ -808,7 +804,7 @@ RETURN x`}, client.CompileOptions{Debuggable: true})
 	waitDebugStop(t, objectEvents)
 	_, err = objectSession.Variables(context.Background(), reference)
 	var wireErr *client.Error
-	if !errors.As(err, &wireErr) || wireErr.Code != codes.NotFound || wireErr.Category != client.ErrorValueReferenceNotFound {
+	if !errors.As(err, &wireErr) || status.Code(err) != codes.NotFound || wireErr.Category != client.ErrorValueReferenceNotFound {
 		t.Fatalf("stale value reference was not mapped to NotFound: %#v", err)
 	}
 }
@@ -1018,7 +1014,7 @@ func TestOutboundMessageLimit(t *testing.T) {
 		}
 	}
 	var wireErr *client.Error
-	if !errors.As(err, &wireErr) || wireErr.Code != codes.ResourceExhausted {
+	if !errors.As(err, &wireErr) || status.Code(err) != codes.ResourceExhausted {
 		t.Fatalf("unexpected oversized outbound message result: %v", err)
 	}
 }

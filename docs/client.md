@@ -20,6 +20,9 @@ debug sessions. Execution and debugger operations live on their respective
 handles. The protocol still carries connection, plan, execution, and
 debug-session IDs, but the facade retains and propagates them privately.
 Callers cannot manually combine a handle with another client's connection.
+Breakpoint IDs and debug value references remain visible because callers pass
+them back to debugger operations; they do not expose connection or handle
+ownership.
 
 ```go
 plan, err := wireClient.Compile(ctx, source, client.CompileOptions{})
@@ -112,6 +115,13 @@ the server's latest published event first when one exists, then ordered changes
 through one terminal event. A newly created debug session has no published
 event until debugging starts; the client does not fabricate a pre-start event.
 
+`ExecutionEvent` contains a sequence and snapshot. `ExecutionSnapshot.State` is
+the single execution lifecycle discriminator, and `ExecutionState.Terminal`
+identifies completed, failed, and cancelled states. Debug events retain a
+separate `DebugEventKind` because starting and continuing are distinct
+transitions that both publish a running snapshot. `DebugState.Terminal`
+centralizes completed, failed, and terminated state handling.
+
 Watch streams are tied to both the operation context and the logical Client
 lifecycle. A watch opened before resource closure remains able to receive the
 server's terminal event. New watches are rejected after the handle or an
@@ -140,6 +150,20 @@ this naturally.
 `DebugSession.Stop` and `DebugSession.Close` are intentionally distinct. Stop
 terminates debugger execution without releasing the remote ID; Close commits
 termination and resource release.
+
+## Errors
+
+Immediate Wire failures are exposed as `*client.Error` with a stable
+`ErrorCategory`, sanitized message, and structured diagnostics. The error
+unwraps its transport cause, so callers that need the gRPC status can use
+`status.Code(err)` without making transport codes part of the client-domain
+type. Protocol resource identifiers remain private.
+
+Terminal execution and debug failures use `*client.Failure`, while local
+lifecycle and waiting conditions remain distinguishable through
+`client.ErrClosed`, `client.ErrExecutionCancelled`, and context errors.
+Convenience APIs join operation and cleanup errors so `errors.Is` and
+`errors.As` continue to find each component.
 
 ## Facade responsibilities
 

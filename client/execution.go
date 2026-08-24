@@ -10,6 +10,33 @@ import (
 )
 
 type (
+	// ExecuteOptions controls encoded execution output.
+	ExecuteOptions struct {
+		OutputContentType string
+	}
+
+	// Output preserves Ferret's encoded content-type and byte abstraction.
+	Output struct {
+		ContentType string
+		Content     []byte
+	}
+
+	// ExecutionState describes the lifecycle state in an ExecutionSnapshot.
+	ExecutionState uint8
+
+	// ExecutionSnapshot is the state published for one remote execution event.
+	ExecutionSnapshot struct {
+		State   ExecutionState
+		Output  *Output
+		Failure *Failure
+	}
+
+	// ExecutionEvent carries an ordered execution snapshot.
+	ExecutionEvent struct {
+		Sequence uint64
+		Snapshot ExecutionSnapshot
+	}
+
 	// Execution is one remote execution owned by its Plan.
 	Execution struct {
 		client *Client
@@ -24,6 +51,14 @@ type (
 		stream wirev1.ExecutionService_WatchExecutionClient
 		cancel context.CancelFunc
 	}
+)
+
+// Execution lifecycle states.
+const (
+	ExecutionRunning ExecutionState = iota + 1
+	ExecutionCompleted
+	ExecutionFailed
+	ExecutionCancelled
 )
 
 // Execute publishes a remote execution of this plan. Output remains Ferret's
@@ -159,7 +194,7 @@ func (e *Execution) Wait(ctx context.Context) (Output, error) {
 			return Output{}, receiveErr
 		}
 
-		if !event.Snapshot.State.terminal() {
+		if !event.Snapshot.State.Terminal() {
 			continue
 		}
 
@@ -204,20 +239,69 @@ func (events *ExecutionEvents) Recv() (ExecutionEvent, error) {
 	}
 
 	event := convertExecutionEvent(value)
-	if event.Snapshot.State.terminal() {
+	if event.Snapshot.State.Terminal() {
 		events.cancel()
 	}
 
 	return event, nil
 }
 
-func (state ExecutionState) terminal() bool {
+// Terminal reports whether the execution has reached a final state.
+func (state ExecutionState) Terminal() bool {
 	switch state {
 	case ExecutionCompleted, ExecutionFailed, ExecutionCancelled:
 		return true
 	default:
 		return false
 	}
+}
+
+func convertOutput(value *wirev1.Output) *Output {
+	if value == nil {
+		return nil
+	}
+
+	return &Output{ContentType: value.GetContentType(), Content: append([]byte(nil), value.GetContent()...)}
+}
+
+func convertExecutionSnapshot(value *wirev1.Execution) ExecutionSnapshot {
+	return ExecutionSnapshot{
+		State:   convertExecutionState(value.GetState()),
+		Output:  convertOutput(value.GetOutput()),
+		Failure: convertFailure(value.GetFailure()),
+	}
+}
+
+func convertExecutionState(value wirev1.ExecutionState) ExecutionState {
+	switch value {
+	case wirev1.ExecutionState_EXECUTION_STATE_RUNNING:
+		return ExecutionRunning
+	case wirev1.ExecutionState_EXECUTION_STATE_COMPLETED:
+		return ExecutionCompleted
+	case wirev1.ExecutionState_EXECUTION_STATE_FAILED:
+		return ExecutionFailed
+	case wirev1.ExecutionState_EXECUTION_STATE_CANCELLED:
+		return ExecutionCancelled
+	default:
+		return 0
+	}
+}
+
+func convertExecutionEvent(value *wirev1.WatchExecutionResponse) ExecutionEvent {
+	result := ExecutionEvent{Sequence: value.GetSequence()}
+
+	switch payload := value.GetPayload().(type) {
+	case *wirev1.WatchExecutionResponse_Started:
+		result.Snapshot = convertExecutionSnapshot(payload.Started.GetExecution())
+	case *wirev1.WatchExecutionResponse_Completed:
+		result.Snapshot = convertExecutionSnapshot(payload.Completed.GetExecution())
+	case *wirev1.WatchExecutionResponse_Failed:
+		result.Snapshot = convertExecutionSnapshot(payload.Failed.GetExecution())
+	case *wirev1.WatchExecutionResponse_Cancelled:
+		result.Snapshot = convertExecutionSnapshot(payload.Cancelled.GetExecution())
+	}
+
+	return result
 }
 
 func (snapshot ExecutionSnapshot) output() Output {

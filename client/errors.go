@@ -8,6 +8,48 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+type (
+	// Failure is a sanitized terminal execution or debug failure. It implements
+	// error so terminal failures remain available through errors.As.
+	Failure struct {
+		Category    ErrorCategory
+		Message     string
+		Diagnostics []Diagnostic
+	}
+
+	// ErrorCategory is the stable Wire failure category independent of transport
+	// status codes.
+	ErrorCategory uint8
+
+	// Error is a structured Wire failure. Internal transport causes remain
+	// available through Unwrap without exposing protocol resource identifiers.
+	Error struct {
+		Category    ErrorCategory
+		Message     string
+		Diagnostics []Diagnostic
+		cause       error
+	}
+)
+
+// Structured Wire error categories.
+const (
+	ErrorInvalidRequest ErrorCategory = iota + 1
+	ErrorCompilation
+	ErrorExecution
+	ErrorPlanNotFound
+	ErrorExecutionNotFound
+	ErrorDebugSessionNotFound
+	ErrorConnectionNotFound
+	ErrorInvalidState
+	ErrorUnsupported
+	ErrorInternal
+	ErrorWatcherLagged
+	ErrorCancelled
+	ErrorValueReferenceNotFound
+	ErrorResourceExhausted
+	ErrorBreakpointNotFound
+)
+
 var (
 	// ErrClosed reports an operation attempted through a closed Client or resource
 	// handle. Closing begins when the first Close call commits teardown.
@@ -58,7 +100,8 @@ func decodeError(err error) error {
 	if !ok {
 		return err
 	}
-	result := &Error{Code: grpcStatus.Code(), Message: grpcStatus.Message(), cause: err}
+	code := grpcStatus.Code()
+	result := &Error{Message: grpcStatus.Message(), cause: err}
 	for _, raw := range grpcStatus.Details() {
 		detail, ok := raw.(*wirev1.ErrorDetail)
 		if !ok {
@@ -66,16 +109,27 @@ func decodeError(err error) error {
 		}
 		result.Category = clientErrorCategory(detail.GetCategory())
 		result.Message = detail.GetMessage()
-		result.ResourceID = detail.GetResourceId()
 		result.Diagnostics = convertDiagnostics(detail.GetDiagnostics())
 		break
 	}
 
-	if result.Category == 0 && (result.Code == codes.Canceled || result.Code == codes.DeadlineExceeded) {
+	if result.Category == 0 && (code == codes.Canceled || code == codes.DeadlineExceeded) {
 		result.Category = ErrorCancelled
 	}
 
 	return result
+}
+
+func convertFailure(value *wirev1.Failure) *Failure {
+	if value == nil {
+		return nil
+	}
+
+	return &Failure{
+		Category:    clientErrorCategory(value.GetCategory()),
+		Message:     value.GetMessage(),
+		Diagnostics: convertDiagnostics(value.GetDiagnostics()),
+	}
 }
 
 func clientErrorCategory(value wirev1.ErrorCategory) ErrorCategory {

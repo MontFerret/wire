@@ -156,12 +156,20 @@ for {
     if err != nil {
         log.Fatal(err)
     }
-    if event.Kind == client.ExecutionEventCompleted {
+    if event.Snapshot.State == client.ExecutionCompleted {
         fmt.Printf("%s: %s\n", event.Snapshot.Output.ContentType, event.Snapshot.Output.Content)
         break
     }
+    if event.Snapshot.State.Terminal() {
+        log.Fatalf("execution ended in state %v: %v", event.Snapshot.State, event.Snapshot.Failure)
+    }
 }
 ```
+
+Wire failures expose stable client error categories and structured diagnostics
+through `*client.Error`. The underlying gRPC status remains available through
+error unwrapping and `status.Code(err)`; remote connection and resource IDs are
+not part of the high-level client error model.
 
 ## Security and trust model
 
