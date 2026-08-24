@@ -19,22 +19,6 @@ type (
 		Content     []byte
 	}
 
-	// ExecutionState describes the lifecycle state in an ExecutionSnapshot.
-	ExecutionState uint8
-
-	// ExecutionSnapshot is the state published for one remote execution event.
-	ExecutionSnapshot struct {
-		State   ExecutionState
-		Output  *Output
-		Failure *Failure
-	}
-
-	// ExecutionEvent carries an ordered execution snapshot.
-	ExecutionEvent struct {
-		Sequence uint64
-		Snapshot ExecutionSnapshot
-	}
-
 	// Execution is one remote execution owned by its Plan.
 	Execution struct {
 		plan      *Plan
@@ -42,21 +26,6 @@ type (
 		id        string
 		handle    *lifecycle.Handle
 	}
-
-	// ExecutionEvents receives the current execution snapshot followed by ordered
-	// state changes until the terminal event or stream cancellation.
-	ExecutionEvents struct {
-		stream *executionEventStream
-		cancel context.CancelFunc
-	}
-)
-
-// Execution lifecycle states.
-const (
-	ExecutionRunning ExecutionState = iota + 1
-	ExecutionCompleted
-	ExecutionFailed
-	ExecutionCancelled
 )
 
 func newExecution(plan *Plan, transport *executionTransport, id string) *Execution {
@@ -149,37 +118,6 @@ func (e *Execution) Close(ctx context.Context) error {
 	return e.handle.Close(ctx, e.release)
 }
 
-// Recv blocks for the next ordered execution event. It releases the local
-// stream when a terminal event or error is observed.
-func (events *ExecutionEvents) Recv() (ExecutionEvent, error) {
-	if events == nil || events.stream == nil {
-		return ExecutionEvent{}, errors.New("execution event receiver is nil")
-	}
-
-	event, err := events.stream.recv()
-	if err != nil {
-		events.cancel()
-
-		return ExecutionEvent{}, err
-	}
-
-	if event.Snapshot.State.Terminal() {
-		events.cancel()
-	}
-
-	return event, nil
-}
-
-// Terminal reports whether the execution has reached a final state.
-func (state ExecutionState) Terminal() bool {
-	switch state {
-	case ExecutionCompleted, ExecutionFailed, ExecutionCancelled:
-		return true
-	default:
-		return false
-	}
-}
-
 func (e *Execution) checkOpen() error {
 	if e == nil || e.plan == nil || e.transport == nil || e.id == "" || e.handle == nil || !e.handle.Open() {
 		return ErrClosed
@@ -198,15 +136,4 @@ func (e *Execution) release(ctx context.Context) error {
 	}
 
 	return e.transport.release(ctx, e.id)
-}
-
-func (snapshot ExecutionSnapshot) output() Output {
-	if snapshot.Output == nil {
-		return Output{}
-	}
-
-	return Output{
-		ContentType: snapshot.Output.ContentType,
-		Content:     append([]byte(nil), snapshot.Output.Content...),
-	}
 }

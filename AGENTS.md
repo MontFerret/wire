@@ -77,14 +77,18 @@ edge behavior with tests.
 
 These rules are mandatory for handwritten Go code:
 
-* Prefer one grouped `type ( ... )` declaration for related package-level types.
-* Group structs, interfaces, aliases, and named primitive types when they form a
-  cohesive responsibility.
-* Do not split files one type at a time merely because types have methods.
-* Keep related lifecycle or protocol-adaptation types together when proximity
-  improves understanding.
-* Split files by responsibility, such as server lifecycle, execution handling,
-  debugger commands, debugger inspection, debugger events, or client lifecycle.
+* A struct that owns methods gets its own file. Keep that struct and all of its
+  methods together in that file.
+* Do not place methods for multiple struct receivers in the same file.
+* Prefer one grouped `type ( ... )` declaration for related package-level types
+  that do not own methods, such as interfaces, aliases, named primitive types,
+  enums, and closely related data-only types.
+* Small supporting data-only types may live with the struct that owns or
+  consumes them when that improves locality and they do not have their own
+  methods.
+* Split package-level functions into predictably named,
+  responsibility-focused files rather than attaching them to an unrelated
+  struct file.
 * Avoid overloaded files that combine unrelated responsibilities.
 * Do not create `helpers.go`, `utils.go`, or similar dumping grounds.
 
@@ -94,14 +98,16 @@ Generated code is exempt.
 
 These rules are mandatory for handwritten Go code:
 
-* Organize files around cohesive responsibilities rather than individual types.
-* Keep methods close to the state and lifecycle they own.
-* Constructors may live beside the types they construct.
-* A type-centered file must not mix in unrelated package-level functions.
+* Keep a struct's methods in the same file as that struct.
+* Do not mix regular package-level functions into a struct-and-method file.
+  Constructors for that struct are the exception and should live with the
+  struct they construct.
+* Keep methods grouped by receiver and organize them by cohesive behavior within
+  the receiver's file.
 * If behavior belongs to a connection, plan, execution, debug session, watcher,
   server, or client lifecycle, prefer a method on that owner.
-* Move genuinely package-level behavior into a predictably named,
-  responsibility-focused file.
+* If behavior is genuinely package-level, keep it out of struct files and place
+  it in a predictably named, responsibility-focused file.
 * Do not create arbitrary collections of small helper functions.
 
 ## Clean code and design
@@ -300,7 +306,7 @@ comparison base.
 ### Organization and scope
 
 Check unnecessary abstractions, generic helper files, inconsistent ownership,
-fragmented related types, overloaded files, comment wallpaper, temporary code,
+structs sharing method files, regular functions mixed into struct files, overloaded files, comment wallpaper, temporary code,
 debugging artifacts, unrelated edits, and scope expansion.
 
 When review finds a meaningful issue, fix it and rerun every affected command.
