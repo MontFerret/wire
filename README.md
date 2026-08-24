@@ -1,204 +1,251 @@
 # Ferret Wire
 
-Ferret Wire is a versioned gRPC boundary for embedding a configured [Ferret](https://github.com/MontFerret/ferret) engine in another process. It lets a host expose compilation, execution, and source-level debugging without moving engine construction, module registration, network policy, or listener security into this library.
+Ferret Wire is a versioned gRPC boundary for exposing a host application's
+configured [Ferret](https://github.com/MontFerret/ferret) engine to external Go
+tooling. It supports compilation, execution, and source-level debugging without
+making Wire responsible for engine configuration or endpoint security.
 
-This module targets Go 1.25 and Ferret `v2.0.0-alpha.50`. The v1 protobuf package is `ferret.wire.v1`; its sources live in `proto/ferret/wire/v1`, and the checked-in Go bindings live in `gen/ferret/wire/v1`.
-
-## Ownership and architecture
+The public client model is intentionally small:
 
 ```text
-host application                         client application
-  owns configured *ferret.Engine           owns grpc.ClientConnInterface
-  owns and secures net.Listener             owns transport lifetime
-             |                                         |
-             v                                         v
-       wire.Server  <-------- ferret.wire.v1 ------ client.Client
-        borrows engine                            owns Connect stream
-             |
-       logical Connection
-        ├── Plans
-        │    ├── Executions
-        │    └── Debug sessions
-        └── bounded watch streams
+Client
+└── Plan
+    ├── Execution
+    └── DebugSession
 ```
 
-`NewServer` only constructs state. It does not listen, dial, inspect the environment, or close the supplied engine. `Serve` is the only operation that accepts a listener, and the caller retains responsibility for the endpoint.
+## Installation
 
-Every `Connect` server stream creates one logical ownership scope. It is deliberately independent of the physical HTTP/2 connection: several logical connections can share one `grpc.ClientConn`, but their IDs and resources remain isolated. Cancelling the Connect stream or calling `CloseConnection` first cancels and waits for pending creation, then settles debug sessions, executions, and plans in that order. Concurrent callers that observe the same in-flight release wait for its retained result. Once cleanup completes, the ID is stale and returns the corresponding structured not-found error. Cancelling one waiter does not abandon committed cleanup.
+Wire requires Go 1.25. Add it to a Go module with:
 
-Unary execution and debug resume calls publish work before returning. Once published, work runs under the logical Connect lifecycle. Compilation, debug-session construction, and frame evaluation combine unary cancellation with logical lifecycle cancellation. Cancelling a watch only detaches that watcher. A watcher first receives the current snapshot, then future events through a buffer of eight; a lagging watcher is detached with `ResourceExhausted` and cannot block the underlying work. Its watcher slot remains occupied until the stream handler exits.
+```sh
+go get github.com/MontFerret/wire@latest
+```
 
-## Protocol contracts
+## Hosting Wire
 
-- Compilation returns opaque UUIDs, declared parameters, debug capability, and Ferret diagnostics. Diagnostic locations are labeled, half-open UTF-8 byte spans, not LSP ranges.
-- Parameter values use an explicit protobuf oneof: none, boolean, signed 64-bit integer, double, string, binary, duration nanoseconds, RFC3339Nano datetime, regexp, array, or string-keyed object. Missing variants, malformed values, and nesting beyond 64 levels are rejected.
-- Execution and debug completion carry Ferret's canonical output contract unchanged: `content_type` plus encoded `content` bytes. Wire does not intercept internal Ferret runtime values and emits output only in the ordered terminal snapshot.
-- Debug RPCs follow Ferret concepts: singular `SetBreakpoint` and `DeleteBreakpoint`, `Frames`, `FrameLocals`, `Step`, `Out`, `Variables`, and `EvaluateFrame`. Source lines are 1-based, breakpoint column `0` means Ferret's unspecified column, frame indices are zero-based, variables carry a parameter marker, and expandable value references become stale after every resume.
-- Unary failures use normal gRPC codes and an attached `ferret.wire.v1.ErrorDetail`. Compilation errors include structured diagnostics. Execution and debug failures are terminal events so watchers observe one ordered outcome.
-- `ResourceExhausted` reports finite-cap violations, while missing breakpoints and other stale resources report structured not-found categories and resource metadata.
-
-`DefaultServerLimits` bounds client-controlled state to 64 logical connections; 128 plans and 128 executions per connection; 32 debug sessions per connection; 8 watchers per execution or debug session; 256 breakpoints per debug session; and 4 MiB for both inbound and outbound gRPC messages. Pending, active, and closing resources all count. Hosts may replace the complete positive limit set with `WithServerLimits`.
-
-The exact Ferret module version is read from Go build metadata. Development and replaced builds, whose dependency version is unavailable, fall back to `compiler.Version`.
-
-The Go client converts parameters without reflection. `client.Parameters` accepts `nil`, booleans, signed integer types, unsigned integers that fit in `int64`, `float32`/`float64`, strings, `[]byte`, `time.Duration`, `time.Time`, `regexp.Regexp` or `*regexp.Regexp`, `[]any`, and `map[string]any`. Other Go types are rejected locally.
-
-## Unix-socket example
-
-The host chooses the endpoint and configures the engine. This example uses an application-private Unix socket; production code should also set appropriate directory and socket permissions.
+The host configures and owns the Ferret engine and listener. Wire serves that
+engine over the supplied endpoint:
 
 ```go
-engine, err := ferret.New(
-    ferret.WithFunctionsRegistrar(func(ns runtime.Namespace) {
-        ns.Function().A0().Add("HOST_NAME", func(context.Context) (runtime.Value, error) {
-            return runtime.NewString("example-host"), nil
-        })
-    }),
-)
-if err != nil {
-    log.Fatal(err)
-}
-defer engine.Close() // the application, not Wire, owns the engine
+func serve(ctx context.Context) error {
+	// Configure Ferret functions, modules, and policies for the host here.
+	engine, err := ferret.New()
+	if err != nil {
+		return err
+	}
+	defer engine.Close()
 
-const socket = "/var/run/my-app/ferret-wire.sock"
-listener, err := net.Listen("unix", socket)
-if err != nil {
-    log.Fatal(err)
-}
-defer listener.Close()
+	listener, err := net.Listen("unix", "/var/run/my-app/ferret-wire.sock")
+	if err != nil {
+		return err
+	}
+	defer listener.Close()
 
-server, err := wire.NewServer(engine, wire.WithRuntimeIdentity(wire.RuntimeIdentity{
-    Name: "my-app", Version: "1.0.0", InstanceID: "worker-1",
-}))
-if err != nil {
-    log.Fatal(err)
-}
-if err := server.Serve(ctx, listener); err != nil {
-    log.Fatal(err)
+	server, err := wire.NewServer(engine)
+	if err != nil {
+		return err
+	}
+
+	return server.Serve(ctx, listener)
 }
 ```
 
-The caller owns the gRPC transport. Closing the Wire client closes only its
-logical connection and the remote resources created through it.
+Secure the listener for the capabilities exposed by the configured engine.
 
-After opening a `client.Client`, the common one-shot path creates and releases
-its plan and execution automatically:
+## One-shot execution
+
+`Client.Run` is the simplest way to compile and execute one FQL program. It
+releases the temporary plan and execution; the caller closes the logical Wire
+client and its gRPC connection.
+
+This complete example connects to an application-private Unix socket:
 
 ```go
-output, err := wireClient.Run(
-    ctx,
-    client.Source{Identity: "example.fql", Content: "RETURN @input"},
-    client.Parameters{"input": "hello"},
-    client.RunOptions{},
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log"
+	"os"
+
+	"github.com/MontFerret/wire/client"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
-if err != nil {
-    log.Fatal(err)
+
+func main() {
+	if err := runOnce(context.Background()); err != nil {
+		log.Fatal(err)
+	}
 }
-fmt.Printf("%s: %s\n", output.ContentType, output.Content)
+
+func runOnce(ctx context.Context) (err error) {
+	conn, err := grpc.NewClient(
+		"unix:///var/run/my-app/ferret-wire.sock",
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		err = errors.Join(err, conn.Close())
+	}()
+
+	wireClient, err := client.New(ctx, conn)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		err = errors.Join(err, wireClient.Close(context.Background()))
+	}()
+
+	output, err := wireClient.Run(
+		ctx,
+		client.Source{Identity: "example.fql", Content: "RETURN @input"},
+		client.Parameters{"input": "hello"},
+		client.RunOptions{
+			Execute: client.ExecuteOptions{OutputContentType: "application/json"},
+		},
+	)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("content type: %s\n", output.ContentType)
+	_, err = os.Stdout.Write(output.Content)
+
+	return err
+}
 ```
 
-Use explicit handles when plans must be reused or execution needs watching,
-cancellation, or separately reported cleanup:
+The example uses transport credentials without TLS because access is restricted
+by the local socket. Use appropriate TLS and authentication for remote
+endpoints.
+
+## Choosing an execution API
+
+- Use `Client.Run` for one-shot execution.
+- Use explicit `Plan` and `Execution` handles for plan reuse, cancellation,
+  event watching, debugging, or direct lifecycle control.
+
+The explicit path compiles, executes, waits, and closes child resources before
+their parent:
 
 ```go
-const socket = "/var/run/my-app/ferret-wire.sock"
-conn, err := grpc.NewClient(
-    "passthrough:///ferret-wire",
-    grpc.WithTransportCredentials(insecure.NewCredentials()),
-    grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
-        return new(net.Dialer).DialContext(ctx, "unix", socket)
-    }),
-)
-if err != nil {
-    log.Fatal(err)
-}
-defer conn.Close()
+func runExplicit(ctx context.Context, wireClient *client.Client) (output client.Output, err error) {
+	plan, err := wireClient.Compile(
+		ctx,
+		client.Source{Identity: "example.fql", Content: "RETURN @input"},
+		client.CompileOptions{},
+	)
+	if err != nil {
+		return client.Output{}, err
+	}
+	defer func() {
+		err = errors.Join(err, plan.Close(context.Background()))
+	}()
 
-wireClient, err := client.New(ctx, conn)
-if err != nil {
-    log.Fatal(err)
-}
-defer func() {
-    if err := wireClient.Close(context.Background()); err != nil {
-        log.Printf("close Wire client: %v", err)
-    }
-}()
+	execution, err := plan.Execute(
+		ctx,
+		client.Parameters{"input": "hello"},
+		client.ExecuteOptions{OutputContentType: "application/json"},
+	)
+	if err != nil {
+		return client.Output{}, err
+	}
+	defer func() {
+		err = errors.Join(err, execution.Close(context.Background()))
+	}()
 
-plan, err := wireClient.Compile(ctx, client.Source{
-    Identity: "example.fql",
-    Content:  "RETURN {host: HOST_NAME(), input: @input}",
-}, client.CompileOptions{})
-if err != nil {
-    log.Fatal(err)
-}
-defer func() {
-    if err := plan.Close(context.Background()); err != nil {
-        log.Printf("close plan: %v", err)
-    }
-}()
-
-execution, err := plan.Execute(ctx, map[string]any{"input": "hello"}, client.ExecuteOptions{})
-if err != nil {
-    log.Fatal(err)
-}
-defer func() {
-    if err := execution.Close(context.Background()); err != nil {
-        log.Printf("close execution: %v", err)
-    }
-}()
-
-events, err := execution.Watch(ctx)
-if err != nil {
-    log.Fatal(err)
-}
-for {
-    event, err := events.Recv()
-    if err != nil {
-        log.Fatal(err)
-    }
-    if event.Snapshot.State == client.ExecutionCompleted {
-        fmt.Printf("%s: %s\n", event.Snapshot.Output.ContentType, event.Snapshot.Output.Content)
-        break
-    }
-    if event.Snapshot.State.Terminal() {
-        log.Fatalf("execution ended in state %v: %v", event.Snapshot.State, event.Snapshot.Failure)
-    }
+	return execution.Wait(ctx)
 }
 ```
 
-Wire failures expose stable client error categories and structured diagnostics
-through `*client.Error`. The underlying gRPC status remains available through
-error unwrapping and `status.Code(err)`; remote connection and resource IDs are
-not part of the high-level client error model.
+## Debugging
 
-## Security and trust model
+Debug sessions are created from plans compiled with debugging enabled. This
+example starts a session and receives its first published event:
 
-Wire supplies no default endpoint, authentication, authorization, TLS policy, TCP listener, named-pipe implementation, listener discovery, or externally reachable binding. Callers must choose and secure the listener, authenticate peers where required, enforce filesystem permissions for local sockets, and decide which Ferret capabilities and host functions are safe for those peers. FQL source and parameters are trusted according to the host's policy; parameters may contain secrets and therefore require a confidential transport.
+```go
+func debugOnce(ctx context.Context, wireClient *client.Client) (err error) {
+	plan, err := wireClient.Compile(
+		ctx,
+		client.Source{Identity: "example.fql", Content: "RETURN @input"},
+		client.CompileOptions{Debuggable: true},
+	)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		err = errors.Join(err, plan.Close(context.Background()))
+	}()
 
-Generic internal errors and cleanup panics are sanitized and do not expose raw causes, panic values, filesystem paths, environment data, or host internals. Expected Ferret compilation/runtime diagnostics and the source identity supplied by the caller remain observable protocol data. Server limits reduce accidental and hostile resource exhaustion, but hosts must still decide which engine capabilities are safe to expose.
+	debugSession, err := plan.NewDebugSession(
+		ctx,
+		client.Parameters{"input": "hello"},
+		client.DebugSessionOptions{OutputContentType: "application/json"},
+	)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		err = errors.Join(err, debugSession.Close(context.Background()))
+	}()
 
-Windows named pipes and remote TCP/TLS can be added later by supplying ordinary `net.Listener` and gRPC dialer implementations. Transport choice does not change the logical connection or protocol semantics.
+	events, err := debugSession.Watch(ctx)
+	if err != nil {
+		return err
+	}
 
-## Non-goals and current limitations
+	if err := debugSession.Start(ctx); err != nil {
+		return err
+	}
 
-Wire does not provide runtime introspection, Ferret module discovery, language intelligence, LSP, DAP translation, listener policy, downstream ferretd/CLI/Lab integration, TTLs, or heartbeats. It makes no changes to Ferret core or other MontFerret repositories.
+	event, err := events.Recv()
+	if err != nil {
+		return err
+	}
 
-Ferret accepts a context at the engine compilation boundary, but compiler CPU work is not internally cancellable. Wire does not attempt to interrupt or work around that implementation detail. Likewise, it does not synthesize intermediate output from logs.
+	fmt.Printf("debug event %d: state %d\n", event.Sequence, event.Snapshot.State)
+
+	return nil
+}
+```
+
+See the client documentation for breakpoints, stepping, inspection, and debug
+event handling.
+
+## Encoded output
+
+Wire preserves Ferret's encoded result boundary. `client.Output` contains the
+encoded `Content` bytes and their `ContentType`; it does not expose Ferret
+runtime values directly. Interpret or decode the bytes according to the
+reported content type.
+
+## Documentation
+
+- [Client usage and lifecycle](docs/client.md)
+- [Client architecture](docs/client-architecture.md)
+- [Wire architecture](docs/architecture.md)
+- [Protocol contract](docs/architecture.md#protocol-contract)
 
 ## Development
 
+The [Makefile](Makefile) is the canonical development interface:
+
 ```sh
-make fmt              # format handwritten Go
-make check-fmt        # verify formatting without changing files
-make generate         # regenerate checked-in Go/gRPC bindings
-make check-generate   # fail when generation changes the checkout
-make proto-lint       # Buf STANDARD lint
-make proto-breaking BUF_BREAKING_AGAINST=.git#branch=main
-make check-tidy       # verify go.mod/go.sum without changing files
-make vet
+make build
 make test
 make test-race
-make build
+make fmt
+make check-fmt
+make check-tidy
+make vet
+make generate
+make check-generate
+make proto-lint
+make proto-breaking BUF_BREAKING_AGAINST=.git#branch=main
 ```
-
-Tests use in-memory `bufconn` transports and direct lifecycle coverage. CI invokes these Make targets on Linux, macOS, and Windows; Linux additionally runs the race detector, Buf lint, checked generation, and pull-request breaking checks against the fetched base branch.
