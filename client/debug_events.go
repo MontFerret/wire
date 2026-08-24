@@ -3,9 +3,6 @@ package client
 import (
 	"context"
 	"errors"
-	"fmt"
-
-	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
 )
 
 type (
@@ -39,7 +36,7 @@ type (
 	// DebugEvents receives published debug snapshots until the terminal event or
 	// stream cancellation.
 	DebugEvents struct {
-		stream wirev1.DebugService_WatchDebugClient
+		stream *debugEventStream
 		cancel context.CancelFunc
 	}
 )
@@ -81,14 +78,12 @@ func (d *DebugSession) Watch(ctx context.Context) (*DebugEvents, error) {
 		return nil, err
 	}
 
-	watchCtx, cancel := d.client.watchContext(ctx)
-	stream, err := d.client.protocol.debugClient.WatchDebug(watchCtx, &wirev1.WatchDebugRequest{
-		ConnectionId: d.client.protocol.connectionProto(), DebugSessionId: &wirev1.DebugSessionId{Value: d.id},
-	})
+	watchCtx, cancel := d.plan.client.watchContext(ctx)
+	stream, err := d.transport.watch(watchCtx, d.id)
 	if err != nil {
 		cancel()
 
-		return nil, decodeError(err)
+		return nil, err
 	}
 
 	return &DebugEvents{stream: stream, cancel: cancel}, nil
@@ -101,20 +96,13 @@ func (events *DebugEvents) Recv() (DebugEvent, error) {
 		return DebugEvent{}, errors.New("debug event receiver is nil")
 	}
 
-	value, err := events.stream.Recv()
+	event, err := events.stream.recv()
 	if err != nil {
 		events.cancel()
 
-		return DebugEvent{}, decodeError(err)
+		return DebugEvent{}, err
 	}
 
-	if value.GetPayload() == nil {
-		events.cancel()
-
-		return DebugEvent{}, fmt.Errorf("Wire server returned an empty debug event")
-	}
-
-	event := convertDebugEvent(value)
 	if event.Snapshot.State.Terminal() {
 		events.cancel()
 	}

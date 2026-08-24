@@ -9,7 +9,6 @@ import (
 	"time"
 
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
-	"github.com/MontFerret/wire/internal/lifecycle"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -112,8 +111,8 @@ func TestCloseRejectsNewOperationsAndCancelsFacadeWatchers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan := &Plan{client: client, id: "plan", handle: &lifecycle.Handle{}}
-	execution := &Execution{client: client, plan: plan, id: "execution", handle: &lifecycle.Handle{}}
+	plan := newPlan(client, compiledPlan{id: "plan"})
+	execution := newExecution(plan, client.executions, "execution")
 	events, err := execution.Watch(testClientContext(t))
 	if err != nil {
 		t.Fatal(err)

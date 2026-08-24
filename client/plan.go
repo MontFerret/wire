@@ -22,12 +22,28 @@ type (
 	// Plan is a compiled remote Ferret program owned by one Client.
 	Plan struct {
 		client     *Client
+		transport  *planTransport
+		executions *executionTransport
+		debug      *debugTransport
 		id         string
 		parameters []string
 		debuggable bool
 		handle     *lifecycle.Handle
 	}
 )
+
+func newPlan(client *Client, compiled compiledPlan) *Plan {
+	return &Plan{
+		client:     client,
+		transport:  client.plans,
+		executions: client.executions,
+		debug:      client.debug,
+		id:         compiled.id,
+		parameters: compiled.parameters,
+		debuggable: compiled.debuggable,
+		handle:     &lifecycle.Handle{},
+	}
+}
 
 // Compile creates a connection-owned plan through Ferret's public compiler.
 // Compilation diagnostics are returned through Error.
@@ -36,18 +52,27 @@ func (c *Client) Compile(ctx context.Context, source Source, options CompileOpti
 		return nil, err
 	}
 
-	compiled, err := c.protocol.compile(ctx, source, options)
+	compiled, err := c.plans.compile(ctx, source, options)
 	if err != nil {
 		return nil, err
 	}
 
-	return &Plan{
-		client:     c,
-		id:         compiled.id,
-		parameters: compiled.parameters,
-		debuggable: compiled.debuggable,
-		handle:     &lifecycle.Handle{},
-	}, nil
+	return newPlan(c, compiled), nil
+}
+
+// Execute publishes a remote execution of this plan. Output remains Ferret's
+// encoded content-type and byte contract.
+func (p *Plan) Execute(ctx context.Context, parameters Parameters, options ExecuteOptions) (*Execution, error) {
+	if err := p.checkOpen(); err != nil {
+		return nil, err
+	}
+
+	id, err := p.executions.execute(ctx, p.id, parameters, options)
+	if err != nil {
+		return nil, err
+	}
+
+	return newExecution(p, p.executions, id), nil
 }
 
 // Parameters returns a copy of the FQL parameters declared by this plan.
@@ -82,7 +107,7 @@ func (p *Plan) Run(ctx context.Context, parameters Parameters, options ExecuteOp
 // Close releases the plan and its remote executions and debug sessions.
 // Concurrent and repeated calls observe one retained release result.
 func (p *Plan) Close(ctx context.Context) error {
-	if p == nil || p.client == nil || p.id == "" || p.handle == nil {
+	if p == nil || p.client == nil || p.transport == nil || p.id == "" || p.handle == nil {
 		return ErrClosed
 	}
 
@@ -90,7 +115,8 @@ func (p *Plan) Close(ctx context.Context) error {
 }
 
 func (p *Plan) checkOpen() error {
-	if p == nil || p.client == nil || p.id == "" || p.handle == nil || !p.handle.Open() {
+	if p == nil || p.client == nil || p.transport == nil || p.executions == nil || p.debug == nil ||
+		p.id == "" || p.handle == nil || !p.handle.Open() {
 		return ErrClosed
 	}
 
@@ -118,5 +144,5 @@ func (p *Plan) release(ctx context.Context) error {
 		return err
 	}
 
-	return p.client.protocol.releasePlan(ctx, p.id)
+	return p.transport.release(ctx, p.id)
 }

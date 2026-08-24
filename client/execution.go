@@ -37,16 +37,16 @@ type (
 
 	// Execution is one remote execution owned by its Plan.
 	Execution struct {
-		client *Client
-		plan   *Plan
-		id     string
-		handle *lifecycle.Handle
+		plan      *Plan
+		transport *executionTransport
+		id        string
+		handle    *lifecycle.Handle
 	}
 
 	// ExecutionEvents receives the current execution snapshot followed by ordered
 	// state changes until the terminal event or stream cancellation.
 	ExecutionEvents struct {
-		stream *protocolExecutionEvents
+		stream *executionEventStream
 		cancel context.CancelFunc
 	}
 )
@@ -59,19 +59,8 @@ const (
 	ExecutionCancelled
 )
 
-// Execute publishes a remote execution of this plan. Output remains Ferret's
-// encoded content-type and byte contract.
-func (p *Plan) Execute(ctx context.Context, parameters Parameters, options ExecuteOptions) (*Execution, error) {
-	if err := p.checkOpen(); err != nil {
-		return nil, err
-	}
-
-	id, err := p.client.protocol.execute(ctx, p.id, parameters, options)
-	if err != nil {
-		return nil, err
-	}
-
-	return &Execution{client: p.client, plan: p, id: id, handle: &lifecycle.Handle{}}, nil
+func newExecution(plan *Plan, transport *executionTransport, id string) *Execution {
+	return &Execution{plan: plan, transport: transport, id: id, handle: &lifecycle.Handle{}}
 }
 
 // Cancel requests execution cancellation. The ordered terminal cancellation
@@ -81,7 +70,7 @@ func (e *Execution) Cancel(ctx context.Context) error {
 		return err
 	}
 
-	return e.client.protocol.cancelExecution(ctx, e.id)
+	return e.transport.cancel(ctx, e.id)
 }
 
 // Watch opens an ordered event stream tied to both ctx and the Client's
@@ -91,8 +80,8 @@ func (e *Execution) Watch(ctx context.Context) (*ExecutionEvents, error) {
 		return nil, err
 	}
 
-	watchCtx, cancel := e.client.watchContext(ctx)
-	stream, err := e.client.protocol.watchExecution(watchCtx, e.id)
+	watchCtx, cancel := e.plan.client.watchContext(ctx)
+	stream, err := e.transport.watch(watchCtx, e.id)
 	if err != nil {
 		cancel()
 
@@ -153,7 +142,7 @@ func (e *Execution) Wait(ctx context.Context) (Output, error) {
 // Close commits cancellation and remote execution cleanup. Concurrent and
 // repeated calls observe one retained release result.
 func (e *Execution) Close(ctx context.Context) error {
-	if e == nil || e.client == nil || e.plan == nil || e.id == "" || e.handle == nil {
+	if e == nil || e.plan == nil || e.transport == nil || e.id == "" || e.handle == nil {
 		return ErrClosed
 	}
 
@@ -192,7 +181,7 @@ func (state ExecutionState) Terminal() bool {
 }
 
 func (e *Execution) checkOpen() error {
-	if e == nil || e.client == nil || e.plan == nil || e.id == "" || e.handle == nil || !e.handle.Open() {
+	if e == nil || e.plan == nil || e.transport == nil || e.id == "" || e.handle == nil || !e.handle.Open() {
 		return ErrClosed
 	}
 
@@ -204,11 +193,11 @@ func (e *Execution) release(ctx context.Context) error {
 		return err
 	}
 
-	if err := e.client.checkOpen(); err != nil {
+	if err := e.plan.client.checkOpen(); err != nil {
 		return err
 	}
 
-	return e.client.protocol.releaseExecution(ctx, e.id)
+	return e.transport.release(ctx, e.id)
 }
 
 func (snapshot ExecutionSnapshot) output() Output {

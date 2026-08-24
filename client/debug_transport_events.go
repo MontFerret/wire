@@ -1,6 +1,44 @@
 package client
 
-import wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
+import (
+	"context"
+	"errors"
+
+	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
+)
+
+type debugEventStream struct {
+	stream wirev1.DebugService_WatchDebugClient
+}
+
+func (t *debugTransport) watch(ctx context.Context, id string) (*debugEventStream, error) {
+	stream, err := t.rpc.WatchDebug(ctx, &wirev1.WatchDebugRequest{
+		ConnectionId:   t.session.connectionProto(),
+		DebugSessionId: &wirev1.DebugSessionId{Value: id},
+	})
+	if err != nil {
+		return nil, decodeError(err)
+	}
+
+	if stream == nil {
+		return nil, errors.New("Wire server returned no debug event stream")
+	}
+
+	return &debugEventStream{stream: stream}, nil
+}
+
+func (events *debugEventStream) recv() (DebugEvent, error) {
+	value, err := events.stream.Recv()
+	if err != nil {
+		return DebugEvent{}, decodeError(err)
+	}
+
+	if value.GetPayload() == nil {
+		return DebugEvent{}, errors.New("Wire server returned an empty debug event")
+	}
+
+	return convertDebugEvent(value), nil
+}
 
 func convertDebugSessionSnapshot(value *wirev1.DebugSession) DebugSessionSnapshot {
 	return DebugSessionSnapshot{

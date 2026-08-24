@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"math"
-
-	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
 )
 
 type (
@@ -68,22 +66,7 @@ func (d *DebugSession) SetBreakpoint(ctx context.Context, location Location) (Br
 		return Breakpoint{}, errors.New("breakpoint has an invalid line or column")
 	}
 
-	response, err := d.client.protocol.debugClient.SetBreakpoint(ctx, &wirev1.SetBreakpointRequest{
-		ConnectionId:   d.client.protocol.connectionProto(),
-		DebugSessionId: &wirev1.DebugSessionId{Value: d.id},
-		Location: &wirev1.SourceLocation{
-			File: location.File, Line: int32(location.Line), Column: int32(location.Column),
-		},
-	})
-	if err != nil {
-		return Breakpoint{}, decodeError(err)
-	}
-
-	if response.GetBreakpoint() == nil {
-		return Breakpoint{}, errors.New("Wire server returned no breakpoint")
-	}
-
-	return convertBreakpoint(response.GetBreakpoint()), nil
+	return d.transport.setBreakpoint(ctx, d.id, location)
 }
 
 // DeleteBreakpoint removes one server-issued breakpoint from a created or
@@ -97,13 +80,7 @@ func (d *DebugSession) DeleteBreakpoint(ctx context.Context, breakpointID uint64
 		return errors.New("breakpoint ID must be positive")
 	}
 
-	_, err := d.client.protocol.debugClient.DeleteBreakpoint(ctx, &wirev1.DeleteBreakpointRequest{
-		ConnectionId:   d.client.protocol.connectionProto(),
-		DebugSessionId: &wirev1.DebugSessionId{Value: d.id},
-		BreakpointId:   breakpointID,
-	})
-
-	return decodeError(err)
+	return d.transport.deleteBreakpoint(ctx, d.id, breakpointID)
 }
 
 // Frames returns the current paused frame followed by its callers.
@@ -112,19 +89,7 @@ func (d *DebugSession) Frames(ctx context.Context) ([]Frame, error) {
 		return nil, err
 	}
 
-	response, err := d.client.protocol.debugClient.Frames(ctx, &wirev1.FramesRequest{
-		ConnectionId: d.client.protocol.connectionProto(), DebugSessionId: &wirev1.DebugSessionId{Value: d.id},
-	})
-	if err != nil {
-		return nil, decodeError(err)
-	}
-
-	result := make([]Frame, len(response.GetFrames()))
-	for i, value := range response.GetFrames() {
-		result[i] = Frame{Index: int(value.GetIndex()), Name: value.GetName(), Location: convertLocation(value.GetLocation())}
-	}
-
-	return result, nil
+	return d.transport.frames(ctx, d.id)
 }
 
 // FrameLocals returns Ferret variables for a paused frame. Parameters are
@@ -138,19 +103,7 @@ func (d *DebugSession) FrameLocals(ctx context.Context, frameIndex int) ([]Varia
 		return nil, errors.New("frame index is out of range")
 	}
 
-	response, err := d.client.protocol.debugClient.FrameLocals(ctx, &wirev1.FrameLocalsRequest{
-		ConnectionId: d.client.protocol.connectionProto(), DebugSessionId: &wirev1.DebugSessionId{Value: d.id}, FrameIndex: int32(frameIndex),
-	})
-	if err != nil {
-		return nil, decodeError(err)
-	}
-
-	result := make([]Variable, len(response.GetVariables()))
-	for i, value := range response.GetVariables() {
-		result[i] = convertVariable(value)
-	}
-
-	return result, nil
+	return d.transport.frameLocals(ctx, d.id, frameIndex)
 }
 
 // Variables expands a non-zero debug value reference. References become stale
@@ -160,19 +113,7 @@ func (d *DebugSession) Variables(ctx context.Context, reference uint64) ([]Varia
 		return nil, err
 	}
 
-	response, err := d.client.protocol.debugClient.Variables(ctx, &wirev1.VariablesRequest{
-		ConnectionId: d.client.protocol.connectionProto(), DebugSessionId: &wirev1.DebugSessionId{Value: d.id}, Reference: reference,
-	})
-	if err != nil {
-		return nil, decodeError(err)
-	}
-
-	result := make([]Variable, len(response.GetVariables()))
-	for i, value := range response.GetVariables() {
-		result[i] = convertVariable(value)
-	}
-
-	return result, nil
+	return d.transport.variables(ctx, d.id, reference)
 }
 
 // EvaluateFrame evaluates an FQL expression in one paused frame.
@@ -185,50 +126,5 @@ func (d *DebugSession) EvaluateFrame(ctx context.Context, frameIndex int, expres
 		return DebugValue{}, errors.New("frame index is out of range")
 	}
 
-	response, err := d.client.protocol.debugClient.EvaluateFrame(ctx, &wirev1.EvaluateFrameRequest{
-		ConnectionId: d.client.protocol.connectionProto(), DebugSessionId: &wirev1.DebugSessionId{Value: d.id},
-		FrameIndex: int32(frameIndex), Expression: expression,
-	})
-	if err != nil {
-		return DebugValue{}, decodeError(err)
-	}
-
-	if response.GetValue() == nil {
-		return DebugValue{}, errors.New("Wire server returned no debug value")
-	}
-
-	return convertDebugValue(response.GetValue()), nil
-}
-
-func convertLocation(value *wirev1.SourceLocation) *Location {
-	if value == nil {
-		return nil
-	}
-
-	return &Location{File: value.GetFile(), Line: int(value.GetLine()), Column: int(value.GetColumn())}
-}
-
-func convertBreakpoint(value *wirev1.Breakpoint) Breakpoint {
-	return Breakpoint{
-		ID:              value.GetId(),
-		File:            value.GetFile(),
-		RequestedLine:   int(value.GetRequestedLine()),
-		RequestedColumn: int(value.GetRequestedColumn()),
-		Line:            int(value.GetLine()),
-		Column:          int(value.GetColumn()),
-		Verified:        value.GetVerified(),
-	}
-}
-
-func convertDebugValue(value *wirev1.DebugValue) DebugValue {
-	return DebugValue{Type: value.GetType(), Display: value.GetDisplay(), Reference: value.GetReference()}
-}
-
-func convertVariable(value *wirev1.Variable) Variable {
-	return Variable{
-		Name:      value.GetName(),
-		Value:     convertDebugValue(value.GetValue()),
-		Mutable:   value.GetMutable(),
-		Parameter: value.GetParameter(),
-	}
+	return d.transport.evaluateFrame(ctx, d.id, frameIndex, expression)
 }

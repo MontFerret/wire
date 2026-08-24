@@ -36,6 +36,7 @@ type handleServer struct {
 	allowExecutionRelease   chan struct{}
 	releaseExecutionOnce    sync.Once
 	releaseExecutionErr     error
+	openDebugRequest        *wirev1.OpenDebugSessionRequest
 }
 
 func (s *handleServer) Connect(_ *wirev1.ConnectRequest, stream wirev1.RuntimeService_ConnectServer) error {
@@ -152,7 +153,10 @@ func (s *handleServer) WatchExecution(request *wirev1.WatchExecutionRequest, str
 
 func (s *handleServer) OpenDebugSession(_ context.Context, request *wirev1.OpenDebugSessionRequest) (*wirev1.OpenDebugSessionResponse, error) {
 	connectionID := request.GetConnectionId().GetValue()
-	s.record("new-debug", connectionID, request.GetPlanId().GetValue())
+	s.mu.Lock()
+	s.calls = append(s.calls, call("new-debug", connectionID, request.GetPlanId().GetValue()))
+	s.openDebugRequest = request
+	s.mu.Unlock()
 
 	return &wirev1.OpenDebugSessionResponse{Session: debugProto("debug-" + connectionID)}, nil
 }

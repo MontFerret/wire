@@ -12,9 +12,12 @@ import (
 type (
 	// Client owns one logical Wire connection while borrowing its gRPC transport.
 	Client struct {
-		protocol *protocolClient
-		info     RuntimeInfo
-		handle   *lifecycle.Handle
+		session    *session
+		plans      *planTransport
+		executions *executionTransport
+		debug      *debugTransport
+		info       RuntimeInfo
+		handle     *lifecycle.Handle
 
 		streamDone chan struct{}
 		streamMu   sync.Mutex
@@ -41,14 +44,17 @@ func New(ctx context.Context, connection grpc.ClientConnInterface) (*Client, err
 		return nil, errors.New("gRPC connection is required")
 	}
 
-	protocol, info, err := openProtocol(ctx, connection)
+	session, info, err := openSession(ctx, connection)
 	if err != nil {
 		return nil, err
 	}
 
 	lifecycleCtx, lifecycleCancel := context.WithCancel(context.Background())
 	client := &Client{
-		protocol:        protocol,
+		session:         session,
+		plans:           newPlanTransport(connection, session),
+		executions:      newExecutionTransport(connection, session),
+		debug:           newDebugTransport(connection, session),
 		info:            info,
 		handle:          &lifecycle.Handle{},
 		streamDone:      make(chan struct{}),
@@ -92,7 +98,7 @@ func (c *Client) Run(ctx context.Context, source Source, parameters Parameters, 
 // Close releases the logical Wire connection without closing the caller-owned
 // gRPC transport. Concurrent callers wait for the same retained result.
 func (c *Client) Close(ctx context.Context) error {
-	if c == nil || c.protocol == nil || c.handle == nil {
+	if c == nil || c.session == nil || c.handle == nil {
 		return ErrClosed
 	}
 
@@ -100,7 +106,7 @@ func (c *Client) Close(ctx context.Context) error {
 }
 
 func (c *Client) monitorConnect() {
-	err := c.protocol.monitorConnection()
+	err := c.session.monitor()
 
 	c.streamMu.Lock()
 	c.streamErr = err
@@ -111,7 +117,7 @@ func (c *Client) monitorConnect() {
 }
 
 func (c *Client) checkOpen() error {
-	if c == nil || c.protocol == nil || c.handle == nil || !c.handle.Open() {
+	if c == nil || c.session == nil || c.handle == nil || !c.handle.Open() {
 		return ErrClosed
 	}
 
@@ -131,7 +137,7 @@ func (c *Client) checkOpen() error {
 }
 
 func (c *Client) closeResult(ctx context.Context) (bool, error) {
-	if c == nil || c.protocol == nil || c.handle == nil {
+	if c == nil || c.session == nil || c.handle == nil {
 		return true, ErrClosed
 	}
 
@@ -140,18 +146,18 @@ func (c *Client) closeResult(ctx context.Context) (bool, error) {
 
 func (c *Client) release(ctx context.Context) error {
 	defer func() {
-		c.protocol.cancelConnection()
+		c.session.cancel()
 		c.lifecycleCancel()
 	}()
 
-	result := c.protocol.closeConnection(ctx)
+	result := c.session.close(ctx)
 
 	var wireErr *Error
 	if errors.As(result, &wireErr) && wireErr.Category == ErrorConnectionNotFound {
 		result = nil
 	}
 
-	c.protocol.cancelConnection()
+	c.session.cancel()
 	c.lifecycleCancel()
 
 	select {

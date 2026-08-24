@@ -5,20 +5,33 @@ import (
 	"errors"
 
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
+	"google.golang.org/grpc"
 )
 
-type protocolExecutionEvents struct {
-	stream wirev1.ExecutionService_WatchExecutionClient
+type (
+	// executionTransport performs execution-specific protocol operations.
+	executionTransport struct {
+		rpc     wirev1.ExecutionServiceClient
+		session *session
+	}
+
+	executionEventStream struct {
+		stream wirev1.ExecutionService_WatchExecutionClient
+	}
+)
+
+func newExecutionTransport(connection grpc.ClientConnInterface, session *session) *executionTransport {
+	return &executionTransport{rpc: wirev1.NewExecutionServiceClient(connection), session: session}
 }
 
-func (p *protocolClient) execute(ctx context.Context, planID string, parameters Parameters, options ExecuteOptions) (string, error) {
+func (t *executionTransport) execute(ctx context.Context, planID string, parameters Parameters, options ExecuteOptions) (string, error) {
 	converted, err := encodeParameters(parameters)
 	if err != nil {
 		return "", err
 	}
 
-	response, err := p.executionClient.Execute(ctx, &wirev1.ExecuteRequest{
-		ConnectionId:      p.connectionProto(),
+	response, err := t.rpc.Execute(ctx, &wirev1.ExecuteRequest{
+		ConnectionId:      t.session.connectionProto(),
 		PlanId:            &wirev1.PlanId{Value: planID},
 		Parameters:        converted,
 		OutputContentType: options.OutputContentType,
@@ -35,18 +48,18 @@ func (p *protocolClient) execute(ctx context.Context, planID string, parameters 
 	return value.GetId().GetValue(), nil
 }
 
-func (p *protocolClient) cancelExecution(ctx context.Context, id string) error {
-	_, err := p.executionClient.CancelExecution(ctx, &wirev1.CancelExecutionRequest{
-		ConnectionId: p.connectionProto(),
+func (t *executionTransport) cancel(ctx context.Context, id string) error {
+	_, err := t.rpc.CancelExecution(ctx, &wirev1.CancelExecutionRequest{
+		ConnectionId: t.session.connectionProto(),
 		ExecutionId:  &wirev1.ExecutionId{Value: id},
 	})
 
 	return decodeError(err)
 }
 
-func (p *protocolClient) watchExecution(ctx context.Context, id string) (*protocolExecutionEvents, error) {
-	stream, err := p.executionClient.WatchExecution(ctx, &wirev1.WatchExecutionRequest{
-		ConnectionId: p.connectionProto(),
+func (t *executionTransport) watch(ctx context.Context, id string) (*executionEventStream, error) {
+	stream, err := t.rpc.WatchExecution(ctx, &wirev1.WatchExecutionRequest{
+		ConnectionId: t.session.connectionProto(),
 		ExecutionId:  &wirev1.ExecutionId{Value: id},
 	})
 	if err != nil {
@@ -57,19 +70,19 @@ func (p *protocolClient) watchExecution(ctx context.Context, id string) (*protoc
 		return nil, errors.New("Wire server returned no execution event stream")
 	}
 
-	return &protocolExecutionEvents{stream: stream}, nil
+	return &executionEventStream{stream: stream}, nil
 }
 
-func (p *protocolClient) releaseExecution(ctx context.Context, id string) error {
-	_, err := p.executionClient.ReleaseExecution(ctx, &wirev1.ReleaseExecutionRequest{
-		ConnectionId: p.connectionProto(),
+func (t *executionTransport) release(ctx context.Context, id string) error {
+	_, err := t.rpc.ReleaseExecution(ctx, &wirev1.ReleaseExecutionRequest{
+		ConnectionId: t.session.connectionProto(),
 		ExecutionId:  &wirev1.ExecutionId{Value: id},
 	})
 
 	return decodeError(err)
 }
 
-func (events *protocolExecutionEvents) recv() (ExecutionEvent, error) {
+func (events *executionEventStream) recv() (ExecutionEvent, error) {
 	value, err := events.stream.Recv()
 	if err != nil {
 		return ExecutionEvent{}, decodeError(err)
@@ -80,14 +93,6 @@ func (events *protocolExecutionEvents) recv() (ExecutionEvent, error) {
 	}
 
 	return convertExecutionEvent(value), nil
-}
-
-func convertOutput(value *wirev1.Output) *Output {
-	if value == nil {
-		return nil
-	}
-
-	return &Output{ContentType: value.GetContentType(), Content: append([]byte(nil), value.GetContent()...)}
 }
 
 func convertExecutionSnapshot(value *wirev1.Execution) ExecutionSnapshot {

@@ -104,6 +104,17 @@ These rules are mandatory for handwritten Go code:
   responsibility-focused file.
 * Do not create arbitrary collections of small helper functions.
 
+## Clean code and design
+
+Apply clean-code and SOLID principles pragmatically. Prefer cohesive types with
+one clear responsibility, keep behavior with the domain object that owns it,
+and compose narrow collaborators instead of broad manager or facade types.
+Avoid god objects and anemic domain models. Introduce interfaces and
+abstractions only for a concrete responsibility, substitution point, or useful
+test seam; do not mechanically reproduce design patterns. Construct valid
+objects up front, encapsulate implementation details, keep dependency surfaces
+narrow, and favor code that can be understood and changed locally.
+
 ## Go control-flow spacing
 
 These rules are mandatory for handwritten Go code. Blank lines separate logical

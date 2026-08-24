@@ -9,17 +9,16 @@ import (
 	"google.golang.org/grpc"
 )
 
-type protocolClient struct {
-	runtimeClient   wirev1.RuntimeServiceClient
-	planClient      wirev1.PlanServiceClient
-	executionClient wirev1.ExecutionServiceClient
-	debugClient     wirev1.DebugServiceClient
-	connectionID    string
-	connectStream   wirev1.RuntimeService_ConnectClient
-	connectCancel   context.CancelFunc
+// session performs the logical RuntimeService connection protocol and retains
+// the opaque connection identity shared by capability-specific transports.
+type session struct {
+	rpc           wirev1.RuntimeServiceClient
+	id            string
+	connectStream wirev1.RuntimeService_ConnectClient
+	connectCancel context.CancelFunc
 }
 
-func openProtocol(ctx context.Context, connection grpc.ClientConnInterface) (*protocolClient, RuntimeInfo, error) {
+func openSession(ctx context.Context, connection grpc.ClientConnInterface) (*session, RuntimeInfo, error) {
 	runtimeClient := wirev1.NewRuntimeServiceClient(connection)
 	streamCtx, streamCancel := context.WithCancel(context.WithoutCancel(ctx))
 	stream, err := runtimeClient.Connect(streamCtx, &wirev1.ConnectRequest{})
@@ -64,21 +63,18 @@ func openProtocol(ctx context.Context, connection grpc.ClientConnInterface) (*pr
 		return nil, RuntimeInfo{}, errors.New("Wire server returned an invalid Connect handshake")
 	}
 
-	protocol := &protocolClient{
-		runtimeClient:   runtimeClient,
-		planClient:      wirev1.NewPlanServiceClient(connection),
-		executionClient: wirev1.NewExecutionServiceClient(connection),
-		debugClient:     wirev1.NewDebugServiceClient(connection),
-		connectionID:    opened.GetConnectionId().GetValue(),
-		connectStream:   stream,
-		connectCancel:   streamCancel,
+	session := &session{
+		rpc:           runtimeClient,
+		id:            opened.GetConnectionId().GetValue(),
+		connectStream: stream,
+		connectCancel: streamCancel,
 	}
 
-	return protocol, convertRuntimeInfo(opened.GetRuntimeInfo()), nil
+	return session, convertRuntimeInfo(opened.GetRuntimeInfo()), nil
 }
 
-func (p *protocolClient) monitorConnection() error {
-	_, err := p.connectStream.Recv()
+func (s *session) monitor() error {
+	_, err := s.connectStream.Recv()
 	if err == nil {
 		return errors.New("Wire server returned an unexpected Connect response")
 	}
@@ -90,20 +86,20 @@ func (p *protocolClient) monitorConnection() error {
 	return decodeError(err)
 }
 
-func (p *protocolClient) closeConnection(ctx context.Context) error {
-	_, err := p.runtimeClient.CloseConnection(ctx, &wirev1.CloseConnectionRequest{
-		ConnectionId: p.connectionProto(),
+func (s *session) close(ctx context.Context) error {
+	_, err := s.rpc.CloseConnection(ctx, &wirev1.CloseConnectionRequest{
+		ConnectionId: s.connectionProto(),
 	})
 
 	return decodeError(err)
 }
 
-func (p *protocolClient) cancelConnection() {
-	p.connectCancel()
+func (s *session) cancel() {
+	s.connectCancel()
 }
 
-func (p *protocolClient) connectionProto() *wirev1.ConnectionId {
-	return &wirev1.ConnectionId{Value: p.connectionID}
+func (s *session) connectionProto() *wirev1.ConnectionId {
+	return &wirev1.ConnectionId{Value: s.id}
 }
 
 func convertRuntimeInfo(value *wirev1.RuntimeInfo) RuntimeInfo {
