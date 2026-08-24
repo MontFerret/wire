@@ -5,8 +5,30 @@ import (
 	"iter"
 
 	ferretdiagnostics "github.com/MontFerret/ferret/v2/pkg/diagnostics"
+	ferretencoding "github.com/MontFerret/ferret/v2/pkg/encoding"
 	"github.com/MontFerret/ferret/v2/pkg/vm"
 )
+
+func failureFromError(err error, identity string) *Failure {
+	diagnostics := diagnosticsFromError(err, identity)
+	if len(diagnostics) > 0 {
+		return &Failure{
+			Category:    ErrorExecution,
+			Message:     "Ferret execution failed",
+			Diagnostics: diagnostics,
+		}
+	}
+
+	if unsupportedOutputCodec(err) {
+		return &Failure{Category: ErrorUnsupported, Message: "output content type is not supported"}
+	}
+
+	return &Failure{Category: ErrorInternal, Message: "internal runtime failure"}
+}
+
+func unsupportedOutputCodec(err error) bool {
+	return errors.Is(err, ferretencoding.ErrCodecNotFound) || errors.Is(err, ferretencoding.ErrEmptyContentType)
+}
 
 type runtimeErrorSet interface {
 	Errors() iter.Seq2[int, *vm.RuntimeError]
@@ -28,6 +50,7 @@ func diagnosticsFromError(err error, identity string) []Diagnostic {
 			SourceIdentity: identity,
 			Spans:          make([]DiagnosticSpan, 0, len(value.Spans)),
 		}
+
 		for _, span := range value.Spans {
 			if span.Span.Start < 0 || span.Span.End < span.Span.Start {
 				continue

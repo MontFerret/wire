@@ -1,5 +1,6 @@
 // Package client provides a domain-oriented Ferret Wire client over a
-// caller-owned gRPC connection.
+// caller-owned gRPC connection. Client owns Plan handles, and each Plan owns
+// its Execution and DebugSession handles; protocol resource IDs remain private.
 package client
 
 import (
@@ -7,28 +8,22 @@ import (
 )
 
 type (
-	ConnectionID   string
-	PlanID         string
-	ExecutionID    string
-	DebugSessionID string
-
-	ClientIdentity struct {
-		Name    string
-		Version string
-	}
-
+	// RuntimeIdentity describes the optional host application identity published
+	// by the server.
 	RuntimeIdentity struct {
 		Name       string
 		Version    string
 		InstanceID string
 	}
 
+	// Capabilities reports the operation families supported by the server.
 	Capabilities struct {
 		Execution    bool
 		Debugging    bool
 		Cancellation bool
 	}
 
+	// RuntimeInfo is the immutable server metadata returned by the Connect handshake.
 	RuntimeInfo struct {
 		APIIdentity     string
 		WireVersion     string
@@ -37,36 +32,46 @@ type (
 		Capabilities    Capabilities
 	}
 
+	// Source is FQL content plus its diagnostic and debugger identity.
 	Source struct {
 		Content  string
 		Identity string
 	}
 
+	// CompileOptions controls Ferret plan construction.
 	CompileOptions struct {
 		Debuggable bool
 	}
 
-	Plan struct {
-		ID         PlanID
-		Parameters []string
-		Debuggable bool
-	}
-
+	// ExecuteOptions controls encoded execution output.
 	ExecuteOptions struct {
 		OutputContentType string
 	}
 
+	// RunOptions composes the existing compile and execute options for Client.Run.
+	RunOptions struct {
+		// Compile controls construction of the temporary plan.
+		Compile CompileOptions
+		// Execute controls the temporary execution and its encoded output.
+		Execute ExecuteOptions
+	}
+
+	// DebugSessionOptions controls encoded debug completion output.
 	DebugSessionOptions struct {
 		OutputContentType string
 	}
 
+	// Parameters is the explicit Wire parameter model accepted by Plan.Execute
+	// and Plan.NewDebugSession. Unsupported Go values are rejected locally.
 	Parameters map[string]any
 
+	// Output preserves Ferret's encoded content-type and byte abstraction.
 	Output struct {
 		ContentType string
-		Data        []byte
+		Content     []byte
 	}
 
+	// DiagnosticSpan is a labeled half-open UTF-8 byte span in source.
 	DiagnosticSpan struct {
 		Start   uint64
 		End     uint64
@@ -74,6 +79,7 @@ type (
 		Primary bool
 	}
 
+	// Diagnostic is a structured Ferret compiler or runtime diagnostic.
 	Diagnostic struct {
 		Kind           string
 		Message        string
@@ -83,46 +89,52 @@ type (
 		Spans          []DiagnosticSpan
 	}
 
+	// Failure is a sanitized terminal execution or debug failure. It implements
+	// error so terminal failures remain available through errors.As.
 	Failure struct {
 		Category    ErrorCategory
 		Message     string
 		Diagnostics []Diagnostic
 	}
 
+	// ExecutionState describes the lifecycle state in an ExecutionSnapshot.
 	ExecutionState uint8
 
-	Execution struct {
-		ID      ExecutionID
-		PlanID  PlanID
+	// ExecutionSnapshot is the state published for one remote execution event.
+	ExecutionSnapshot struct {
 		State   ExecutionState
 		Output  *Output
 		Failure *Failure
 	}
 
+	// ExecutionEventKind identifies an ordered execution state transition.
 	ExecutionEventKind uint8
 
+	// ExecutionEvent carries an ordered execution snapshot.
 	ExecutionEvent struct {
-		ExecutionID ExecutionID
-		Sequence    uint64
-		Kind        ExecutionEventKind
-		Execution   Execution
-		Output      *Output
+		Sequence uint64
+		Kind     ExecutionEventKind
+		Snapshot ExecutionSnapshot
 	}
 
-	DebugState      uint8
-	DebugStopReason uint8
-	DebugEventKind  uint8
-	ScopeKind       uint8
+	// DebugState describes the lifecycle state in a DebugSessionSnapshot.
+	DebugState uint8
 
+	// DebugStopReason identifies why a running session became stopped.
+	DebugStopReason uint8
+
+	// DebugEventKind identifies an ordered debug state transition.
+	DebugEventKind uint8
+
+	// Location is a Ferret source position. Breakpoint column zero is unspecified.
 	Location struct {
 		File   string
 		Line   int
 		Column int
 	}
 
-	DebugSession struct {
-		ID               DebugSessionID
-		PlanID           PlanID
+	// DebugSessionSnapshot is the state published for one remote debug event.
+	DebugSessionSnapshot struct {
 		State            DebugState
 		StopReason       DebugStopReason
 		Location         *Location
@@ -131,19 +143,14 @@ type (
 		Failure          *Failure
 	}
 
+	// DebugEvent carries an ordered debug-session snapshot.
 	DebugEvent struct {
-		SessionID DebugSessionID
-		Sequence  uint64
-		Kind      DebugEventKind
-		Session   DebugSession
-		Output    *Output
+		Sequence uint64
+		Kind     DebugEventKind
+		Snapshot DebugSessionSnapshot
 	}
 
-	BreakpointLocation struct {
-		Line   int
-		Column int
-	}
-
+	// Breakpoint describes the requested and bound Ferret breakpoint locations.
 	Breakpoint struct {
 		ID              uint64
 		File            string
@@ -154,32 +161,34 @@ type (
 		Verified        bool
 	}
 
+	// DebugValue is Ferret's formatted debugger value and optional expansion reference.
 	DebugValue struct {
 		Type      string
 		Display   string
 		Reference uint64
 	}
 
+	// Variable is a Ferret debugger variable. Parameter distinguishes declared
+	// query parameters from other frame locals.
 	Variable struct {
-		Name    string
-		Value   DebugValue
-		Mutable bool
+		Name      string
+		Value     DebugValue
+		Mutable   bool
+		Parameter bool
 	}
 
-	StackFrame struct {
+	// Frame describes one paused frame and its zero-based inspection index.
+	Frame struct {
 		Index    int
 		Name     string
 		Location *Location
 	}
 
-	Scope struct {
-		Kind      ScopeKind
-		Name      string
-		Variables []Variable
-	}
-
+	// ErrorCategory is the stable Wire failure category independent of gRPC code.
 	ErrorCategory uint8
 
+	// Error is a structured Wire RPC failure. Internal causes remain available
+	// through Unwrap without being copied into Message.
 	Error struct {
 		Code        codes.Code
 		Category    ErrorCategory
@@ -190,6 +199,7 @@ type (
 	}
 )
 
+// Execution lifecycle states.
 const (
 	ExecutionRunning ExecutionState = iota + 1
 	ExecutionCompleted
@@ -197,14 +207,15 @@ const (
 	ExecutionCancelled
 )
 
+// Execution event kinds. Every execution has one ordered terminal event.
 const (
 	ExecutionEventStarted ExecutionEventKind = iota + 1
-	ExecutionEventOutput
 	ExecutionEventCompleted
 	ExecutionEventFailed
 	ExecutionEventCancelled
 )
 
+// Debug session lifecycle states.
 const (
 	DebugCreated DebugState = iota + 1
 	DebugRunning
@@ -214,6 +225,7 @@ const (
 	DebugTerminated
 )
 
+// Debug stop reasons reported by Ferret.
 const (
 	DebugStopNone DebugStopReason = iota
 	DebugStopEntry
@@ -223,21 +235,17 @@ const (
 	DebugStopRuntimeError
 )
 
+// Debug event kinds. Every session has one ordered terminal event.
 const (
 	DebugEventStarted DebugEventKind = iota + 1
 	DebugEventContinued
 	DebugEventStopped
-	DebugEventOutput
 	DebugEventCompleted
 	DebugEventFailed
 	DebugEventTerminated
 )
 
-const (
-	ScopeLocals ScopeKind = iota + 1
-	ScopeParameters
-)
-
+// Structured Wire error categories.
 const (
 	ErrorInvalidRequest ErrorCategory = iota + 1
 	ErrorCompilation
@@ -252,4 +260,6 @@ const (
 	ErrorWatcherLagged
 	ErrorCancelled
 	ErrorValueReferenceNotFound
+	ErrorResourceExhausted
+	ErrorBreakpointNotFound
 )

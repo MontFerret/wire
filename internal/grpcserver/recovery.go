@@ -19,6 +19,7 @@ func UnaryRecoveryInterceptor(
 			err = rpcError(&core.DomainError{Category: core.ErrorInternal, Message: "internal runtime failure"})
 		}
 	}()
+
 	return handler(ctx, request)
 }
 
@@ -33,5 +34,6 @@ func StreamRecoveryInterceptor(
 			err = rpcError(&core.DomainError{Category: core.ErrorInternal, Message: "internal runtime failure"})
 		}
 	}()
+
 	return handler(server, stream)
 }

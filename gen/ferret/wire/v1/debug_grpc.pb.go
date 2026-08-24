@@ -21,16 +21,17 @@ const _ = grpc.SupportPackageIsVersion9
 const (
 	DebugService_OpenDebugSession_FullMethodName    = "/ferret.wire.v1.DebugService/OpenDebugSession"
 	DebugService_StartDebug_FullMethodName          = "/ferret.wire.v1.DebugService/StartDebug"
-	DebugService_SetBreakpoints_FullMethodName      = "/ferret.wire.v1.DebugService/SetBreakpoints"
+	DebugService_SetBreakpoint_FullMethodName       = "/ferret.wire.v1.DebugService/SetBreakpoint"
+	DebugService_DeleteBreakpoint_FullMethodName    = "/ferret.wire.v1.DebugService/DeleteBreakpoint"
 	DebugService_Continue_FullMethodName            = "/ferret.wire.v1.DebugService/Continue"
 	DebugService_Pause_FullMethodName               = "/ferret.wire.v1.DebugService/Pause"
 	DebugService_Next_FullMethodName                = "/ferret.wire.v1.DebugService/Next"
-	DebugService_StepIn_FullMethodName              = "/ferret.wire.v1.DebugService/StepIn"
-	DebugService_StepOut_FullMethodName             = "/ferret.wire.v1.DebugService/StepOut"
-	DebugService_StackTrace_FullMethodName          = "/ferret.wire.v1.DebugService/StackTrace"
-	DebugService_Scopes_FullMethodName              = "/ferret.wire.v1.DebugService/Scopes"
+	DebugService_Step_FullMethodName                = "/ferret.wire.v1.DebugService/Step"
+	DebugService_Out_FullMethodName                 = "/ferret.wire.v1.DebugService/Out"
+	DebugService_Frames_FullMethodName              = "/ferret.wire.v1.DebugService/Frames"
+	DebugService_FrameLocals_FullMethodName         = "/ferret.wire.v1.DebugService/FrameLocals"
 	DebugService_Variables_FullMethodName           = "/ferret.wire.v1.DebugService/Variables"
-	DebugService_Evaluate_FullMethodName            = "/ferret.wire.v1.DebugService/Evaluate"
+	DebugService_EvaluateFrame_FullMethodName       = "/ferret.wire.v1.DebugService/EvaluateFrame"
 	DebugService_StopDebug_FullMethodName           = "/ferret.wire.v1.DebugService/StopDebug"
 	DebugService_ReleaseDebugSession_FullMethodName = "/ferret.wire.v1.DebugService/ReleaseDebugSession"
 	DebugService_WatchDebug_FullMethodName          = "/ferret.wire.v1.DebugService/WatchDebug"
@@ -42,18 +43,22 @@ const (
 type DebugServiceClient interface {
 	OpenDebugSession(ctx context.Context, in *OpenDebugSessionRequest, opts ...grpc.CallOption) (*OpenDebugSessionResponse, error)
 	StartDebug(ctx context.Context, in *StartDebugRequest, opts ...grpc.CallOption) (*StartDebugResponse, error)
-	SetBreakpoints(ctx context.Context, in *SetBreakpointsRequest, opts ...grpc.CallOption) (*SetBreakpointsResponse, error)
+	// Breakpoints are singular Ferret-owned resources, not DAP source replacements.
+	SetBreakpoint(ctx context.Context, in *SetBreakpointRequest, opts ...grpc.CallOption) (*SetBreakpointResponse, error)
+	DeleteBreakpoint(ctx context.Context, in *DeleteBreakpointRequest, opts ...grpc.CallOption) (*DeleteBreakpointResponse, error)
 	Continue(ctx context.Context, in *ContinueRequest, opts ...grpc.CallOption) (*ContinueResponse, error)
 	Pause(ctx context.Context, in *PauseRequest, opts ...grpc.CallOption) (*PauseResponse, error)
 	Next(ctx context.Context, in *NextRequest, opts ...grpc.CallOption) (*NextResponse, error)
-	StepIn(ctx context.Context, in *StepInRequest, opts ...grpc.CallOption) (*StepInResponse, error)
-	StepOut(ctx context.Context, in *StepOutRequest, opts ...grpc.CallOption) (*StepOutResponse, error)
-	StackTrace(ctx context.Context, in *StackTraceRequest, opts ...grpc.CallOption) (*StackTraceResponse, error)
-	Scopes(ctx context.Context, in *ScopesRequest, opts ...grpc.CallOption) (*ScopesResponse, error)
+	Step(ctx context.Context, in *StepRequest, opts ...grpc.CallOption) (*StepResponse, error)
+	Out(ctx context.Context, in *OutRequest, opts ...grpc.CallOption) (*OutResponse, error)
+	Frames(ctx context.Context, in *FramesRequest, opts ...grpc.CallOption) (*FramesResponse, error)
+	FrameLocals(ctx context.Context, in *FrameLocalsRequest, opts ...grpc.CallOption) (*FrameLocalsResponse, error)
 	Variables(ctx context.Context, in *VariablesRequest, opts ...grpc.CallOption) (*VariablesResponse, error)
-	Evaluate(ctx context.Context, in *EvaluateRequest, opts ...grpc.CallOption) (*EvaluateResponse, error)
+	EvaluateFrame(ctx context.Context, in *EvaluateFrameRequest, opts ...grpc.CallOption) (*EvaluateFrameResponse, error)
 	StopDebug(ctx context.Context, in *StopDebugRequest, opts ...grpc.CallOption) (*StopDebugResponse, error)
+	// ReleaseDebugSession commits termination and cleanup. The session ID then becomes stale.
 	ReleaseDebugSession(ctx context.Context, in *ReleaseDebugSessionRequest, opts ...grpc.CallOption) (*ReleaseDebugSessionResponse, error)
+	// WatchDebug is finite, ordered, and ends after one terminal snapshot.
 	WatchDebug(ctx context.Context, in *WatchDebugRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[WatchDebugResponse], error)
 }
 
@@ -85,10 +90,20 @@ func (c *debugServiceClient) StartDebug(ctx context.Context, in *StartDebugReque
 	return out, nil
 }
 
-func (c *debugServiceClient) SetBreakpoints(ctx context.Context, in *SetBreakpointsRequest, opts ...grpc.CallOption) (*SetBreakpointsResponse, error) {
+func (c *debugServiceClient) SetBreakpoint(ctx context.Context, in *SetBreakpointRequest, opts ...grpc.CallOption) (*SetBreakpointResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(SetBreakpointsResponse)
-	err := c.cc.Invoke(ctx, DebugService_SetBreakpoints_FullMethodName, in, out, cOpts...)
+	out := new(SetBreakpointResponse)
+	err := c.cc.Invoke(ctx, DebugService_SetBreakpoint_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *debugServiceClient) DeleteBreakpoint(ctx context.Context, in *DeleteBreakpointRequest, opts ...grpc.CallOption) (*DeleteBreakpointResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DeleteBreakpointResponse)
+	err := c.cc.Invoke(ctx, DebugService_DeleteBreakpoint_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -125,40 +140,40 @@ func (c *debugServiceClient) Next(ctx context.Context, in *NextRequest, opts ...
 	return out, nil
 }
 
-func (c *debugServiceClient) StepIn(ctx context.Context, in *StepInRequest, opts ...grpc.CallOption) (*StepInResponse, error) {
+func (c *debugServiceClient) Step(ctx context.Context, in *StepRequest, opts ...grpc.CallOption) (*StepResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(StepInResponse)
-	err := c.cc.Invoke(ctx, DebugService_StepIn_FullMethodName, in, out, cOpts...)
+	out := new(StepResponse)
+	err := c.cc.Invoke(ctx, DebugService_Step_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *debugServiceClient) StepOut(ctx context.Context, in *StepOutRequest, opts ...grpc.CallOption) (*StepOutResponse, error) {
+func (c *debugServiceClient) Out(ctx context.Context, in *OutRequest, opts ...grpc.CallOption) (*OutResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(StepOutResponse)
-	err := c.cc.Invoke(ctx, DebugService_StepOut_FullMethodName, in, out, cOpts...)
+	out := new(OutResponse)
+	err := c.cc.Invoke(ctx, DebugService_Out_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *debugServiceClient) StackTrace(ctx context.Context, in *StackTraceRequest, opts ...grpc.CallOption) (*StackTraceResponse, error) {
+func (c *debugServiceClient) Frames(ctx context.Context, in *FramesRequest, opts ...grpc.CallOption) (*FramesResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(StackTraceResponse)
-	err := c.cc.Invoke(ctx, DebugService_StackTrace_FullMethodName, in, out, cOpts...)
+	out := new(FramesResponse)
+	err := c.cc.Invoke(ctx, DebugService_Frames_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *debugServiceClient) Scopes(ctx context.Context, in *ScopesRequest, opts ...grpc.CallOption) (*ScopesResponse, error) {
+func (c *debugServiceClient) FrameLocals(ctx context.Context, in *FrameLocalsRequest, opts ...grpc.CallOption) (*FrameLocalsResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(ScopesResponse)
-	err := c.cc.Invoke(ctx, DebugService_Scopes_FullMethodName, in, out, cOpts...)
+	out := new(FrameLocalsResponse)
+	err := c.cc.Invoke(ctx, DebugService_FrameLocals_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -175,10 +190,10 @@ func (c *debugServiceClient) Variables(ctx context.Context, in *VariablesRequest
 	return out, nil
 }
 
-func (c *debugServiceClient) Evaluate(ctx context.Context, in *EvaluateRequest, opts ...grpc.CallOption) (*EvaluateResponse, error) {
+func (c *debugServiceClient) EvaluateFrame(ctx context.Context, in *EvaluateFrameRequest, opts ...grpc.CallOption) (*EvaluateFrameResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(EvaluateResponse)
-	err := c.cc.Invoke(ctx, DebugService_Evaluate_FullMethodName, in, out, cOpts...)
+	out := new(EvaluateFrameResponse)
+	err := c.cc.Invoke(ctx, DebugService_EvaluateFrame_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -230,18 +245,22 @@ type DebugService_WatchDebugClient = grpc.ServerStreamingClient[WatchDebugRespon
 type DebugServiceServer interface {
 	OpenDebugSession(context.Context, *OpenDebugSessionRequest) (*OpenDebugSessionResponse, error)
 	StartDebug(context.Context, *StartDebugRequest) (*StartDebugResponse, error)
-	SetBreakpoints(context.Context, *SetBreakpointsRequest) (*SetBreakpointsResponse, error)
+	// Breakpoints are singular Ferret-owned resources, not DAP source replacements.
+	SetBreakpoint(context.Context, *SetBreakpointRequest) (*SetBreakpointResponse, error)
+	DeleteBreakpoint(context.Context, *DeleteBreakpointRequest) (*DeleteBreakpointResponse, error)
 	Continue(context.Context, *ContinueRequest) (*ContinueResponse, error)
 	Pause(context.Context, *PauseRequest) (*PauseResponse, error)
 	Next(context.Context, *NextRequest) (*NextResponse, error)
-	StepIn(context.Context, *StepInRequest) (*StepInResponse, error)
-	StepOut(context.Context, *StepOutRequest) (*StepOutResponse, error)
-	StackTrace(context.Context, *StackTraceRequest) (*StackTraceResponse, error)
-	Scopes(context.Context, *ScopesRequest) (*ScopesResponse, error)
+	Step(context.Context, *StepRequest) (*StepResponse, error)
+	Out(context.Context, *OutRequest) (*OutResponse, error)
+	Frames(context.Context, *FramesRequest) (*FramesResponse, error)
+	FrameLocals(context.Context, *FrameLocalsRequest) (*FrameLocalsResponse, error)
 	Variables(context.Context, *VariablesRequest) (*VariablesResponse, error)
-	Evaluate(context.Context, *EvaluateRequest) (*EvaluateResponse, error)
+	EvaluateFrame(context.Context, *EvaluateFrameRequest) (*EvaluateFrameResponse, error)
 	StopDebug(context.Context, *StopDebugRequest) (*StopDebugResponse, error)
+	// ReleaseDebugSession commits termination and cleanup. The session ID then becomes stale.
 	ReleaseDebugSession(context.Context, *ReleaseDebugSessionRequest) (*ReleaseDebugSessionResponse, error)
+	// WatchDebug is finite, ordered, and ends after one terminal snapshot.
 	WatchDebug(*WatchDebugRequest, grpc.ServerStreamingServer[WatchDebugResponse]) error
 	mustEmbedUnimplementedDebugServiceServer()
 }
@@ -259,8 +278,11 @@ func (UnimplementedDebugServiceServer) OpenDebugSession(context.Context, *OpenDe
 func (UnimplementedDebugServiceServer) StartDebug(context.Context, *StartDebugRequest) (*StartDebugResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method StartDebug not implemented")
 }
-func (UnimplementedDebugServiceServer) SetBreakpoints(context.Context, *SetBreakpointsRequest) (*SetBreakpointsResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method SetBreakpoints not implemented")
+func (UnimplementedDebugServiceServer) SetBreakpoint(context.Context, *SetBreakpointRequest) (*SetBreakpointResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetBreakpoint not implemented")
+}
+func (UnimplementedDebugServiceServer) DeleteBreakpoint(context.Context, *DeleteBreakpointRequest) (*DeleteBreakpointResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DeleteBreakpoint not implemented")
 }
 func (UnimplementedDebugServiceServer) Continue(context.Context, *ContinueRequest) (*ContinueResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Continue not implemented")
@@ -271,23 +293,23 @@ func (UnimplementedDebugServiceServer) Pause(context.Context, *PauseRequest) (*P
 func (UnimplementedDebugServiceServer) Next(context.Context, *NextRequest) (*NextResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Next not implemented")
 }
-func (UnimplementedDebugServiceServer) StepIn(context.Context, *StepInRequest) (*StepInResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method StepIn not implemented")
+func (UnimplementedDebugServiceServer) Step(context.Context, *StepRequest) (*StepResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Step not implemented")
 }
-func (UnimplementedDebugServiceServer) StepOut(context.Context, *StepOutRequest) (*StepOutResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method StepOut not implemented")
+func (UnimplementedDebugServiceServer) Out(context.Context, *OutRequest) (*OutResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Out not implemented")
 }
-func (UnimplementedDebugServiceServer) StackTrace(context.Context, *StackTraceRequest) (*StackTraceResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method StackTrace not implemented")
+func (UnimplementedDebugServiceServer) Frames(context.Context, *FramesRequest) (*FramesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Frames not implemented")
 }
-func (UnimplementedDebugServiceServer) Scopes(context.Context, *ScopesRequest) (*ScopesResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method Scopes not implemented")
+func (UnimplementedDebugServiceServer) FrameLocals(context.Context, *FrameLocalsRequest) (*FrameLocalsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method FrameLocals not implemented")
 }
 func (UnimplementedDebugServiceServer) Variables(context.Context, *VariablesRequest) (*VariablesResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Variables not implemented")
 }
-func (UnimplementedDebugServiceServer) Evaluate(context.Context, *EvaluateRequest) (*EvaluateResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method Evaluate not implemented")
+func (UnimplementedDebugServiceServer) EvaluateFrame(context.Context, *EvaluateFrameRequest) (*EvaluateFrameResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method EvaluateFrame not implemented")
 }
 func (UnimplementedDebugServiceServer) StopDebug(context.Context, *StopDebugRequest) (*StopDebugResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method StopDebug not implemented")
@@ -355,20 +377,38 @@ func _DebugService_StartDebug_Handler(srv interface{}, ctx context.Context, dec 
 	return interceptor(ctx, in, info, handler)
 }
 
-func _DebugService_SetBreakpoints_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(SetBreakpointsRequest)
+func _DebugService_SetBreakpoint_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetBreakpointRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(DebugServiceServer).SetBreakpoints(ctx, in)
+		return srv.(DebugServiceServer).SetBreakpoint(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: DebugService_SetBreakpoints_FullMethodName,
+		FullMethod: DebugService_SetBreakpoint_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DebugServiceServer).SetBreakpoints(ctx, req.(*SetBreakpointsRequest))
+		return srv.(DebugServiceServer).SetBreakpoint(ctx, req.(*SetBreakpointRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DebugService_DeleteBreakpoint_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteBreakpointRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DebugServiceServer).DeleteBreakpoint(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DebugService_DeleteBreakpoint_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DebugServiceServer).DeleteBreakpoint(ctx, req.(*DeleteBreakpointRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -427,74 +467,74 @@ func _DebugService_Next_Handler(srv interface{}, ctx context.Context, dec func(i
 	return interceptor(ctx, in, info, handler)
 }
 
-func _DebugService_StepIn_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(StepInRequest)
+func _DebugService_Step_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(StepRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(DebugServiceServer).StepIn(ctx, in)
+		return srv.(DebugServiceServer).Step(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: DebugService_StepIn_FullMethodName,
+		FullMethod: DebugService_Step_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DebugServiceServer).StepIn(ctx, req.(*StepInRequest))
+		return srv.(DebugServiceServer).Step(ctx, req.(*StepRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _DebugService_StepOut_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(StepOutRequest)
+func _DebugService_Out_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(OutRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(DebugServiceServer).StepOut(ctx, in)
+		return srv.(DebugServiceServer).Out(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: DebugService_StepOut_FullMethodName,
+		FullMethod: DebugService_Out_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DebugServiceServer).StepOut(ctx, req.(*StepOutRequest))
+		return srv.(DebugServiceServer).Out(ctx, req.(*OutRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _DebugService_StackTrace_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(StackTraceRequest)
+func _DebugService_Frames_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(FramesRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(DebugServiceServer).StackTrace(ctx, in)
+		return srv.(DebugServiceServer).Frames(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: DebugService_StackTrace_FullMethodName,
+		FullMethod: DebugService_Frames_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DebugServiceServer).StackTrace(ctx, req.(*StackTraceRequest))
+		return srv.(DebugServiceServer).Frames(ctx, req.(*FramesRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _DebugService_Scopes_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ScopesRequest)
+func _DebugService_FrameLocals_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(FrameLocalsRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(DebugServiceServer).Scopes(ctx, in)
+		return srv.(DebugServiceServer).FrameLocals(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: DebugService_Scopes_FullMethodName,
+		FullMethod: DebugService_FrameLocals_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DebugServiceServer).Scopes(ctx, req.(*ScopesRequest))
+		return srv.(DebugServiceServer).FrameLocals(ctx, req.(*FrameLocalsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -517,20 +557,20 @@ func _DebugService_Variables_Handler(srv interface{}, ctx context.Context, dec f
 	return interceptor(ctx, in, info, handler)
 }
 
-func _DebugService_Evaluate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(EvaluateRequest)
+func _DebugService_EvaluateFrame_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(EvaluateFrameRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(DebugServiceServer).Evaluate(ctx, in)
+		return srv.(DebugServiceServer).EvaluateFrame(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: DebugService_Evaluate_FullMethodName,
+		FullMethod: DebugService_EvaluateFrame_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DebugServiceServer).Evaluate(ctx, req.(*EvaluateRequest))
+		return srv.(DebugServiceServer).EvaluateFrame(ctx, req.(*EvaluateFrameRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -598,8 +638,12 @@ var DebugService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _DebugService_StartDebug_Handler,
 		},
 		{
-			MethodName: "SetBreakpoints",
-			Handler:    _DebugService_SetBreakpoints_Handler,
+			MethodName: "SetBreakpoint",
+			Handler:    _DebugService_SetBreakpoint_Handler,
+		},
+		{
+			MethodName: "DeleteBreakpoint",
+			Handler:    _DebugService_DeleteBreakpoint_Handler,
 		},
 		{
 			MethodName: "Continue",
@@ -614,28 +658,28 @@ var DebugService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _DebugService_Next_Handler,
 		},
 		{
-			MethodName: "StepIn",
-			Handler:    _DebugService_StepIn_Handler,
+			MethodName: "Step",
+			Handler:    _DebugService_Step_Handler,
 		},
 		{
-			MethodName: "StepOut",
-			Handler:    _DebugService_StepOut_Handler,
+			MethodName: "Out",
+			Handler:    _DebugService_Out_Handler,
 		},
 		{
-			MethodName: "StackTrace",
-			Handler:    _DebugService_StackTrace_Handler,
+			MethodName: "Frames",
+			Handler:    _DebugService_Frames_Handler,
 		},
 		{
-			MethodName: "Scopes",
-			Handler:    _DebugService_Scopes_Handler,
+			MethodName: "FrameLocals",
+			Handler:    _DebugService_FrameLocals_Handler,
 		},
 		{
 			MethodName: "Variables",
 			Handler:    _DebugService_Variables_Handler,
 		},
 		{
-			MethodName: "Evaluate",
-			Handler:    _DebugService_Evaluate_Handler,
+			MethodName: "EvaluateFrame",
+			Handler:    _DebugService_EvaluateFrame_Handler,
 		},
 		{
 			MethodName: "StopDebug",

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/MontFerret/ferret/v2"
+	ferretruntime "github.com/MontFerret/ferret/v2/pkg/runtime"
 )
 
 func TestSlowDebugWatcherIsDetachedWithoutBlockingCommands(t *testing.T) {
@@ -16,7 +17,9 @@ func TestSlowDebugWatcherIsDetachedWithoutBlockingCommands(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer engine.Close()
-	runtime, err := NewRuntime(engine, RuntimeInfo{})
+	limits := testLimits()
+	limits.MaxWatchersPerResource = 2
+	runtime, err := NewRuntime(engine, RuntimeInfo{}, limits)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,6 +74,16 @@ func TestSlowDebugWatcherIsDetachedWithoutBlockingCommands(t *testing.T) {
 		t.Fatal("slow watcher was not detached")
 	}
 
+	if _, err := connection.WatchDebug(session.ID); !hasCategory(err, ErrorResourceExhausted) {
+		t.Fatalf("lagged stream released its watcher slot before the handler exited: %v", err)
+	}
+	slow.Cancel()
+	replacement, err := connection.WatchDebug(session.ID)
+	if err != nil {
+		t.Fatalf("watcher slot was not released when the handler exited: %v", err)
+	}
+	replacement.Cancel()
+
 	if _, err := connection.NextDebug(context.Background(), session.ID); err != nil {
 		t.Fatalf("slow watcher blocked a later debugger command: %v", err)
 	}
@@ -85,6 +98,7 @@ func waitCoreDebugStop(t *testing.T, subscription DebugSubscription) {
 			if !ok {
 				t.Fatal("debug subscription closed before a stop")
 			}
+
 			if event.Kind == DebugEventStopped {
 				return
 			}
@@ -98,13 +112,25 @@ func waitCoreDebugStop(t *testing.T, subscription DebugSubscription) {
 	}
 }
 
-func TestConcurrentReleaseWaitsForTheSameResult(t *testing.T) {
-	engine, err := ferret.New()
+func TestSlowExecutionWatcherDoesNotBlockCompletionAndRetainsSlotUntilHandlerExit(t *testing.T) {
+	executionStarted := make(chan struct{})
+	allowExecution := make(chan struct{})
+	engine, err := ferret.New(ferret.WithFunctionsRegistrar(func(namespace ferretruntime.Namespace) {
+		namespace.Function().A0().Add("SLOW_EXECUTION", func(context.Context) (ferretruntime.Value, error) {
+			close(executionStarted)
+			<-allowExecution
+
+			return ferretruntime.NewInt(1), nil
+		})
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer engine.Close()
-	runtime, err := NewRuntime(engine, RuntimeInfo{})
+
+	limits := testLimits()
+	limits.MaxWatchersPerResource = 1
+	runtime, err := NewRuntime(engine, RuntimeInfo{}, limits)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +138,8 @@ func TestConcurrentReleaseWaitsForTheSameResult(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan, err := connection.Compile(context.Background(), CompileInput{Content: "RETURN 1"})
+	defer connection.Close(context.Background())
+	plan, err := connection.Compile(context.Background(), CompileInput{Content: "RETURN SLOW_EXECUTION()"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,39 +147,110 @@ func TestConcurrentReleaseWaitsForTheSameResult(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	subscription, err := connection.WatchExecution(execution.ID)
+	select {
+	case <-executionStarted:
+	case <-time.After(10 * time.Second):
+		t.Fatal("execution did not start")
+	}
+
+	slow, err := connection.WatchExecution(execution.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer subscription.Cancel()
-	for {
-		if subscription.Current.Kind == ExecutionEventCompleted {
-			break
-		}
-		event, ok := <-subscription.Events
-		if !ok {
-			break
-		}
-		if event.Kind == ExecutionEventCompleted {
-			break
-		}
+
+	if slow.Current.Kind != ExecutionEventStarted {
+		t.Fatalf("unexpected initial snapshot: %#v", slow.Current)
+	}
+	close(allowExecution)
+	current, err := connection.execution(execution.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-current.done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("slow watcher blocked execution completion")
+	}
+
+	if _, err := connection.WatchExecution(execution.ID); !hasCategory(err, ErrorResourceExhausted) {
+		t.Fatalf("slow terminal watcher released its slot before handler exit: %v", err)
+	}
+	slow.Cancel()
+	if replacement, err := connection.WatchExecution(execution.ID); err != nil {
+		t.Fatalf("slow watcher slot was not reusable after handler exit: %v", err)
+	} else {
+		replacement.Cancel()
+	}
+}
+
+func TestConcurrentReleaseWaitsForTheSameResult(t *testing.T) {
+	started := make(chan struct{})
+	cancelled := make(chan struct{})
+	allowReturn := make(chan struct{})
+	engine, err := ferret.New(ferret.WithFunctionsRegistrar(func(namespace ferretruntime.Namespace) {
+		namespace.Function().A0().Add("BLOCK_RELEASE", func(ctx context.Context) (ferretruntime.Value, error) {
+			close(started)
+			<-ctx.Done()
+			close(cancelled)
+			<-allowReturn
+
+			return ferretruntime.None, ctx.Err()
+		})
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer engine.Close()
+	runtime, err := NewRuntime(engine, RuntimeInfo{}, testLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
+	connection, err := runtime.OpenConnection()
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := connection.Compile(context.Background(), CompileInput{Content: "RETURN BLOCK_RELEASE()"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	execution, err := connection.Execute(context.Background(), ExecuteInput{PlanID: plan.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-started:
+	case <-time.After(10 * time.Second):
+		t.Fatal("execution did not start")
 	}
 
 	const callers = 16
-	start := make(chan struct{})
 	errs := make(chan error, callers)
-	for range callers {
+	go func() {
+		errs <- connection.ReleaseExecution(context.Background(), execution.ID)
+	}()
+	select {
+	case <-cancelled:
+	case <-time.After(10 * time.Second):
+		t.Fatal("release did not cancel execution")
+	}
+
+	for range callers - 1 {
 		go func() {
-			<-start
 			errs <- connection.ReleaseExecution(context.Background(), execution.ID)
 		}()
 	}
-	close(start)
+	time.Sleep(50 * time.Millisecond)
+	close(allowReturn)
 	for range callers {
 		if err := <-errs; err != nil {
 			t.Fatalf("release failed: %v", err)
 		}
 	}
+
+	if err := connection.ReleaseExecution(context.Background(), execution.ID); !hasCategory(err, ErrorExecutionNotFound) {
+		t.Fatalf("completed release did not become stale: %v", err)
+	}
+
 	if err := connection.ReleasePlan(context.Background(), plan.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +268,7 @@ func TestCompileRacingConnectionCloseCannotPublishAPlan(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer engine.Close()
-	runtime, err := NewRuntime(engine, RuntimeInfo{})
+	runtime, err := NewRuntime(engine, RuntimeInfo{}, testLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,13 +289,25 @@ func TestCompileRacingConnectionCloseCannotPublishAPlan(t *testing.T) {
 	if err := <-compileResult; err == nil {
 		t.Fatal("compile published a plan after connection close committed")
 	}
+
 	if err := <-closeResult; err != nil {
 		t.Fatal(err)
 	}
 	connection.mu.RLock()
-	plans := len(connection.plans) + len(connection.releasedPlans)
+	plans := len(connection.plans) + len(connection.closingPlans)
 	connection.mu.RUnlock()
 	if plans != 0 {
 		t.Fatalf("connection retained %d plans after close", plans)
+	}
+}
+
+func testLimits() Limits {
+	return Limits{
+		MaxConnections:                64,
+		MaxPlansPerConnection:         128,
+		MaxExecutionsPerConnection:    128,
+		MaxDebugSessionsPerConnection: 32,
+		MaxWatchersPerResource:        8,
+		MaxBreakpointsPerDebugSession: 256,
 	}
 }

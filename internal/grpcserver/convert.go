@@ -16,6 +16,7 @@ func runtimeInfo(value core.RuntimeInfo) *wirev1.RuntimeInfo {
 			wirev1.Capability_CAPABILITY_CANCELLATION,
 		},
 	}
+
 	if value.RuntimeIdentity != (core.RuntimeIdentity{}) {
 		result.RuntimeIdentity = &wirev1.RuntimeIdentity{
 			Name:       value.RuntimeIdentity.Name,
@@ -23,6 +24,7 @@ func runtimeInfo(value core.RuntimeInfo) *wirev1.RuntimeInfo {
 			InstanceId: value.RuntimeIdentity.InstanceID,
 		}
 	}
+
 	return result
 }
 
@@ -47,6 +49,7 @@ func diagnostics(values []core.Diagnostic) []*wirev1.Diagnostic {
 			Spans:          spans,
 		}
 	}
+
 	return result
 }
 
@@ -62,13 +65,15 @@ func output(value *core.Output) *wirev1.Output {
 	if value == nil {
 		return nil
 	}
-	return &wirev1.Output{ContentType: value.ContentType, Data: append([]byte(nil), value.Data...)}
+
+	return &wirev1.Output{ContentType: value.ContentType, Content: append([]byte(nil), value.Content...)}
 }
 
 func failure(value *core.Failure) *wirev1.Failure {
 	if value == nil {
 		return nil
 	}
+
 	return &wirev1.Failure{Category: errorCategory(value.Category), Message: value.Message, Diagnostics: diagnostics(value.Diagnostics)}
 }
 
@@ -106,8 +111,6 @@ func executionEvent(value core.ExecutionEvent) *wirev1.WatchExecutionResponse {
 	switch value.Kind {
 	case core.ExecutionEventStarted:
 		result.Payload = &wirev1.WatchExecutionResponse_Started{Started: &wirev1.ExecutionStarted{Execution: snapshot}}
-	case core.ExecutionEventOutput:
-		result.Payload = &wirev1.WatchExecutionResponse_Output{Output: &wirev1.ExecutionOutput{Output: output(value.Snapshot.Output)}}
 	case core.ExecutionEventCompleted:
 		result.Payload = &wirev1.WatchExecutionResponse_Completed{Completed: &wirev1.ExecutionCompleted{Execution: snapshot}}
 	case core.ExecutionEventFailed:
@@ -115,6 +118,7 @@ func executionEvent(value core.ExecutionEvent) *wirev1.WatchExecutionResponse {
 	case core.ExecutionEventCancelled:
 		result.Payload = &wirev1.WatchExecutionResponse_Cancelled{Cancelled: &wirev1.ExecutionCancelled{Execution: snapshot}}
 	}
+
 	return result
 }
 
@@ -122,6 +126,7 @@ func location(value core.Location) *wirev1.SourceLocation {
 	if value == (core.Location{}) {
 		return nil
 	}
+
 	return &wirev1.SourceLocation{File: value.File, Line: int32(value.Line), Column: int32(value.Column)}
 }
 
@@ -187,8 +192,6 @@ func debugEvent(value core.DebugEvent) *wirev1.WatchDebugResponse {
 		result.Payload = &wirev1.WatchDebugResponse_Continued{Continued: &wirev1.DebugContinued{Session: snapshot}}
 	case core.DebugEventStopped:
 		result.Payload = &wirev1.WatchDebugResponse_Stopped{Stopped: &wirev1.DebugStopped{Session: snapshot}}
-	case core.DebugEventOutput:
-		result.Payload = &wirev1.WatchDebugResponse_Output{Output: &wirev1.DebugOutput{Output: output(value.Snapshot.Output)}}
 	case core.DebugEventCompleted:
 		result.Payload = &wirev1.WatchDebugResponse_Completed{Completed: &wirev1.DebugCompleted{Session: snapshot}}
 	case core.DebugEventFailed:
@@ -196,6 +199,7 @@ func debugEvent(value core.DebugEvent) *wirev1.WatchDebugResponse {
 	case core.DebugEventTerminated:
 		result.Payload = &wirev1.WatchDebugResponse_Terminated{Terminated: &wirev1.DebugTerminated{Session: snapshot}}
 	}
+
 	return result
 }
 
@@ -216,5 +220,10 @@ func debugValue(value core.DebugValue) *wirev1.DebugValue {
 }
 
 func variable(value core.Variable) *wirev1.Variable {
-	return &wirev1.Variable{Name: value.Name, Value: debugValue(value.Value), Mutable: value.Mutable}
+	return &wirev1.Variable{
+		Name:      value.Name,
+		Value:     debugValue(value.Value),
+		Mutable:   value.Mutable,
+		Parameter: value.Parameter,
+	}
 }

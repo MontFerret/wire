@@ -11,51 +11,63 @@ import (
 	"github.com/google/uuid"
 )
 
-type Plan struct {
-	mu         sync.Mutex
-	id         PlanID
-	plan       *ferret.Plan
-	identity   string
-	content    string
-	parameters []string
-	debuggable bool
-	closing    bool
-	executions map[ExecutionID]struct{}
-	debug      map[DebugSessionID]struct{}
-	release    lifecycle.Close
-}
+type (
+	Plan struct {
+		mu         sync.Mutex
+		id         PlanID
+		plan       *ferret.Plan
+		identity   string
+		parameters []string
+		debuggable bool
+		closing    bool
+		executions map[ExecutionID]struct{}
+		debug      map[DebugSessionID]struct{}
+		release    lifecycle.Close
+	}
 
-type CompileInput struct {
-	Content    string
-	Identity   string
-	Debuggable bool
-}
+	CompileInput struct {
+		Content    string
+		Identity   string
+		Debuggable bool
+	}
 
-type PlanSnapshot struct {
-	ID         PlanID
-	Parameters []string
-	Debuggable bool
-}
+	PlanSnapshot struct {
+		ID         PlanID
+		Parameters []string
+		Debuggable bool
+	}
+)
 
 func (c *Connection) Compile(ctx context.Context, input CompileInput) (PlanSnapshot, error) {
 	if err := ctx.Err(); err != nil {
 		return PlanSnapshot{}, err
 	}
+
 	if input.Content == "" {
 		return PlanSnapshot{}, invalidRequest("source content is required")
 	}
+
 	if input.Identity == "" {
 		input.Identity = "anonymous"
 	}
+
+	if err := c.beginPlanCreation(); err != nil {
+		return PlanSnapshot{}, err
+	}
+	defer c.finishPlanCreation()
+
+	compileCtx, cancel := c.operationContext(ctx)
+	defer cancel()
 
 	src := source.New(input.Identity, input.Content)
 	var compiled *ferret.Plan
 	var err error
 	if input.Debuggable {
-		compiled, err = c.engine.CompileDebug(ctx, src)
+		compiled, err = c.engine.CompileDebug(compileCtx, src)
 	} else {
-		compiled, err = c.engine.Compile(ctx, src)
+		compiled, err = c.engine.Compile(compileCtx, src)
 	}
+
 	if err != nil {
 		return PlanSnapshot{}, &DomainError{
 			Category:    ErrorCompilation,
@@ -65,10 +77,7 @@ func (c *Connection) Compile(ctx context.Context, input CompileInput) (PlanSnaps
 		}
 	}
 
-	if err := ctx.Err(); err != nil {
-		return PlanSnapshot{}, errors.Join(err, compiled.Close())
-	}
-	if err := c.ctx.Err(); err != nil {
+	if err := compileCtx.Err(); err != nil {
 		return PlanSnapshot{}, errors.Join(err, compiled.Close())
 	}
 
@@ -76,7 +85,6 @@ func (c *Connection) Compile(ctx context.Context, input CompileInput) (PlanSnaps
 		id:         PlanID(uuid.NewString()),
 		plan:       compiled,
 		identity:   input.Identity,
-		content:    input.Content,
 		parameters: compiled.Params(),
 		debuggable: input.Debuggable,
 		executions: make(map[ExecutionID]struct{}),
@@ -88,6 +96,7 @@ func (c *Connection) Compile(ctx context.Context, input CompileInput) (PlanSnaps
 		c.mu.Unlock()
 		return PlanSnapshot{}, errors.Join(err, compiled.Close())
 	}
+
 	if err := ctx.Err(); err != nil {
 		c.mu.Unlock()
 		return PlanSnapshot{}, errors.Join(err, compiled.Close())
@@ -106,28 +115,6 @@ func (p *Plan) snapshot() PlanSnapshot {
 	}
 }
 
-func (c *Connection) plan(id PlanID) (*Plan, error) {
-	if err := validateID(id, "plan ID"); err != nil {
-		return nil, err
-	}
-
-	c.mu.RLock()
-	plan := c.plans[id]
-	c.mu.RUnlock()
-	if plan == nil {
-		return nil, notFound(ErrorPlanNotFound, string(id))
-	}
-
-	plan.mu.Lock()
-	closing := plan.closing
-	plan.mu.Unlock()
-	if closing {
-		return nil, notFound(ErrorPlanNotFound, string(id))
-	}
-
-	return plan, nil
-}
-
 func (c *Connection) ReleasePlan(ctx context.Context, id PlanID) error {
 	if err := validateID(id, "plan ID"); err != nil {
 		return err
@@ -136,27 +123,48 @@ func (c *Connection) ReleasePlan(ctx context.Context, id PlanID) error {
 	c.mu.Lock()
 	plan := c.plans[id]
 	if plan == nil {
-		plan = c.releasedPlans[id]
+		plan = c.closingPlans[id]
 	}
+
 	if plan == nil {
 		c.mu.Unlock()
 		return notFound(ErrorPlanNotFound, string(id))
 	}
+
 	if _, active := c.plans[id]; active {
 		plan.mu.Lock()
 		plan.closing = true
 		plan.mu.Unlock()
 		delete(c.plans, id)
-		c.releasedPlans[id] = plan
+		c.closingPlans[id] = plan
 	}
 	c.mu.Unlock()
 
 	if plan.release.Begin() {
 		go func() {
-			plan.release.Finish(c.settlePlanRelease(plan))
+			var err error
+			defer func() {
+				if recover() != nil {
+					err = errors.Join(err, internalError(errors.New("plan cleanup panicked")))
+				}
+
+				c.finishPlanRelease(plan)
+				plan.release.Finish(err)
+			}()
+
+			err = c.settlePlanRelease(plan)
 		}()
 	}
+
 	return plan.release.Wait(ctx)
+}
+
+func (c *Connection) finishPlanRelease(plan *Plan) {
+	c.mu.Lock()
+	if c.closingPlans[plan.id] == plan {
+		delete(c.closingPlans, plan.id)
+	}
+	c.mu.Unlock()
 }
 
 func (c *Connection) settlePlanRelease(plan *Plan) error {
@@ -173,10 +181,13 @@ func (c *Connection) settlePlanRelease(plan *Plan) error {
 
 	var result error
 	for _, child := range debugIDs {
-		result = errors.Join(result, c.ReleaseDebugSession(context.Background(), child))
+		err := c.ReleaseDebugSession(context.Background(), child)
+		result = errors.Join(result, ignoreMissingResource(err, ErrorDebugSessionNotFound))
 	}
+
 	for _, child := range executionIDs {
-		result = errors.Join(result, c.ReleaseExecution(context.Background(), child))
+		err := c.ReleaseExecution(context.Background(), child)
+		result = errors.Join(result, ignoreMissingResource(err, ErrorExecutionNotFound))
 	}
 	result = errors.Join(result, plan.plan.Close())
 	return result

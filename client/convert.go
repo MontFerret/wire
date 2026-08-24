@@ -8,6 +8,7 @@ func convertRuntimeInfo(value *wirev1.RuntimeInfo) RuntimeInfo {
 		WireVersion:   value.GetWireVersion(),
 		FerretVersion: value.GetFerretVersion(),
 	}
+
 	if identity := value.GetRuntimeIdentity(); identity != nil {
 		result.RuntimeIdentity = &RuntimeIdentity{
 			Name:       identity.GetName(),
@@ -15,6 +16,7 @@ func convertRuntimeInfo(value *wirev1.RuntimeInfo) RuntimeInfo {
 			InstanceID: identity.GetInstanceId(),
 		}
 	}
+
 	for _, capability := range value.GetCapabilities() {
 		switch capability {
 		case wirev1.Capability_CAPABILITY_EXECUTION:
@@ -25,35 +27,32 @@ func convertRuntimeInfo(value *wirev1.RuntimeInfo) RuntimeInfo {
 			result.Capabilities.Cancellation = true
 		}
 	}
-	return result
-}
 
-func convertPlan(value *wirev1.Plan) Plan {
-	return Plan{
-		ID:         PlanID(value.GetId().GetValue()),
-		Parameters: append([]string(nil), value.GetParameters()...),
-		Debuggable: value.GetDebuggable(),
-	}
+	return result
 }
 
 func convertOutput(value *wirev1.Output) *Output {
 	if value == nil {
 		return nil
 	}
-	return &Output{ContentType: value.GetContentType(), Data: append([]byte(nil), value.GetData()...)}
+
+	return &Output{ContentType: value.GetContentType(), Content: append([]byte(nil), value.GetContent()...)}
 }
 
 func convertDiagnostics(values []*wirev1.Diagnostic) []Diagnostic {
 	result := make([]Diagnostic, len(values))
+
 	for i, value := range values {
 		if value == nil {
 			continue
 		}
+
 		spans := make([]DiagnosticSpan, len(value.GetSpans()))
 		for j, span := range value.GetSpans() {
 			if span == nil {
 				continue
 			}
+
 			spans[j] = DiagnosticSpan{
 				Start:   span.GetStartByte(),
 				End:     span.GetEndByte(),
@@ -61,6 +60,7 @@ func convertDiagnostics(values []*wirev1.Diagnostic) []Diagnostic {
 				Primary: span.GetPrimary(),
 			}
 		}
+
 		result[i] = Diagnostic{
 			Kind:           value.GetKind(),
 			Message:        value.GetMessage(),
@@ -70,6 +70,7 @@ func convertDiagnostics(values []*wirev1.Diagnostic) []Diagnostic {
 			Spans:          spans,
 		}
 	}
+
 	return result
 }
 
@@ -77,6 +78,7 @@ func convertFailure(value *wirev1.Failure) *Failure {
 	if value == nil {
 		return nil
 	}
+
 	return &Failure{
 		Category:    clientErrorCategory(value.GetCategory()),
 		Message:     value.GetMessage(),
@@ -84,10 +86,8 @@ func convertFailure(value *wirev1.Failure) *Failure {
 	}
 }
 
-func convertExecution(value *wirev1.Execution) Execution {
-	return Execution{
-		ID:      ExecutionID(value.GetId().GetValue()),
-		PlanID:  PlanID(value.GetPlanId().GetValue()),
+func convertExecutionSnapshot(value *wirev1.Execution) ExecutionSnapshot {
+	return ExecutionSnapshot{
 		State:   convertExecutionState(value.GetState()),
 		Output:  convertOutput(value.GetOutput()),
 		Failure: convertFailure(value.GetFailure()),
@@ -110,24 +110,22 @@ func convertExecutionState(value wirev1.ExecutionState) ExecutionState {
 }
 
 func convertExecutionEvent(value *wirev1.WatchExecutionResponse) ExecutionEvent {
-	result := ExecutionEvent{ExecutionID: ExecutionID(value.GetExecutionId().GetValue()), Sequence: value.GetSequence()}
+	result := ExecutionEvent{Sequence: value.GetSequence()}
 	switch payload := value.GetPayload().(type) {
 	case *wirev1.WatchExecutionResponse_Started:
 		result.Kind = ExecutionEventStarted
-		result.Execution = convertExecution(payload.Started.GetExecution())
-	case *wirev1.WatchExecutionResponse_Output:
-		result.Kind = ExecutionEventOutput
-		result.Output = convertOutput(payload.Output.GetOutput())
+		result.Snapshot = convertExecutionSnapshot(payload.Started.GetExecution())
 	case *wirev1.WatchExecutionResponse_Completed:
 		result.Kind = ExecutionEventCompleted
-		result.Execution = convertExecution(payload.Completed.GetExecution())
+		result.Snapshot = convertExecutionSnapshot(payload.Completed.GetExecution())
 	case *wirev1.WatchExecutionResponse_Failed:
 		result.Kind = ExecutionEventFailed
-		result.Execution = convertExecution(payload.Failed.GetExecution())
+		result.Snapshot = convertExecutionSnapshot(payload.Failed.GetExecution())
 	case *wirev1.WatchExecutionResponse_Cancelled:
 		result.Kind = ExecutionEventCancelled
-		result.Execution = convertExecution(payload.Cancelled.GetExecution())
+		result.Snapshot = convertExecutionSnapshot(payload.Cancelled.GetExecution())
 	}
+
 	return result
 }
 
@@ -135,13 +133,12 @@ func convertLocation(value *wirev1.SourceLocation) *Location {
 	if value == nil {
 		return nil
 	}
+
 	return &Location{File: value.GetFile(), Line: int(value.GetLine()), Column: int(value.GetColumn())}
 }
 
-func convertDebugSession(value *wirev1.DebugSession) DebugSession {
-	return DebugSession{
-		ID:               DebugSessionID(value.GetId().GetValue()),
-		PlanID:           PlanID(value.GetPlanId().GetValue()),
+func convertDebugSessionSnapshot(value *wirev1.DebugSession) DebugSessionSnapshot {
+	return DebugSessionSnapshot{
 		State:            convertDebugState(value.GetState()),
 		StopReason:       convertDebugStopReason(value.GetStopReason()),
 		Location:         convertLocation(value.GetLocation()),
@@ -188,30 +185,28 @@ func convertDebugStopReason(value wirev1.DebugStopReason) DebugStopReason {
 }
 
 func convertDebugEvent(value *wirev1.WatchDebugResponse) DebugEvent {
-	result := DebugEvent{SessionID: DebugSessionID(value.GetDebugSessionId().GetValue()), Sequence: value.GetSequence()}
+	result := DebugEvent{Sequence: value.GetSequence()}
 	switch payload := value.GetPayload().(type) {
 	case *wirev1.WatchDebugResponse_Started:
 		result.Kind = DebugEventStarted
-		result.Session = convertDebugSession(payload.Started.GetSession())
+		result.Snapshot = convertDebugSessionSnapshot(payload.Started.GetSession())
 	case *wirev1.WatchDebugResponse_Continued:
 		result.Kind = DebugEventContinued
-		result.Session = convertDebugSession(payload.Continued.GetSession())
+		result.Snapshot = convertDebugSessionSnapshot(payload.Continued.GetSession())
 	case *wirev1.WatchDebugResponse_Stopped:
 		result.Kind = DebugEventStopped
-		result.Session = convertDebugSession(payload.Stopped.GetSession())
-	case *wirev1.WatchDebugResponse_Output:
-		result.Kind = DebugEventOutput
-		result.Output = convertOutput(payload.Output.GetOutput())
+		result.Snapshot = convertDebugSessionSnapshot(payload.Stopped.GetSession())
 	case *wirev1.WatchDebugResponse_Completed:
 		result.Kind = DebugEventCompleted
-		result.Session = convertDebugSession(payload.Completed.GetSession())
+		result.Snapshot = convertDebugSessionSnapshot(payload.Completed.GetSession())
 	case *wirev1.WatchDebugResponse_Failed:
 		result.Kind = DebugEventFailed
-		result.Session = convertDebugSession(payload.Failed.GetSession())
+		result.Snapshot = convertDebugSessionSnapshot(payload.Failed.GetSession())
 	case *wirev1.WatchDebugResponse_Terminated:
 		result.Kind = DebugEventTerminated
-		result.Session = convertDebugSession(payload.Terminated.GetSession())
+		result.Snapshot = convertDebugSessionSnapshot(payload.Terminated.GetSession())
 	}
+
 	return result
 }
 
@@ -232,5 +227,10 @@ func convertDebugValue(value *wirev1.DebugValue) DebugValue {
 }
 
 func convertVariable(value *wirev1.Variable) Variable {
-	return Variable{Name: value.GetName(), Value: convertDebugValue(value.GetValue()), Mutable: value.GetMutable()}
+	return Variable{
+		Name:      value.GetName(),
+		Value:     convertDebugValue(value.GetValue()),
+		Mutable:   value.GetMutable(),
+		Parameter: value.GetParameter(),
+	}
 }

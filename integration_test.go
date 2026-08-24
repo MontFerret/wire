@@ -7,6 +7,7 @@ import (
 	"net"
 	"reflect"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -35,14 +36,24 @@ type integrationEnv struct {
 }
 
 func newIntegrationEnv(t *testing.T, engineOptions ...ferret.Option) *integrationEnv {
+	return newIntegrationEnvWithServerOptions(t, nil, engineOptions...)
+}
+
+func newIntegrationEnvWithServerOptions(
+	t *testing.T,
+	serverOptions []wire.ServerOption,
+	engineOptions ...ferret.Option,
+) *integrationEnv {
 	t.Helper()
 	engine, err := ferret.New(engineOptions...)
 	if err != nil {
 		t.Fatal(err)
 	}
-	server, err := wire.NewServer(engine, wire.WithRuntimeIdentity(wire.RuntimeIdentity{
+	options := []wire.ServerOption{wire.WithRuntimeIdentity(wire.RuntimeIdentity{
 		Name: "test-host", Version: "1.2.3", InstanceID: "instance-1",
-	}))
+	})}
+	options = append(options, serverOptions...)
+	server, err := wire.NewServer(engine, options...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +73,7 @@ func newIntegrationEnv(t *testing.T, engineOptions ...ferret.Option) *integratio
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	wireClient, err := client.New(ctx, conn, client.WithClientIdentity(client.ClientIdentity{Name: "tests", Version: "1"}))
+	wireClient, err := client.New(ctx, conn)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,9 +84,17 @@ func newIntegrationEnv(t *testing.T, engineOptions ...ferret.Option) *integratio
 	t.Cleanup(func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cleanupCancel()
-		_ = wireClient.Close(cleanupCtx)
-		_ = server.Shutdown(cleanupCtx)
-		_ = conn.Close()
+		if err := wireClient.Close(cleanupCtx); err != nil {
+			t.Errorf("client cleanup failed: %v", err)
+		}
+
+		if err := server.Shutdown(cleanupCtx); err != nil {
+			t.Errorf("server cleanup failed: %v", err)
+		}
+
+		if err := conn.Close(); err != nil {
+			t.Errorf("transport cleanup failed: %v", err)
+		}
 		select {
 		case serveErr := <-serveErr:
 			if serveErr != nil {
@@ -84,9 +103,20 @@ func newIntegrationEnv(t *testing.T, engineOptions ...ferret.Option) *integratio
 		case <-cleanupCtx.Done():
 			t.Errorf("Serve did not settle: %v", cleanupCtx.Err())
 		}
-		_ = engine.Close()
+
+		if err := engine.Close(); err != nil {
+			t.Errorf("engine cleanup failed: %v", err)
+		}
 	})
 	return env
+}
+
+func testContext(t *testing.T) context.Context {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	t.Cleanup(cancel)
+
+	return ctx
 }
 
 func TestHandshakeCompileExecuteAndCanonicalOutput(t *testing.T) {
@@ -99,6 +129,7 @@ func TestHandshakeCompileExecuteAndCanonicalOutput(t *testing.T) {
 	if info.APIIdentity != "ferret.wire.v1" || info.WireVersion == "" || info.FerretVersion != compiler.Version {
 		t.Fatalf("unexpected runtime info: %#v", info)
 	}
+
 	if info.RuntimeIdentity == nil || info.RuntimeIdentity.Name != "test-host" || !info.Capabilities.Execution || !info.Capabilities.Debugging || !info.Capabilities.Cancellation {
 		t.Fatalf("unexpected identity/capabilities: %#v", info)
 	}
@@ -109,12 +140,13 @@ func TestHandshakeCompileExecuteAndCanonicalOutput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sort.Strings(plan.Parameters)
-	if !reflect.DeepEqual(plan.Parameters, []string{"nested", "value"}) {
-		t.Fatalf("unexpected declared parameters: %v", plan.Parameters)
+	parameters := plan.Parameters()
+	sort.Strings(parameters)
+	if !reflect.DeepEqual(parameters, []string{"nested", "value"}) {
+		t.Fatalf("unexpected declared parameters: %v", parameters)
 	}
 
-	execution, err := env.client.Execute(context.Background(), plan.ID, map[string]any{
+	execution, err := plan.Execute(context.Background(), map[string]any{
 		"value": int64(42),
 		"nested": map[string]any{
 			"array": []any{true, "wire", nil},
@@ -123,57 +155,63 @@ func TestHandshakeCompileExecuteAndCanonicalOutput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	events, err := env.client.WatchExecution(context.Background(), execution.ID)
+	events, err := execution.Watch(testContext(t))
 	if err != nil {
 		t.Fatal(err)
 	}
-	var completed client.Execution
+	var completed client.ExecutionSnapshot
 	var previous uint64
 	for completed.State != client.ExecutionCompleted {
 		event, recvErr := events.Recv()
 		if recvErr != nil {
 			t.Fatal(recvErr)
 		}
+
 		if event.Sequence <= previous {
 			t.Fatalf("non-monotonic event sequence: %d after %d", event.Sequence, previous)
 		}
 		previous = event.Sequence
 		if event.Kind == client.ExecutionEventFailed || event.Kind == client.ExecutionEventCancelled {
-			t.Fatalf("execution did not complete: %#v", event.Execution)
+			t.Fatalf("execution did not complete: %#v", event.Snapshot)
 		}
+
 		if event.Kind == client.ExecutionEventCompleted {
-			completed = event.Execution
+			completed = event.Snapshot
 		}
 	}
+
 	if completed.Output == nil || completed.Output.ContentType != "application/json" {
 		t.Fatalf("unexpected canonical output: %#v", completed.Output)
 	}
 	var decoded map[string]any
-	if err := json.Unmarshal(completed.Output.Data, &decoded); err != nil {
+	if err := json.Unmarshal(completed.Output.Content, &decoded); err != nil {
 		t.Fatal(err)
-	}
-	if decoded["host"] != "from-host" || decoded["value"] != float64(42) {
-		t.Fatalf("unexpected output: %s", completed.Output.Data)
 	}
 
-	if err := env.client.ReleaseExecution(context.Background(), execution.ID); err != nil {
+	if decoded["host"] != "from-host" || decoded["value"] != float64(42) {
+		t.Fatalf("unexpected output: %s", completed.Output.Content)
+	}
+
+	if err := execution.Close(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if err := env.client.ReleaseExecution(context.Background(), execution.ID); err != nil {
-		t.Fatalf("idempotent execution release failed: %v", err)
+	if err := execution.Close(context.Background()); err != nil {
+		t.Fatalf("repeated execution close changed its result: %v", err)
 	}
-	if err := env.client.ReleasePlan(context.Background(), plan.ID); err != nil {
+
+	if err := plan.Close(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func TestCompilationDiagnosticsAndConnectionIsolation(t *testing.T) {
+func TestCompilationDiagnosticsAndHandleOwnership(t *testing.T) {
 	env := newIntegrationEnv(t)
 	_, err := env.client.Compile(context.Background(), client.Source{Identity: "broken.fql", Content: "RETURN ("}, client.CompileOptions{})
 	var wireErr *client.Error
 	if !errors.As(err, &wireErr) || wireErr.Category != client.ErrorCompilation || wireErr.Code != codes.InvalidArgument {
 		t.Fatalf("unexpected compilation error: %#v", err)
 	}
+
 	if len(wireErr.Diagnostics) == 0 || wireErr.Diagnostics[0].SourceIdentity != "broken.fql" || len(wireErr.Diagnostics[0].Spans) == 0 {
 		t.Fatalf("missing structured diagnostics: %#v", wireErr)
 	}
@@ -186,16 +224,28 @@ func TestCompilationDiagnosticsAndConnectionIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = other.Close(context.Background()) })
-	_, err = other.Execute(context.Background(), plan.ID, nil, client.ExecuteOptions{})
-	if !errors.As(err, &wireErr) || wireErr.Category != client.ErrorPlanNotFound || wireErr.ResourceID != string(plan.ID) {
-		t.Fatalf("cross-connection plan was not concealed: %#v", err)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := other.Close(ctx); err != nil {
+			t.Errorf("secondary client cleanup failed: %v", err)
+		}
+	})
+	if err := other.Close(context.Background()); err != nil {
+		t.Fatal(err)
 	}
-	if err := other.ReleasePlan(context.Background(), plan.ID); !errors.As(err, &wireErr) || wireErr.Category != client.ErrorPlanNotFound {
-		t.Fatalf("cross-connection release was not concealed: %#v", err)
+
+	execution, err := plan.Execute(context.Background(), nil, client.ExecuteOptions{})
+	if err != nil {
+		t.Fatalf("plan did not remain bound to its originating client: %v", err)
 	}
-	if err := env.client.ReleasePlan(context.Background(), client.PlanID("not-a-uuid")); !errors.As(err, &wireErr) || wireErr.Category != client.ErrorInvalidRequest {
-		t.Fatalf("malformed ID was not rejected: %#v", err)
+
+	if err := execution.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := plan.Close(context.Background()); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -213,11 +263,11 @@ func TestExecutionCancellationIsATerminalEvent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	execution, err := env.client.Execute(context.Background(), plan.ID, nil, client.ExecuteOptions{})
+	execution, err := plan.Execute(context.Background(), nil, client.ExecuteOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	events, err := env.client.WatchExecution(context.Background(), execution.ID)
+	events, err := execution.Watch(testContext(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -226,20 +276,70 @@ func TestExecutionCancellationIsATerminalEvent(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("host function did not start")
 	}
-	if _, err := env.client.CancelExecution(context.Background(), execution.ID); err != nil {
+
+	if err := execution.Cancel(context.Background()); err != nil {
 		t.Fatal(err)
 	}
+
 	for {
 		event, recvErr := events.Recv()
 		if recvErr != nil {
 			t.Fatal(recvErr)
 		}
+
 		if event.Kind == client.ExecutionEventCancelled {
-			if event.Execution.State != client.ExecutionCancelled {
-				t.Fatalf("unexpected cancellation snapshot: %#v", event.Execution)
+			if event.Snapshot.State != client.ExecutionCancelled {
+				t.Fatalf("unexpected cancellation snapshot: %#v", event.Snapshot)
 			}
+
 			break
 		}
+	}
+
+	if _, err := execution.Wait(testContext(t)); !errors.Is(err, client.ErrExecutionCancelled) || errors.Is(err, context.Canceled) {
+		t.Fatalf("Wait did not preserve remote cancellation semantics: %v", err)
+	}
+}
+
+func TestConvenienceExecutionAPIs(t *testing.T) {
+	env := newIntegrationEnv(t)
+
+	output, err := env.client.Run(
+		testContext(t),
+		client.Source{Content: "RETURN @value"},
+		client.Parameters{"value": "client"},
+		client.RunOptions{Execute: client.ExecuteOptions{OutputContentType: "application/json"}},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var clientValue string
+	if err := json.Unmarshal(output.Content, &clientValue); err != nil || clientValue != "client" || output.ContentType != "application/json" {
+		t.Fatalf("unexpected Client.Run output: %q, %v", output.Content, err)
+	}
+
+	plan, err := env.client.Compile(testContext(t), client.Source{Content: "RETURN @value"}, client.CompileOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := plan.Run(testContext(t), client.Parameters{"value": "first"}, client.ExecuteOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := plan.Run(testContext(t), client.Parameters{"value": "second"}, client.ExecuteOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var firstValue string
+	if err := json.Unmarshal(first.Content, &firstValue); err != nil || firstValue != "first" {
+		t.Fatalf("unexpected first Plan.Run output: %q, %v", first.Content, err)
+	}
+	var secondValue string
+	if err := json.Unmarshal(second.Content, &secondValue); err != nil || secondValue != "second" {
+		t.Fatalf("unexpected second Plan.Run output: %q, %v", second.Content, err)
+	}
+	if err := plan.Close(testContext(t)); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -251,29 +351,32 @@ func TestConcurrentExecutionsShareAPlan(t *testing.T) {
 	}
 	const count = 24
 	start := make(chan struct{})
+	watchCtx := testContext(t)
 	errs := make(chan error, count)
 	for index := range count {
 		go func(value int) {
 			<-start
-			execution, executeErr := env.client.Execute(context.Background(), plan.ID, client.Parameters{"value": value}, client.ExecuteOptions{})
+			execution, executeErr := plan.Execute(context.Background(), client.Parameters{"value": value}, client.ExecuteOptions{})
 			if executeErr != nil {
 				errs <- executeErr
 				return
 			}
-			events, watchErr := env.client.WatchExecution(context.Background(), execution.ID)
+			events, watchErr := execution.Watch(watchCtx)
 			if watchErr != nil {
 				errs <- watchErr
 				return
 			}
+
 			for {
 				event, receiveErr := events.Recv()
 				if receiveErr != nil {
 					errs <- receiveErr
 					return
 				}
+
 				if event.Kind == client.ExecutionEventCompleted {
 					var decoded int
-					if jsonErr := json.Unmarshal(event.Execution.Output.Data, &decoded); jsonErr != nil || decoded != value {
+					if jsonErr := json.Unmarshal(event.Snapshot.Output.Content, &decoded); jsonErr != nil || decoded != value {
 						errs <- errors.New("concurrent execution returned the wrong output")
 						return
 					}
@@ -297,24 +400,36 @@ func TestExecutionFailureAndPlanReleaseCascade(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	execution, err := env.client.Execute(context.Background(), failingPlan.ID, nil, client.ExecuteOptions{})
+	execution, err := failingPlan.Execute(context.Background(), nil, client.ExecuteOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	events, err := env.client.WatchExecution(context.Background(), execution.ID)
+	events, err := execution.Watch(testContext(t))
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	for {
 		event, recvErr := events.Recv()
 		if recvErr != nil {
 			t.Fatal(recvErr)
 		}
+
 		if event.Kind == client.ExecutionEventFailed {
-			if event.Execution.Failure == nil || len(event.Execution.Failure.Diagnostics) == 0 {
-				t.Fatalf("execution failure lost diagnostics: %#v", event.Execution)
+			if event.Snapshot.Failure == nil || len(event.Snapshot.Failure.Diagnostics) == 0 {
+				t.Fatalf("execution failure lost diagnostics: %#v", event.Snapshot)
 			}
+
 			break
+		}
+	}
+
+	if output, waitErr := execution.Wait(testContext(t)); waitErr == nil || output.Content != nil {
+		t.Fatalf("unexpected failed Wait result: %#v, %v", output, waitErr)
+	} else {
+		var failure *client.Failure
+		if !errors.As(waitErr, &failure) || failure.Category != client.ErrorExecution || len(failure.Diagnostics) == 0 {
+			t.Fatalf("Wait lost the structured terminal failure: %#v", waitErr)
 		}
 	}
 
@@ -329,18 +444,23 @@ func TestExecutionFailureAndPlanReleaseCascade(t *testing.T) {
 			return ferretruntime.None, ctx.Err()
 		})
 	}))
-	plan, err := blockingEnv.client.Compile(context.Background(), client.Source{Content: "RETURN CASCADE_BLOCK()"}, client.CompileOptions{})
+	plan, err := blockingEnv.client.Compile(context.Background(), client.Source{Content: "RETURN CASCADE_BLOCK()"}, client.CompileOptions{Debuggable: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	running, err := blockingEnv.client.Execute(context.Background(), plan.ID, nil, client.ExecuteOptions{})
+	debugSession, err := plan.NewDebugSession(context.Background(), nil, client.DebugSessionOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	runningEvents, err := blockingEnv.client.WatchExecution(context.Background(), running.ID)
+	running, err := plan.Execute(context.Background(), nil, client.ExecuteOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
+	runningEvents, err := running.Watch(testContext(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	if event, err := runningEvents.Recv(); err != nil || event.Kind != client.ExecutionEventStarted {
 		t.Fatalf("execution watcher did not attach before cascade: %#v, %v", event, err)
 	}
@@ -349,7 +469,8 @@ func TestExecutionFailureAndPlanReleaseCascade(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("cascaded execution did not start")
 	}
-	if err := blockingEnv.client.ReleasePlan(context.Background(), plan.ID); err != nil {
+
+	if err := plan.Close(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -357,17 +478,114 @@ func TestExecutionFailureAndPlanReleaseCascade(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("plan release did not settle its execution")
 	}
+
 	for {
 		event, recvErr := runningEvents.Recv()
 		if recvErr != nil {
 			t.Fatal(recvErr)
 		}
+
 		if event.Kind == client.ExecutionEventCancelled {
 			break
 		}
 	}
-	if err := blockingEnv.client.ReleasePlan(context.Background(), plan.ID); err != nil {
-		t.Fatalf("repeated plan release failed: %v", err)
+	if err := debugSession.Close(context.Background()); err != nil {
+		t.Fatalf("debug close did not observe successful plan cleanup: %v", err)
+	}
+
+	if err := running.Close(context.Background()); err != nil {
+		t.Fatalf("execution close did not observe successful plan cleanup: %v", err)
+	}
+
+	if err := plan.Close(context.Background()); err != nil {
+		t.Fatalf("repeated plan close changed its result: %v", err)
+	}
+}
+
+func TestFailureCategoriesAreStructuredAndSanitized(t *testing.T) {
+	env := newIntegrationEnv(t, ferret.WithSessionCloseHook(func() error {
+		return errors.New("host secret must not cross Wire")
+	}))
+	tests := []struct {
+		name        string
+		content     string
+		contentType string
+		category    client.ErrorCategory
+		message     string
+	}{
+		{name: "unsupported codec", content: "RETURN 1", contentType: "application/x-missing", category: client.ErrorUnsupported, message: "output content type is not supported"},
+		{name: "internal failure", content: "RETURN 1", category: client.ErrorInternal, message: "internal runtime failure"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			plan, err := env.client.Compile(context.Background(), client.Source{Content: test.content}, client.CompileOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			execution, err := plan.Execute(context.Background(), nil, client.ExecuteOptions{OutputContentType: test.contentType})
+			if err != nil {
+				t.Fatal(err)
+			}
+			events, err := execution.Watch(testContext(t))
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			for {
+				event, recvErr := events.Recv()
+				if recvErr != nil {
+					t.Fatal(recvErr)
+				}
+
+				if event.Kind != client.ExecutionEventFailed {
+					continue
+				}
+
+				if event.Snapshot.Failure == nil || event.Snapshot.Failure.Category != test.category || event.Snapshot.Failure.Message != test.message {
+					t.Fatalf("unexpected structured failure: %#v", event.Snapshot.Failure)
+				}
+
+				break
+			}
+		})
+	}
+
+	debugEnv := newIntegrationEnv(t)
+	debugPlan, err := debugEnv.client.Compile(context.Background(), client.Source{Content: "RETURN 1"}, client.CompileOptions{Debuggable: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	debugSession, err := debugPlan.NewDebugSession(context.Background(), nil, client.DebugSessionOptions{
+		OutputContentType: "application/x-missing",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	debugEvents, err := debugSession.Watch(testContext(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := debugSession.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	waitDebugStop(t, debugEvents)
+	if err := debugSession.Continue(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for {
+		event, recvErr := debugEvents.Recv()
+		if recvErr != nil {
+			t.Fatal(recvErr)
+		}
+		if event.Kind != client.DebugEventFailed {
+			continue
+		}
+		if event.Snapshot.Failure == nil || event.Snapshot.Failure.Category != client.ErrorUnsupported || event.Snapshot.Failure.Message != "output content type is not supported" {
+			t.Fatalf("unexpected debug output codec failure: %#v", event.Snapshot.Failure)
+		}
+
+		break
 	}
 }
 
@@ -379,62 +597,93 @@ func TestDebugPreStartBreakpointsInspectionAndCompletion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	session, err := env.client.OpenDebugSession(context.Background(), plan.ID, map[string]any{"input": 2}, client.DebugSessionOptions{})
+	session, err := plan.NewDebugSession(context.Background(), map[string]any{"input": 2}, client.DebugSessionOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if session.State != client.DebugCreated {
-		t.Fatalf("unexpected pre-start state: %#v", session)
-	}
-	breakpoints, err := env.client.SetBreakpoints(context.Background(), session.ID, "debug.fql", []client.BreakpointLocation{{Line: 2, Column: 1}})
+
+	breakpoint, err := session.SetBreakpoint(context.Background(), client.Location{File: "debug.fql", Line: 2, Column: 0})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(breakpoints) != 1 || !breakpoints[0].Verified || breakpoints[0].Line != 3 {
-		t.Fatalf("unexpected breakpoint binding: %#v", breakpoints)
+
+	if !breakpoint.Verified || breakpoint.Line != 3 || breakpoint.RequestedColumn != 0 {
+		t.Fatalf("unexpected breakpoint binding: %#v", breakpoint)
 	}
-	events, err := env.client.WatchDebug(context.Background(), session.ID)
+	events, err := session.Watch(testContext(t))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := env.client.StartDebug(context.Background(), session.ID); err != nil {
+
+	if err := session.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	entry := waitDebugStop(t, events)
 	if entry.StopReason != client.DebugStopEntry || entry.Location == nil || entry.Location.Line != 1 {
 		t.Fatalf("unexpected entry stop: %#v", entry)
 	}
-	if _, err := env.client.Continue(context.Background(), session.ID); err != nil {
+
+	if err := session.Continue(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	stopped := waitDebugStop(t, events)
 	if stopped.StopReason != client.DebugStopBreakpoint || len(stopped.HitBreakpointIDs) != 1 {
 		t.Fatalf("unexpected breakpoint stop: %#v", stopped)
 	}
-	frames, err := env.client.StackTrace(context.Background(), session.ID)
+	frames, err := session.Frames(context.Background())
 	if err != nil || len(frames) == 0 || frames[0].Index != 0 {
 		t.Fatalf("unexpected frames: %#v, %v", frames, err)
 	}
-	scopes, err := env.client.Scopes(context.Background(), session.ID, 0)
-	if err != nil || len(scopes) != 2 {
-		t.Fatalf("unexpected scopes: %#v, %v", scopes, err)
+	locals, err := session.FrameLocals(context.Background(), 0)
+	if err != nil || len(locals) == 0 {
+		t.Fatalf("unexpected frame locals: %#v, %v", locals, err)
 	}
-	value, err := env.client.Evaluate(context.Background(), session.ID, 0, "x + @input")
+	parameterFound := false
+	for _, variable := range locals {
+		if variable.Name == "@input" && variable.Parameter {
+			parameterFound = true
+		}
+	}
+
+	if !parameterFound {
+		t.Fatalf("frame parameters were not marked: %#v", locals)
+	}
+	var wireErr *client.Error
+	if _, err := session.FrameLocals(context.Background(), 999); !errors.As(err, &wireErr) || wireErr.Category != client.ErrorInvalidRequest {
+		t.Fatalf("missing frame was not mapped as an invalid request: %v", err)
+	}
+	value, err := session.EvaluateFrame(context.Background(), 0, "x + @input")
 	if err != nil || value.Display != "3" {
 		t.Fatalf("unexpected evaluation: %#v, %v", value, err)
 	}
-	if _, err := env.client.Continue(context.Background(), session.ID); err != nil {
+
+	if err := session.Pause(context.Background()); !errors.As(err, &wireErr) || wireErr.Category != client.ErrorInvalidState {
+		t.Fatalf("pause while stopped did not fail consistently: %v", err)
+	}
+
+	if err := session.DeleteBreakpoint(context.Background(), breakpoint.ID); err != nil {
 		t.Fatal(err)
 	}
+
+	if err := session.DeleteBreakpoint(context.Background(), breakpoint.ID); !errors.As(err, &wireErr) || wireErr.Category != client.ErrorBreakpointNotFound || wireErr.ResourceID == "" {
+		t.Fatalf("missing breakpoint was not mapped with resource metadata: %v", err)
+	}
+
+	if err := session.Continue(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
 	for {
 		event, recvErr := events.Recv()
 		if recvErr != nil {
 			t.Fatal(recvErr)
 		}
+
 		if event.Kind == client.DebugEventCompleted {
-			if event.Session.Output == nil || string(event.Session.Output.Data) != "3" {
-				t.Fatalf("unexpected debug output: %#v", event.Session.Output)
+			if event.Snapshot.Output == nil || string(event.Snapshot.Output.Content) != "3" {
+				t.Fatalf("unexpected debug output: %#v", event.Snapshot.Output)
 			}
+
 			break
 		}
 	}
@@ -451,57 +700,65 @@ RETURN x`}, client.CompileOptions{Debuggable: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	session, err := env.client.OpenDebugSession(context.Background(), udfPlan.ID, nil, client.DebugSessionOptions{})
+	session, err := udfPlan.NewDebugSession(context.Background(), nil, client.DebugSessionOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	events, err := env.client.WatchDebug(context.Background(), session.ID)
+	events, err := session.Watch(testContext(t))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := env.client.StartDebug(context.Background(), session.ID); err != nil {
+
+	if err := session.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
+
 	if entry := waitDebugStop(t, events); entry.Location == nil || entry.Location.Line != 5 {
 		t.Fatalf("unexpected UDF entry: %#v", entry)
 	}
-	if _, err := env.client.StepIn(context.Background(), session.ID); err != nil {
+
+	if err := session.Step(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	inside := waitDebugStop(t, events)
 	if inside.Location == nil || inside.Location.Line != 2 {
 		t.Fatalf("step-in did not enter UDF: %#v", inside)
 	}
-	frames, err := env.client.StackTrace(context.Background(), session.ID)
+	frames, err := session.Frames(context.Background())
 	if err != nil || len(frames) != 2 {
 		t.Fatalf("unexpected UDF frames: %#v, %v", frames, err)
 	}
-	if _, err := env.client.StepOut(context.Background(), session.ID); err != nil {
+
+	if err := session.Out(context.Background()); err != nil {
 		t.Fatal(err)
 	}
+
 	if outside := waitDebugStop(t, events); outside.Location == nil || outside.Location.Line != 6 {
 		t.Fatalf("step-out did not return to main: %#v", outside)
 	}
 
-	nextSession, err := env.client.OpenDebugSession(context.Background(), udfPlan.ID, nil, client.DebugSessionOptions{})
+	nextSession, err := udfPlan.NewDebugSession(context.Background(), nil, client.DebugSessionOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	nextEvents, err := env.client.WatchDebug(context.Background(), nextSession.ID)
+	nextEvents, err := nextSession.Watch(testContext(t))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := env.client.StartDebug(context.Background(), nextSession.ID); err != nil {
+
+	if err := nextSession.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	waitDebugStop(t, nextEvents)
-	if _, err := env.client.Next(context.Background(), nextSession.ID); err != nil {
+	if err := nextSession.Next(context.Background()); err != nil {
 		t.Fatal(err)
 	}
+
 	if stopped := waitDebugStop(t, nextEvents); stopped.Location == nil || stopped.Location.Line != 6 {
 		t.Fatalf("next did not step over UDF: %#v", stopped)
 	}
-	if _, err := env.client.StopDebug(context.Background(), nextSession.ID); err != nil {
+
+	if err := nextSession.Stop(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -509,45 +766,47 @@ RETURN x`}, client.CompileOptions{Debuggable: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	objectSession, err := env.client.OpenDebugSession(context.Background(), objectPlan.ID, nil, client.DebugSessionOptions{})
+	objectSession, err := objectPlan.NewDebugSession(context.Background(), nil, client.DebugSessionOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	objectEvents, err := env.client.WatchDebug(context.Background(), objectSession.ID)
+	objectEvents, err := objectSession.Watch(testContext(t))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := env.client.StartDebug(context.Background(), objectSession.ID); err != nil {
+
+	if err := objectSession.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	waitDebugStop(t, objectEvents)
-	if _, err := env.client.Next(context.Background(), objectSession.ID); err != nil {
+	if err := objectSession.Next(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	waitDebugStop(t, objectEvents)
-	scopes, err := env.client.Scopes(context.Background(), objectSession.ID, 0)
+	locals, err := objectSession.FrameLocals(context.Background(), 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var reference uint64
-	for _, scope := range scopes {
-		for _, variable := range scope.Variables {
-			if variable.Name == "obj" {
-				reference = variable.Value.Reference
-			}
+	for _, variable := range locals {
+		if variable.Name == "obj" {
+			reference = variable.Value.Reference
 		}
 	}
+
 	if reference == 0 {
-		t.Fatalf("expandable object reference was not exposed: %#v", scopes)
+		t.Fatalf("expandable object reference was not exposed: %#v", locals)
 	}
-	if variables, err := env.client.Variables(context.Background(), objectSession.ID, reference); err != nil || len(variables) != 1 {
+
+	if variables, err := objectSession.Variables(context.Background(), reference); err != nil || len(variables) != 1 {
 		t.Fatalf("object expansion failed: %#v, %v", variables, err)
 	}
-	if _, err := env.client.Next(context.Background(), objectSession.ID); err != nil {
+
+	if err := objectSession.Next(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	waitDebugStop(t, objectEvents)
-	_, err = env.client.Variables(context.Background(), objectSession.ID, reference)
+	_, err = objectSession.Variables(context.Background(), reference)
 	var wireErr *client.Error
 	if !errors.As(err, &wireErr) || wireErr.Code != codes.NotFound || wireErr.Category != client.ErrorValueReferenceNotFound {
 		t.Fatalf("stale value reference was not mapped to NotFound: %#v", err)
@@ -560,33 +819,37 @@ func TestDebugRuntimeErrorStopAndTermination(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	session, err := env.client.OpenDebugSession(context.Background(), plan.ID, nil, client.DebugSessionOptions{})
+	session, err := plan.NewDebugSession(context.Background(), nil, client.DebugSessionOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	events, err := env.client.WatchDebug(context.Background(), session.ID)
+	events, err := session.Watch(testContext(t))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := env.client.StartDebug(context.Background(), session.ID); err != nil {
+
+	if err := session.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	waitDebugStop(t, events)
-	if _, err := env.client.Continue(context.Background(), session.ID); err != nil {
+	if err := session.Continue(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	stopped := waitDebugStop(t, events)
 	if stopped.StopReason != client.DebugStopRuntimeError || stopped.Failure == nil || len(stopped.Failure.Diagnostics) == 0 {
 		t.Fatalf("runtime error was not preserved as an inspectable stop: %#v", stopped)
 	}
-	if _, err := env.client.Continue(context.Background(), session.ID); err != nil {
+
+	if err := session.Continue(context.Background()); err != nil {
 		t.Fatal(err)
 	}
+
 	for {
 		event, recvErr := events.Recv()
 		if recvErr != nil {
 			t.Fatal(recvErr)
 		}
+
 		if event.Kind == client.DebugEventFailed || event.Kind == client.DebugEventTerminated {
 			break
 		}
@@ -594,44 +857,101 @@ func TestDebugRuntimeErrorStopAndTermination(t *testing.T) {
 }
 
 func TestDebugPause(t *testing.T) {
-	env := newIntegrationEnv(t)
-	plan, err := env.client.Compile(context.Background(), client.Source{Identity: "pause.fql", Content: "LET obj = {b: 2, a: 1}\nRETURN obj"}, client.CompileOptions{Debuggable: true})
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
+	env := newIntegrationEnv(t, ferret.WithFunctionsRegistrar(func(namespace ferretruntime.Namespace) {
+		namespace.Function().A0().Add("PAUSE_GATE", func(ctx context.Context) (ferretruntime.Value, error) {
+			close(entered)
+			select {
+			case <-release:
+				return ferretruntime.NewInt(1), nil
+			case <-ctx.Done():
+				return ferretruntime.None, ctx.Err()
+			}
+		})
+	}))
+	plan, err := env.client.Compile(context.Background(), client.Source{Identity: "pause.fql", Content: "LET value = PAUSE_GATE()\nRETURN value"}, client.CompileOptions{Debuggable: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	session, err := env.client.OpenDebugSession(context.Background(), plan.ID, nil, client.DebugSessionOptions{})
+	session, err := plan.NewDebugSession(context.Background(), nil, client.DebugSessionOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	events, err := env.client.WatchDebug(context.Background(), session.ID)
+	events, err := session.Watch(testContext(t))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := env.client.StartDebug(context.Background(), session.ID); err != nil {
+
+	if err := session.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	waitDebugStop(t, events)
-	if _, err := env.client.Pause(context.Background(), session.ID); err != nil {
+	if err := session.Continue(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := env.client.Continue(context.Background(), session.ID); err != nil {
+	select {
+	case <-entered:
+	case <-time.After(10 * time.Second):
+		t.Fatal("debug execution did not enter the host function")
+	}
+
+	if err := session.Pause(context.Background()); err != nil {
 		t.Fatal(err)
 	}
+	releaseOnce.Do(func() { close(release) })
 	stopped := waitDebugStop(t, events)
 	if stopped.StopReason != client.DebugStopPause {
 		t.Fatalf("unexpected pause stop: %#v", stopped)
 	}
 }
 
-func waitDebugStop(t *testing.T, events *client.DebugEvents) client.DebugSession {
+func TestEvaluateFrameRejectsCancelledRequestWithoutChangingState(t *testing.T) {
+	env := newIntegrationEnv(t)
+	plan, err := env.client.Compile(context.Background(), client.Source{
+		Identity: "evaluate.fql", Content: "LET value = 1\nRETURN value",
+	}, client.CompileOptions{Debuggable: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := plan.NewDebugSession(context.Background(), nil, client.DebugSessionOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	events, err := session.Watch(testContext(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := session.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	waitDebugStop(t, events)
+
+	evaluateCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	var wireErr *client.Error
+	if _, err := session.EvaluateFrame(evaluateCtx, 0, "value + 1"); !errors.As(err, &wireErr) || wireErr.Category != client.ErrorCancelled {
+		t.Fatalf("evaluation cancellation was not mapped: %v", err)
+	}
+
+	if frames, err := session.Frames(context.Background()); err != nil || len(frames) == 0 {
+		t.Fatalf("cancelled evaluation changed the stopped session: %#v, %v", frames, err)
+	}
+}
+
+func waitDebugStop(t *testing.T, events *client.DebugEvents) client.DebugSessionSnapshot {
 	t.Helper()
 	for {
 		event, err := events.Recv()
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		if event.Kind == client.DebugEventStopped {
-			return event.Session
+			return event.Snapshot
 		}
 	}
 }
@@ -662,12 +982,44 @@ func TestInboundMessageLimitAndBorrowedEngine(t *testing.T) {
 	if err := env.client.Close(shutdownCtx); err != nil {
 		t.Fatal(err)
 	}
+
 	if err := env.server.Shutdown(shutdownCtx); err != nil {
 		t.Fatal(err)
 	}
 	output, err := env.engine.Run(context.Background(), ferretSource("RETURN 7"))
 	if err != nil || string(output.Content) != "7" {
 		t.Fatalf("server closed the borrowed engine: %q, %v", output.Content, err)
+	}
+}
+
+func TestOutboundMessageLimit(t *testing.T) {
+	limits := wire.DefaultServerLimits()
+	limits.MaxOutboundMessageBytes = 1024
+	env := newIntegrationEnvWithServerOptions(t, []wire.ServerOption{wire.WithServerLimits(limits)})
+	plan, err := env.client.Compile(context.Background(), client.Source{
+		Content: `RETURN "` + strings.Repeat("x", 2048) + `"`,
+	}, client.CompileOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	execution, err := plan.Execute(context.Background(), nil, client.ExecuteOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	events, err := execution.Watch(testContext(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for {
+		_, err = events.Recv()
+		if err != nil {
+			break
+		}
+	}
+	var wireErr *client.Error
+	if !errors.As(err, &wireErr) || wireErr.Code != codes.ResourceExhausted {
+		t.Fatalf("unexpected oversized outbound message result: %v", err)
 	}
 }
 

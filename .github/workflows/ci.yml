@@ -17,23 +17,35 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
           go-version: 1.25.x
           cache: true
-      - run: go test ./...
-      - run: go vet ./...
-      - run: go build ./...
+      - run: make check-fmt
+      - run: make check-tidy
+      - run: make vet
+      - run: make test
+      - run: make build
 
   race-and-proto:
     name: Race and protocol
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
           go-version: 1.25.x
           cache: true
-      - run: go test -race ./...
+      - run: make test-race
       - run: make proto-lint
       - run: make check-generate
+      # PR #1 establishes the unreleased v1 protocol baseline. Every later PR
+      # compares its protocol against the fetched base branch.
+      - if: github.event_name == 'pull_request' && github.event.pull_request.number != 1
+        run: git fetch origin "+refs/heads/${{ github.base_ref }}:refs/heads/${{ github.base_ref }}"
+      - if: github.event_name == 'pull_request' && github.event.pull_request.number != 1
+        run: make proto-breaking BUF_BREAKING_AGAINST=".git#branch=${{ github.base_ref }}"
