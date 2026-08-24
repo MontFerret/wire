@@ -29,6 +29,45 @@ When generated bindings disagree with protobuf source, protobuf source is
 authoritative. When descriptive documentation disagrees with current source or
 tests, verify the intended contract and correct the stale documentation.
 
+## Architecture Documentation
+
+Keep architectural and design documentation in the repository's dedicated `docs/` directory.
+
+`AGENTS.md` must remain concise and focused on contributor/agent instructions. Do not use it as the primary location for detailed architecture documentation, protocol design explanations, lifecycle descriptions, or design rationale.
+
+When architectural knowledge needs to be documented:
+
+1. Create or update an appropriate document under `docs/`.
+2. Organize documents by architectural concern where useful, for example:
+
+```text
+docs/
+  architecture.md
+  protocol.md
+  client.md
+  lifecycle.md
+```
+
+Do not mechanically create all of these files; use only the structure justified by the current documentation.
+
+3. Keep `AGENTS.md` limited to short architectural guidance and references to the authoritative documents, for example:
+
+```markdown
+## Architecture
+
+Architecture and design documentation lives under [`docs/`](docs/).
+
+Before making architectural changes, read the relevant documents there and update them when the change modifies documented behavior or design decisions.
+```
+
+4. Treat documentation under `docs/` as part of the implementation. When a change affects a documented architectural contract, update the relevant document in the same change.
+
+5. Avoid duplicating detailed architectural information between `AGENTS.md` and `docs/`. `AGENTS.md` should point to the authoritative documentation rather than reproduce it.
+
+As part of this task, inspect the current `AGENTS.md`. If detailed Wire architecture documentation has already accumulated there, move it into appropriately scoped documents under `docs/` and replace it with concise references.
+
+Apply this convention to future architectural documentation as well.
+
 ## Architecture and ownership
 
 The fundamental dependency direction is:
@@ -509,16 +548,24 @@ Do not use self-review to justify speculative redesign or unrelated cleanup.
 ## CI and documentation synchronization
 
 CI uses the Makefile's canonical targets on Linux, macOS, and Windows. Linux
-also runs race, protobuf lint, generation consistency, and pull-request Buf
-breaking checks against the fetched base branch. Keep CI orchestration in the
-workflow and command composition in the Makefile.
+also runs race detection, protobuf linting, generation consistency checks, and
+pull-request Buf breaking checks against the fetched base branch. Keep CI
+orchestration in the workflow and command composition in the Makefile.
 
-Documentation is part of implementation. Update `README.md` and protobuf
-comments when changing protocol behavior, lifecycle semantics, public APIs,
-security assumptions, supported transports, or development workflow. Avoid
-documentation churn for behavior-neutral internal changes. If a public change
-requires documentation in another Ferret ecosystem repository that is not in
-scope or available, identify the exact follow-up in the final report.
+Documentation is part of implementation. Keep detailed architecture, protocol
+design, lifecycle semantics, security considerations, and other design
+documentation under `docs/`. Keep `AGENTS.md` concise and use it to reference
+the relevant documents rather than duplicating their contents.
+
+Update the appropriate documentation whenever a change affects documented
+architecture, protocol behavior, lifecycle semantics, public APIs, security
+assumptions, supported transports, or development workflow. Update `README.md`
+when the change affects its user-facing overview, setup, or examples, and keep
+protobuf comments synchronized with the protocol contract they describe.
+
+Avoid documentation churn for behavior-neutral internal changes. If a public
+change requires documentation in another Ferret ecosystem repository that is
+not in scope or available, identify the exact follow-up in the final report.
 
 ## Scope discipline
 
