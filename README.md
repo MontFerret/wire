@@ -19,23 +19,25 @@ host application                         client application
         ├── Plans
         │    ├── Executions
         │    └── Debug sessions
-        └── fixed-buffer watchers
+        └── bounded watch streams
 ```
 
 `NewServer` only constructs state. It does not listen, dial, inspect the environment, or close the supplied engine. `Serve` is the only operation that accepts a listener, and the caller retains responsibility for the endpoint.
 
-Every `Connect` server stream creates one logical ownership scope. It is deliberately independent of the physical HTTP/2 connection: several logical connections can share one `grpc.ClientConn`, but their IDs and resources remain isolated. Cancelling the Connect stream or calling `CloseConnection` cancels and settles debug sessions and executions before releasing plans. Release calls are idempotent; concurrent callers wait for the same retained cleanup result. Cancelling one waiter does not abandon committed cleanup.
+Every `Connect` server stream creates one logical ownership scope. It is deliberately independent of the physical HTTP/2 connection: several logical connections can share one `grpc.ClientConn`, but their IDs and resources remain isolated. Cancelling the Connect stream or calling `CloseConnection` first cancels and waits for pending creation, then settles debug sessions, executions, and plans in that order. Concurrent callers that observe the same in-flight release wait for its retained result. Once cleanup completes, the ID is stale and returns the corresponding structured not-found error. Cancelling one waiter does not abandon committed cleanup.
 
-Unary execution and debug resume calls publish work before returning. Once published, work runs under the Connect stream context rather than the unary request context. Cancelling a watch only detaches that watcher. A watcher first receives the current snapshot, then future events through a buffer of eight; a lagging watcher is detached with `ResourceExhausted` and cannot block the underlying work.
+Unary execution and debug resume calls publish work before returning. Once published, work runs under the logical Connect lifecycle. Compilation, debug-session construction, and frame evaluation combine unary cancellation with logical lifecycle cancellation. Cancelling a watch only detaches that watcher. A watcher first receives the current snapshot, then future events through a buffer of eight; a lagging watcher is detached with `ResourceExhausted` and cannot block the underlying work. Its watcher slot remains occupied until the stream handler exits.
 
 ## Protocol contracts
 
 - Compilation returns opaque UUIDs, declared parameters, debug capability, and Ferret diagnostics. Diagnostic locations are labeled, half-open UTF-8 byte spans, not LSP ranges.
 - Parameter values use an explicit protobuf oneof: none, boolean, signed 64-bit integer, double, string, binary, duration nanoseconds, RFC3339Nano datetime, regexp, array, or string-keyed object. Missing variants, malformed values, and nesting beyond 64 levels are rejected.
-- Execution and debug completion carry Ferret's canonical output contract unchanged: content type plus encoded bytes. The current Ferret APIs do not expose intermediate runtime or debugger output, so Wire emits terminal output only even though v1 reserves intermediate output events.
-- Debug sessions are created before execution so breakpoints can be replaced deterministically. Source lines and columns are 1-based, frame indices are zero-based, and expandable value references become stale after every resume.
+- Execution and debug completion carry Ferret's canonical output contract unchanged: `content_type` plus encoded `content` bytes. Wire does not intercept internal Ferret runtime values and emits output only in the ordered terminal snapshot.
+- Debug RPCs follow Ferret concepts: singular `SetBreakpoint` and `DeleteBreakpoint`, `Frames`, `FrameLocals`, `Step`, `Out`, `Variables`, and `EvaluateFrame`. Source lines are 1-based, breakpoint column `0` means Ferret's unspecified column, frame indices are zero-based, variables carry a parameter marker, and expandable value references become stale after every resume.
 - Unary failures use normal gRPC codes and an attached `ferret.wire.v1.ErrorDetail`. Compilation errors include structured diagnostics. Execution and debug failures are terminal events so watchers observe one ordered outcome.
-- The server sets an explicit 4 MiB inbound gRPC message limit.
+- `ResourceExhausted` reports finite-cap violations, while missing breakpoints and other stale resources report structured not-found categories and resource metadata.
+
+`DefaultServerLimits` bounds client-controlled state to 64 logical connections; 128 plans and 128 executions per connection; 32 debug sessions per connection; 8 watchers per execution or debug session; 256 breakpoints per debug session; and 4 MiB for both inbound and outbound gRPC messages. Pending, active, and closing resources all count. Hosts may replace the complete positive limit set with `WithServerLimits`.
 
 The exact Ferret module version is read from Go build metadata. Development and replaced builds, whose dependency version is unavailable, fall back to `compiler.Version`.
 
@@ -119,7 +121,7 @@ for {
         log.Fatal(err)
     }
     if event.Kind == client.ExecutionEventCompleted {
-        fmt.Printf("%s: %s\n", event.Execution.Output.ContentType, event.Execution.Output.Data)
+        fmt.Printf("%s: %s\n", event.Execution.Output.ContentType, event.Execution.Output.Content)
         break
     }
 }
@@ -129,7 +131,7 @@ for {
 
 Wire supplies no default endpoint, authentication, authorization, TLS policy, TCP listener, named-pipe implementation, listener discovery, or externally reachable binding. Callers must choose and secure the listener, authenticate peers where required, enforce filesystem permissions for local sockets, and decide which Ferret capabilities and host functions are safe for those peers. FQL source and parameters are trusted according to the host's policy; parameters may contain secrets and therefore require a confidential transport.
 
-Generic internal errors are sanitized and do not expose raw causes, panic values, filesystem paths, environment data, or host internals. Expected Ferret compilation/runtime diagnostics and the source identity supplied by the caller remain observable protocol data.
+Generic internal errors and cleanup panics are sanitized and do not expose raw causes, panic values, filesystem paths, environment data, or host internals. Expected Ferret compilation/runtime diagnostics and the source identity supplied by the caller remain observable protocol data. Server limits reduce accidental and hostile resource exhaustion, but hosts must still decide which engine capabilities are safe to expose.
 
 Windows named pipes and remote TCP/TLS can be added later by supplying ordinary `net.Listener` and gRPC dialer implementations. Transport choice does not change the logical connection or protocol semantics.
 
@@ -142,11 +144,17 @@ Ferret accepts a context at the engine compilation boundary, but compiler CPU wo
 ## Development
 
 ```sh
-make proto-lint       # Buf STANDARD lint
+make fmt              # format handwritten Go
+make check-fmt        # verify formatting without changing files
 make generate         # regenerate checked-in Go/gRPC bindings
 make check-generate   # fail when generation changes the checkout
-make test
+make proto-lint       # Buf STANDARD lint
+make proto-breaking BUF_BREAKING_AGAINST=.git#branch=main
+make check-tidy       # verify go.mod/go.sum without changing files
 make vet
+make test
+make test-race
+make build
 ```
 
-Tests use in-memory `bufconn` transports and direct lifecycle coverage. CI runs test, vet, and build on Linux, macOS, and Windows; Linux additionally runs the race detector and validates Buf lint and checked generation.
+Tests use in-memory `bufconn` transports and direct lifecycle coverage. CI invokes these Make targets on Linux, macOS, and Windows; Linux additionally runs the race detector, Buf lint, checked generation, and pull-request breaking checks against the fetched base branch.

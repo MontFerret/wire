@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"net"
-	"runtime/debug"
 	"sync"
 	"time"
 
@@ -15,44 +14,6 @@ import (
 	"github.com/MontFerret/wire/internal/lifecycle"
 	"google.golang.org/grpc"
 )
-
-const (
-	apiIdentity           = "ferret.wire.v1"
-	maxInboundMessageSize = 4 << 20
-
-	wireModulePath   = "github.com/MontFerret/wire"
-	ferretModulePath = "github.com/MontFerret/ferret/v2"
-)
-
-type RuntimeIdentity struct {
-	Name       string
-	Version    string
-	InstanceID string
-}
-
-type ServerOption interface {
-	apply(*serverOptions) error
-}
-
-type serverOptionFunc func(*serverOptions) error
-
-func (option serverOptionFunc) apply(options *serverOptions) error {
-	return option(options)
-}
-
-type serverOptions struct {
-	runtimeIdentity RuntimeIdentity
-}
-
-func WithRuntimeIdentity(identity RuntimeIdentity) ServerOption {
-	return serverOptionFunc(func(options *serverOptions) error {
-		if identity.Name == "" {
-			return errors.New("runtime identity name is required")
-		}
-		options.runtimeIdentity = identity
-		return nil
-	})
-}
 
 // Server hosts Ferret Wire over a caller-supplied listener. It borrows the
 // Engine passed to NewServer and never closes it.
@@ -65,12 +26,15 @@ type Server struct {
 	shutdown lifecycle.Close
 }
 
+// NewServer adapts a caller-configured Ferret engine without taking ownership
+// or creating a listener. Limits default to DefaultServerLimits.
 func NewServer(engine *ferret.Engine, options ...ServerOption) (*Server, error) {
-	configured := serverOptions{}
+	configured := serverOptions{limits: DefaultServerLimits()}
 	for _, option := range options {
 		if option == nil {
 			return nil, errors.New("server option must not be nil")
 		}
+
 		if err := option.apply(&configured); err != nil {
 			return nil, err
 		}
@@ -86,12 +50,21 @@ func NewServer(engine *ferret.Engine, options ...ServerOption) (*Server, error) 
 			InstanceID: configured.runtimeIdentity.InstanceID,
 		},
 	}
-	runtime, err := core.NewRuntime(engine, info)
+	runtime, err := core.NewRuntime(engine, info, core.Limits{
+		MaxConnections:                configured.limits.MaxConnections,
+		MaxPlansPerConnection:         configured.limits.MaxPlansPerConnection,
+		MaxExecutionsPerConnection:    configured.limits.MaxExecutionsPerConnection,
+		MaxDebugSessionsPerConnection: configured.limits.MaxDebugSessionsPerConnection,
+		MaxWatchersPerResource:        configured.limits.MaxWatchersPerResource,
+		MaxBreakpointsPerDebugSession: configured.limits.MaxBreakpointsPerDebugSession,
+	})
 	if err != nil {
 		return nil, err
 	}
+
 	grpcServer := grpc.NewServer(
-		grpc.MaxRecvMsgSize(maxInboundMessageSize),
+		grpc.MaxRecvMsgSize(configured.limits.MaxInboundMessageBytes),
+		grpc.MaxSendMsgSize(configured.limits.MaxOutboundMessageBytes),
 		grpc.UnaryInterceptor(grpcserver.UnaryRecoveryInterceptor),
 		grpc.StreamInterceptor(grpcserver.StreamRecoveryInterceptor),
 	)
@@ -100,38 +73,13 @@ func NewServer(engine *ferret.Engine, options ...ServerOption) (*Server, error) 
 	return &Server{grpcServer: grpcServer, runtime: runtime}, nil
 }
 
-func moduleVersion(path, fallback string) string {
-	info, ok := debug.ReadBuildInfo()
-	if !ok {
-		return fallback
-	}
-	if info.Main.Path == path && usableVersion(info.Main.Version) {
-		return info.Main.Version
-	}
-	for _, dependency := range info.Deps {
-		if dependency.Path != path {
-			continue
-		}
-		if usableVersion(dependency.Version) {
-			return dependency.Version
-		}
-		if dependency.Replace != nil && usableVersion(dependency.Replace.Version) {
-			return dependency.Replace.Version
-		}
-	}
-	return fallback
-}
-
-func usableVersion(value string) bool {
-	return value != "" && value != "(devel)"
-}
-
 // Serve serves the caller-owned listener until it fails, ctx is cancelled, or
 // Shutdown is called. NewServer and package initialization never open a listener.
 func (s *Server) Serve(ctx context.Context, listener net.Listener) error {
 	if listener == nil {
 		return errors.New("listener is required")
 	}
+
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -167,6 +115,7 @@ func (s *Server) Serve(ctx context.Context, listener net.Listener) error {
 // all concurrent callers.
 func (s *Server) Shutdown(ctx context.Context) error {
 	s.beginShutdown(deadlineFrom(ctx))
+
 	return s.shutdown.Wait(ctx)
 }
 
@@ -174,11 +123,28 @@ func (s *Server) beginShutdown(deadline time.Time) {
 	if !s.shutdown.Begin() {
 		return
 	}
+
 	go s.settleShutdown(deadline)
 }
 
 func (s *Server) settleShutdown(deadline time.Time) {
 	stopTimer := make(chan struct{})
+	var stopOnce sync.Once
+	stopDeadline := func() {
+		stopOnce.Do(func() { close(stopTimer) })
+	}
+
+	var err error
+	defer func() {
+		if recover() != nil {
+			err = errors.Join(err, errors.New("Wire server shutdown panicked"))
+			s.grpcServer.Stop()
+		}
+
+		stopDeadline()
+		s.shutdown.Finish(err)
+	}()
+
 	if !deadline.IsZero() {
 		go func() {
 			timer := time.NewTimer(time.Until(deadline))
@@ -191,10 +157,8 @@ func (s *Server) settleShutdown(deadline time.Time) {
 		}()
 	}
 
-	err := s.runtime.Close(context.Background())
+	err = s.runtime.Close(context.Background())
 	s.grpcServer.GracefulStop()
-	close(stopTimer)
-	s.shutdown.Finish(err)
 }
 
 func deadlineFrom(ctx context.Context) time.Time {
@@ -202,5 +166,6 @@ func deadlineFrom(ctx context.Context) time.Time {
 	if !ok {
 		return time.Time{}
 	}
+
 	return deadline
 }

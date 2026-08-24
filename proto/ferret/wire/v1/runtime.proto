@@ -5,19 +5,21 @@ package ferret.wire.v1;
 option go_package = "github.com/MontFerret/wire/gen/ferret/wire/v1;wirev1";
 
 service RuntimeService {
+  // Servers apply finite host-configured limits to messages and logical resources.
+  // Connect creates the logical ownership scope for all resources created with
+  // the returned connection ID. The stream remains open for that scope's life.
   rpc Connect(ConnectRequest) returns (stream ConnectResponse);
+  // CloseConnection commits deterministic cleanup of one logical connection.
+  // After cleanup, the connection ID and every owned resource ID are stale.
   rpc CloseConnection(CloseConnectionRequest) returns (CloseConnectionResponse);
 }
 
+// ConnectionId is an opaque, server-issued logical connection identifier.
 message ConnectionId {
   string value = 1;
 }
 
-message ClientIdentity {
-  string name = 1;
-  string version = 2;
-}
-
+// RuntimeIdentity is optional host-supplied application identity.
 message RuntimeIdentity {
   string name = 1;
   string version = 2;
@@ -44,17 +46,16 @@ message ConnectionOpened {
   RuntimeInfo runtime_info = 2;
 }
 
-message ConnectionClosing {}
-
 message ConnectResponse {
-  oneof payload {
-    ConnectionOpened opened = 1;
-    ConnectionClosing closing = 2;
-  }
+  reserved 2;
+  reserved "closing";
+
+  ConnectionOpened opened = 1;
 }
 
 message ConnectRequest {
-  ClientIdentity client_identity = 1;
+  reserved 1;
+  reserved "client_identity";
 }
 
 message CloseConnectionRequest {
@@ -78,6 +79,8 @@ enum ErrorCategory {
   ERROR_CATEGORY_WATCHER_LAGGED = 11;
   ERROR_CATEGORY_CANCELLED = 12;
   ERROR_CATEGORY_VALUE_REFERENCE_NOT_FOUND = 13;
+  ERROR_CATEGORY_RESOURCE_EXHAUSTED = 14;
+  ERROR_CATEGORY_BREAKPOINT_NOT_FOUND = 15;
 }
 
 enum ResourceKind {
@@ -88,8 +91,10 @@ enum ResourceKind {
   RESOURCE_KIND_DEBUG_SESSION = 4;
   RESOURCE_KIND_WATCHER = 5;
   RESOURCE_KIND_VALUE_REFERENCE = 6;
+  RESOURCE_KIND_BREAKPOINT = 7;
 }
 
+// DiagnosticSpan is a labeled, half-open UTF-8 byte span in source.
 message DiagnosticSpan {
   uint64 start_byte = 1;
   uint64 end_byte = 2;
@@ -106,6 +111,7 @@ message Diagnostic {
   repeated DiagnosticSpan spans = 6;
 }
 
+// ErrorDetail provides stable machine-readable information alongside a gRPC status.
 message ErrorDetail {
   ErrorCategory category = 1;
   string message = 2;

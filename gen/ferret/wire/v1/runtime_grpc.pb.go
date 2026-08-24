@@ -27,7 +27,12 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type RuntimeServiceClient interface {
+	// Servers apply finite host-configured limits to messages and logical resources.
+	// Connect creates the logical ownership scope for all resources created with
+	// the returned connection ID. The stream remains open for that scope's life.
 	Connect(ctx context.Context, in *ConnectRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ConnectResponse], error)
+	// CloseConnection commits deterministic cleanup of one logical connection.
+	// After cleanup, the connection ID and every owned resource ID are stale.
 	CloseConnection(ctx context.Context, in *CloseConnectionRequest, opts ...grpc.CallOption) (*CloseConnectionResponse, error)
 }
 
@@ -72,7 +77,12 @@ func (c *runtimeServiceClient) CloseConnection(ctx context.Context, in *CloseCon
 // All implementations must embed UnimplementedRuntimeServiceServer
 // for forward compatibility.
 type RuntimeServiceServer interface {
+	// Servers apply finite host-configured limits to messages and logical resources.
+	// Connect creates the logical ownership scope for all resources created with
+	// the returned connection ID. The stream remains open for that scope's life.
 	Connect(*ConnectRequest, grpc.ServerStreamingServer[ConnectResponse]) error
+	// CloseConnection commits deterministic cleanup of one logical connection.
+	// After cleanup, the connection ID and every owned resource ID are stale.
 	CloseConnection(context.Context, *CloseConnectionRequest) (*CloseConnectionResponse, error)
 	mustEmbedUnimplementedRuntimeServiceServer()
 }

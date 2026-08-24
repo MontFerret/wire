@@ -14,18 +14,21 @@ func rpcError(err error) error {
 	if err == nil {
 		return nil
 	}
+
 	if errors.Is(err, context.Canceled) {
 		return statusWithDetail(codes.Canceled, &wirev1.ErrorDetail{
 			Category: wirev1.ErrorCategory_ERROR_CATEGORY_CANCELLED,
 			Message:  context.Canceled.Error(),
 		})
 	}
+
 	if errors.Is(err, context.DeadlineExceeded) {
 		return statusWithDetail(codes.DeadlineExceeded, &wirev1.ErrorDetail{
 			Category: wirev1.ErrorCategory_ERROR_CATEGORY_CANCELLED,
 			Message:  context.DeadlineExceeded.Error(),
 		})
 	}
+
 	if errors.Is(err, core.ErrWatcherLagged) {
 		return statusWithDetail(codes.ResourceExhausted, &wirev1.ErrorDetail{
 			Category: wirev1.ErrorCategory_ERROR_CATEGORY_WATCHER_LAGGED,
@@ -46,13 +49,13 @@ func rpcError(err error) error {
 	switch domain.Category {
 	case core.ErrorInvalidRequest, core.ErrorCompilation:
 		code = codes.InvalidArgument
-	case core.ErrorPlanNotFound, core.ErrorExecutionNotFound, core.ErrorDebugSessionNotFound, core.ErrorConnectionNotFound, core.ErrorValueReferenceNotFound:
+	case core.ErrorPlanNotFound, core.ErrorExecutionNotFound, core.ErrorDebugSessionNotFound, core.ErrorConnectionNotFound, core.ErrorValueReferenceNotFound, core.ErrorBreakpointNotFound:
 		code = codes.NotFound
 	case core.ErrorInvalidState:
 		code = codes.FailedPrecondition
 	case core.ErrorUnsupported:
 		code = codes.Unimplemented
-	case core.ErrorWatcherLagged:
+	case core.ErrorWatcherLagged, core.ErrorResourceExhausted:
 		code = codes.ResourceExhausted
 	}
 
@@ -63,6 +66,7 @@ func rpcError(err error) error {
 		ResourceId:  domain.ResourceID,
 		Diagnostics: diagnostics(domain.Diagnostics),
 	}
+
 	if detail.Message == "" || domain.Category == core.ErrorInternal {
 		detail.Message = "internal runtime failure"
 	}
@@ -75,6 +79,7 @@ func statusWithDetail(code codes.Code, detail *wirev1.ErrorDetail) error {
 	if err != nil {
 		return status.Error(code, detail.GetMessage())
 	}
+
 	return withDetails.Err()
 }
 
@@ -102,6 +107,10 @@ func errorCategory(value core.ErrorCategory) wirev1.ErrorCategory {
 		return wirev1.ErrorCategory_ERROR_CATEGORY_WATCHER_LAGGED
 	case core.ErrorValueReferenceNotFound:
 		return wirev1.ErrorCategory_ERROR_CATEGORY_VALUE_REFERENCE_NOT_FOUND
+	case core.ErrorResourceExhausted:
+		return wirev1.ErrorCategory_ERROR_CATEGORY_RESOURCE_EXHAUSTED
+	case core.ErrorBreakpointNotFound:
+		return wirev1.ErrorCategory_ERROR_CATEGORY_BREAKPOINT_NOT_FOUND
 	default:
 		return wirev1.ErrorCategory_ERROR_CATEGORY_INTERNAL_RUNTIME_FAILURE
 	}
@@ -121,6 +130,8 @@ func resourceKind(value core.ErrorCategory) wirev1.ResourceKind {
 		return wirev1.ResourceKind_RESOURCE_KIND_WATCHER
 	case core.ErrorValueReferenceNotFound:
 		return wirev1.ResourceKind_RESOURCE_KIND_VALUE_REFERENCE
+	case core.ErrorBreakpointNotFound:
+		return wirev1.ResourceKind_RESOURCE_KIND_BREAKPOINT
 	default:
 		return wirev1.ResourceKind_RESOURCE_KIND_UNSPECIFIED
 	}

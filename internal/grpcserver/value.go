@@ -35,6 +35,7 @@ func decodeValue(input *wirev1.Value, depth int) (ferretruntime.Value, error) {
 	if input == nil || input.Value == nil {
 		return nil, fmt.Errorf("value oneof is required")
 	}
+
 	if depth >= maxValueDepth {
 		return nil, fmt.Errorf("value nesting exceeds %d levels", maxValueDepth)
 	}
@@ -44,6 +45,7 @@ func decodeValue(input *wirev1.Value, depth int) (ferretruntime.Value, error) {
 		if value.NoneValue != structpb.NullValue_NULL_VALUE {
 			return nil, fmt.Errorf("invalid none value")
 		}
+
 		return ferretruntime.None, nil
 	case *wirev1.Value_BooleanValue:
 		return ferretruntime.Boolean(value.BooleanValue), nil
@@ -62,12 +64,14 @@ func decodeValue(input *wirev1.Value, depth int) (ferretruntime.Value, error) {
 		if err != nil {
 			return nil, fmt.Errorf("invalid RFC3339Nano datetime: %w", err)
 		}
+
 		return ferretruntime.NewDateTime(parsed), nil
 	case *wirev1.Value_RegexpValue:
 		parsed, err := ferretruntime.NewRegexp(value.RegexpValue)
 		if err != nil {
 			return nil, fmt.Errorf("invalid regexp: %w", err)
 		}
+
 		return parsed, nil
 	case *wirev1.Value_ArrayValue:
 		if value.ArrayValue == nil {
@@ -81,6 +85,7 @@ func decodeValue(input *wirev1.Value, depth int) (ferretruntime.Value, error) {
 			}
 			items[i] = converted
 		}
+
 		return ferretruntime.NewArrayOf(items), nil
 	case *wirev1.Value_ObjectValue:
 		if value.ObjectValue == nil {
@@ -97,6 +102,7 @@ func decodeValue(input *wirev1.Value, depth int) (ferretruntime.Value, error) {
 			}
 			fields[name] = converted
 		}
+
 		return ferretruntime.NewObjectWith(fields), nil
 	default:
 		return nil, fmt.Errorf("unsupported value variant")

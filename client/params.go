@@ -24,6 +24,7 @@ func encodeParameters(values map[string]any) (*wirev1.Parameters, error) {
 		}
 		result.Values[name] = converted
 	}
+
 	return result, nil
 }
 
@@ -51,6 +52,7 @@ func encodeValue(value any, depth int) (*wirev1.Value, error) {
 		if uint64(value) > math.MaxInt64 {
 			return nil, fmt.Errorf("unsigned integer exceeds int64")
 		}
+
 		return &wirev1.Value{Value: &wirev1.Value_IntegerValue{IntegerValue: int64(value)}}, nil
 	case uint8:
 		return &wirev1.Value{Value: &wirev1.Value_IntegerValue{IntegerValue: int64(value)}}, nil
@@ -62,6 +64,7 @@ func encodeValue(value any, depth int) (*wirev1.Value, error) {
 		if value > math.MaxInt64 {
 			return nil, fmt.Errorf("unsigned integer exceeds int64")
 		}
+
 		return &wirev1.Value{Value: &wirev1.Value_IntegerValue{IntegerValue: int64(value)}}, nil
 	case float32:
 		return &wirev1.Value{Value: &wirev1.Value_FloatValue{FloatValue: float64(value)}}, nil
@@ -81,6 +84,7 @@ func encodeValue(value any, depth int) (*wirev1.Value, error) {
 		if value == nil {
 			return nil, fmt.Errorf("regexp must not be nil")
 		}
+
 		return &wirev1.Value{Value: &wirev1.Value_RegexpValue{RegexpValue: value.String()}}, nil
 	case []any:
 		items := make([]*wirev1.Value, len(value))
@@ -91,6 +95,7 @@ func encodeValue(value any, depth int) (*wirev1.Value, error) {
 			}
 			items[i] = converted
 		}
+
 		return &wirev1.Value{Value: &wirev1.Value_ArrayValue{ArrayValue: &wirev1.ArrayValue{Values: items}}}, nil
 	case map[string]any:
 		fields := make(map[string]*wirev1.Value, len(value))
@@ -104,6 +109,7 @@ func encodeValue(value any, depth int) (*wirev1.Value, error) {
 			}
 			fields[name] = converted
 		}
+
 		return &wirev1.Value{Value: &wirev1.Value_ObjectValue{ObjectValue: &wirev1.ObjectValue{Fields: fields}}}, nil
 	default:
 		return nil, fmt.Errorf("unsupported Go value type %T", value)

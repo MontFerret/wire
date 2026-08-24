@@ -284,7 +284,6 @@ func (x *CompileRequest) GetOptions() *CompileOptions {
 type CompileResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Plan          *Plan                  `protobuf:"bytes,1,opt,name=plan,proto3" json:"plan,omitempty"`
-	Diagnostics   []*Diagnostic          `protobuf:"bytes,2,rep,name=diagnostics,proto3" json:"diagnostics,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -322,13 +321,6 @@ func (*CompileResponse) Descriptor() ([]byte, []int) {
 func (x *CompileResponse) GetPlan() *Plan {
 	if x != nil {
 		return x.Plan
-	}
-	return nil
-}
-
-func (x *CompileResponse) GetDiagnostics() []*Diagnostic {
-	if x != nil {
-		return x.Diagnostics
 	}
 	return nil
 }
@@ -446,10 +438,9 @@ const file_ferret_wire_v1_plan_proto_rawDesc = "" +
 	"\x0eCompileRequest\x12A\n" +
 	"\rconnection_id\x18\x01 \x01(\v2\x1c.ferret.wire.v1.ConnectionIdR\fconnectionId\x12.\n" +
 	"\x06source\x18\x02 \x01(\v2\x16.ferret.wire.v1.SourceR\x06source\x128\n" +
-	"\aoptions\x18\x03 \x01(\v2\x1e.ferret.wire.v1.CompileOptionsR\aoptions\"y\n" +
+	"\aoptions\x18\x03 \x01(\v2\x1e.ferret.wire.v1.CompileOptionsR\aoptions\"N\n" +
 	"\x0fCompileResponse\x12(\n" +
-	"\x04plan\x18\x01 \x01(\v2\x14.ferret.wire.v1.PlanR\x04plan\x12<\n" +
-	"\vdiagnostics\x18\x02 \x03(\v2\x1a.ferret.wire.v1.DiagnosticR\vdiagnostics\"\x88\x01\n" +
+	"\x04plan\x18\x01 \x01(\v2\x14.ferret.wire.v1.PlanR\x04planJ\x04\b\x02\x10\x03R\vdiagnostics\"\x88\x01\n" +
 	"\x12ReleasePlanRequest\x12A\n" +
 	"\rconnection_id\x18\x01 \x01(\v2\x1c.ferret.wire.v1.ConnectionIdR\fconnectionId\x12/\n" +
 	"\aplan_id\x18\x02 \x01(\v2\x16.ferret.wire.v1.PlanIdR\x06planId\"\x15\n" +
@@ -481,26 +472,24 @@ var file_ferret_wire_v1_plan_proto_goTypes = []any{
 	(*ReleasePlanRequest)(nil),  // 6: ferret.wire.v1.ReleasePlanRequest
 	(*ReleasePlanResponse)(nil), // 7: ferret.wire.v1.ReleasePlanResponse
 	(*ConnectionId)(nil),        // 8: ferret.wire.v1.ConnectionId
-	(*Diagnostic)(nil),          // 9: ferret.wire.v1.Diagnostic
 }
 var file_ferret_wire_v1_plan_proto_depIdxs = []int32{
-	0,  // 0: ferret.wire.v1.Plan.id:type_name -> ferret.wire.v1.PlanId
-	8,  // 1: ferret.wire.v1.CompileRequest.connection_id:type_name -> ferret.wire.v1.ConnectionId
-	1,  // 2: ferret.wire.v1.CompileRequest.source:type_name -> ferret.wire.v1.Source
-	2,  // 3: ferret.wire.v1.CompileRequest.options:type_name -> ferret.wire.v1.CompileOptions
-	3,  // 4: ferret.wire.v1.CompileResponse.plan:type_name -> ferret.wire.v1.Plan
-	9,  // 5: ferret.wire.v1.CompileResponse.diagnostics:type_name -> ferret.wire.v1.Diagnostic
-	8,  // 6: ferret.wire.v1.ReleasePlanRequest.connection_id:type_name -> ferret.wire.v1.ConnectionId
-	0,  // 7: ferret.wire.v1.ReleasePlanRequest.plan_id:type_name -> ferret.wire.v1.PlanId
-	4,  // 8: ferret.wire.v1.PlanService.Compile:input_type -> ferret.wire.v1.CompileRequest
-	6,  // 9: ferret.wire.v1.PlanService.ReleasePlan:input_type -> ferret.wire.v1.ReleasePlanRequest
-	5,  // 10: ferret.wire.v1.PlanService.Compile:output_type -> ferret.wire.v1.CompileResponse
-	7,  // 11: ferret.wire.v1.PlanService.ReleasePlan:output_type -> ferret.wire.v1.ReleasePlanResponse
-	10, // [10:12] is the sub-list for method output_type
-	8,  // [8:10] is the sub-list for method input_type
-	8,  // [8:8] is the sub-list for extension type_name
-	8,  // [8:8] is the sub-list for extension extendee
-	0,  // [0:8] is the sub-list for field type_name
+	0, // 0: ferret.wire.v1.Plan.id:type_name -> ferret.wire.v1.PlanId
+	8, // 1: ferret.wire.v1.CompileRequest.connection_id:type_name -> ferret.wire.v1.ConnectionId
+	1, // 2: ferret.wire.v1.CompileRequest.source:type_name -> ferret.wire.v1.Source
+	2, // 3: ferret.wire.v1.CompileRequest.options:type_name -> ferret.wire.v1.CompileOptions
+	3, // 4: ferret.wire.v1.CompileResponse.plan:type_name -> ferret.wire.v1.Plan
+	8, // 5: ferret.wire.v1.ReleasePlanRequest.connection_id:type_name -> ferret.wire.v1.ConnectionId
+	0, // 6: ferret.wire.v1.ReleasePlanRequest.plan_id:type_name -> ferret.wire.v1.PlanId
+	4, // 7: ferret.wire.v1.PlanService.Compile:input_type -> ferret.wire.v1.CompileRequest
+	6, // 8: ferret.wire.v1.PlanService.ReleasePlan:input_type -> ferret.wire.v1.ReleasePlanRequest
+	5, // 9: ferret.wire.v1.PlanService.Compile:output_type -> ferret.wire.v1.CompileResponse
+	7, // 10: ferret.wire.v1.PlanService.ReleasePlan:output_type -> ferret.wire.v1.ReleasePlanResponse
+	9, // [9:11] is the sub-list for method output_type
+	7, // [7:9] is the sub-list for method input_type
+	7, // [7:7] is the sub-list for extension type_name
+	7, // [7:7] is the sub-list for extension extendee
+	0, // [0:7] is the sub-list for field type_name
 }
 
 func init() { file_ferret_wire_v1_plan_proto_init() }

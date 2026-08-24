@@ -28,12 +28,15 @@ func TestEncodeParametersUsesExplicitWireVariants(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if _, ok := values.Values["duration"].Value.(*wirev1.Value_DurationNanos); !ok {
 		t.Fatalf("duration was not encoded explicitly: %#v", values.Values["duration"])
 	}
+
 	if got := values.Values["datetime"].GetDatetimeValue(); got != when.Format(time.RFC3339Nano) {
 		t.Fatalf("unexpected datetime: %q", got)
 	}
+
 	if _, ok := values.Values["object"].Value.(*wirev1.Value_ObjectValue); !ok {
 		t.Fatalf("object was not encoded explicitly: %#v", values.Values["object"])
 	}

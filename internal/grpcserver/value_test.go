@@ -21,6 +21,7 @@ func TestDecodeValueRejectsMalformedInput(t *testing.T) {
 		{name: "nil array", value: &wirev1.Value{Value: &wirev1.Value_ArrayValue{}}, want: "array value"},
 		{name: "nil object", value: &wirev1.Value{Value: &wirev1.Value_ObjectValue{}}, want: "object value"},
 	}
+
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			_, err := decodeValue(test.value, 0)
@@ -52,9 +53,11 @@ func TestDecodeParametersBuildsExplicitFerretValues(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if value, ok := parameters["integer"].(ferretruntime.Int); !ok || value != 42 {
 		t.Fatalf("unexpected integer: %#v", parameters["integer"])
 	}
+
 	if _, ok := parameters["array"].(*ferretruntime.Array); !ok {
 		t.Fatalf("unexpected array: %#v", parameters["array"])
 	}

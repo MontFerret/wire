@@ -26,6 +26,15 @@ type (
 		RuntimeIdentity RuntimeIdentity
 	}
 
+	Limits struct {
+		MaxConnections                int
+		MaxPlansPerConnection         int
+		MaxExecutionsPerConnection    int
+		MaxDebugSessionsPerConnection int
+		MaxWatchersPerResource        int
+		MaxBreakpointsPerDebugSession int
+	}
+
 	DiagnosticSpan struct {
 		Start   uint64
 		End     uint64
@@ -53,6 +62,25 @@ type (
 	}
 )
 
+func (limits Limits) validate() error {
+	values := []int{
+		limits.MaxConnections,
+		limits.MaxPlansPerConnection,
+		limits.MaxExecutionsPerConnection,
+		limits.MaxDebugSessionsPerConnection,
+		limits.MaxWatchersPerResource,
+		limits.MaxBreakpointsPerDebugSession,
+	}
+
+	for _, value := range values {
+		if value <= 0 {
+			return invalidRequest("runtime limits must be positive")
+		}
+	}
+
+	return nil
+}
+
 const (
 	ErrorInvalidRequest ErrorCategory = iota + 1
 	ErrorCompilation
@@ -66,6 +94,8 @@ const (
 	ErrorInternal
 	ErrorWatcherLagged
 	ErrorValueReferenceNotFound
+	ErrorResourceExhausted
+	ErrorBreakpointNotFound
 )
 
 var ErrWatcherLagged = errors.New("wire watcher lagged")
@@ -102,10 +132,24 @@ func internalError(cause error) error {
 	return &DomainError{Category: ErrorInternal, Message: "internal runtime failure", Cause: cause}
 }
 
+func resourceExhausted(message string) error {
+	return &DomainError{Category: ErrorResourceExhausted, Message: message}
+}
+
+func ignoreMissingResource(err error, category ErrorCategory) error {
+	var domain *DomainError
+	if errors.As(err, &domain) && domain.Category == category {
+		return nil
+	}
+
+	return err
+}
+
 func validateID[T ~string](value T, name string) error {
 	if value == "" {
 		return invalidRequest(fmt.Sprintf("%s is required", name))
 	}
+
 	if _, err := uuid.Parse(string(value)); err != nil {
 		return invalidRequest(fmt.Sprintf("%s is malformed", name))
 	}

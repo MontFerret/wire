@@ -6,29 +6,43 @@ import (
 	"sync"
 
 	"github.com/MontFerret/ferret/v2"
+	"github.com/MontFerret/wire/internal/lifecycle"
 	"github.com/google/uuid"
 )
 
-// Runtime owns logical Wire connections while borrowing a host Engine.
-type Runtime struct {
-	mu          sync.RWMutex
-	engine      *ferret.Engine
-	info        RuntimeInfo
-	connections map[ConnectionID]*Connection
-	closing     map[ConnectionID]*Connection
-	closed      bool
-}
+type (
+	closingConnection struct {
+		connection *Connection
+		close      lifecycle.Close
+	}
 
-func NewRuntime(engine *ferret.Engine, info RuntimeInfo) (*Runtime, error) {
+	// Runtime owns logical Wire connections while borrowing a host Engine.
+	Runtime struct {
+		mu          sync.RWMutex
+		engine      *ferret.Engine
+		info        RuntimeInfo
+		limits      Limits
+		connections map[ConnectionID]*Connection
+		closing     map[ConnectionID]*closingConnection
+		closed      bool
+	}
+)
+
+func NewRuntime(engine *ferret.Engine, info RuntimeInfo, limits Limits) (*Runtime, error) {
 	if engine == nil {
 		return nil, invalidRequest("Ferret engine is required")
+	}
+
+	if err := limits.validate(); err != nil {
+		return nil, err
 	}
 
 	return &Runtime{
 		engine:      engine,
 		info:        info,
+		limits:      limits,
 		connections: make(map[ConnectionID]*Connection),
-		closing:     make(map[ConnectionID]*Connection),
+		closing:     make(map[ConnectionID]*closingConnection),
 	}, nil
 }
 
@@ -37,14 +51,18 @@ func (r *Runtime) Info() RuntimeInfo {
 }
 
 func (r *Runtime) OpenConnection() (*Connection, error) {
-	id := ConnectionID(uuid.NewString())
-	connection := newConnection(id, r.engine)
-
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.closed {
 		return nil, invalidState("server is shutting down", nil)
 	}
+
+	if len(r.connections)+len(r.closing) >= r.limits.MaxConnections {
+		return nil, resourceExhausted("logical connection limit reached")
+	}
+
+	id := ConnectionID(uuid.NewString())
+	connection := newConnection(id, r.engine, r.limits)
 
 	r.connections[id] = connection
 
@@ -73,49 +91,65 @@ func (r *Runtime) CloseConnection(ctx context.Context, id ConnectionID) error {
 
 	r.mu.Lock()
 	connection := r.connections[id]
+	closing := r.closing[id]
 	if connection != nil {
 		delete(r.connections, id)
-		r.closing[id] = connection
-	} else {
-		connection = r.closing[id]
+		closing = &closingConnection{connection: connection}
+		r.closing[id] = closing
 	}
 	r.mu.Unlock()
-	if connection == nil {
+	if closing == nil {
 		return notFound(ErrorConnectionNotFound, string(id))
 	}
 
-	return connection.Close(ctx)
+	if closing.close.Begin() {
+		go r.settleConnectionClose(id, closing)
+	}
+
+	return closing.close.Wait(ctx)
+}
+
+func (r *Runtime) settleConnectionClose(id ConnectionID, closing *closingConnection) {
+	var err error
+	defer func() {
+		if recover() != nil {
+			err = errors.Join(err, internalError(errors.New("logical connection cleanup panicked")))
+		}
+
+		r.mu.Lock()
+		if r.closing[id] == closing {
+			delete(r.closing, id)
+		}
+		r.mu.Unlock()
+		closing.close.Finish(err)
+	}()
+
+	err = closing.connection.Close(context.Background())
 }
 
 func (r *Runtime) Close(ctx context.Context) error {
 	r.mu.Lock()
 	r.closed = true
-	connections := make([]*Connection, 0, len(r.connections)+len(r.closing))
 	for id, connection := range r.connections {
-		connections = append(connections, connection)
-		r.closing[id] = connection
+		r.closing[id] = &closingConnection{connection: connection}
 	}
 	clear(r.connections)
-	for _, connection := range r.closing {
-		if !containsConnection(connections, connection) {
-			connections = append(connections, connection)
-		}
+	connections := make(map[ConnectionID]*closingConnection, len(r.closing))
+	for id, closing := range r.closing {
+		connections[id] = closing
 	}
 	r.mu.Unlock()
 
+	for id, closing := range connections {
+		if closing.close.Begin() {
+			go r.settleConnectionClose(id, closing)
+		}
+	}
+
 	var result error
-	for _, connection := range connections {
-		result = errors.Join(result, connection.Close(ctx))
+	for _, closing := range connections {
+		result = errors.Join(result, closing.close.Wait(ctx))
 	}
 
 	return result
-}
-
-func containsConnection(values []*Connection, target *Connection) bool {
-	for _, value := range values {
-		if value == target {
-			return true
-		}
-	}
-	return false
 }

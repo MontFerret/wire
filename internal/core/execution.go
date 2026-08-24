@@ -17,7 +17,7 @@ type (
 
 	Output struct {
 		ContentType string
-		Data        []byte
+		Content     []byte
 	}
 
 	Failure struct {
@@ -53,6 +53,32 @@ type (
 		Parameters        ferretruntime.Params
 		OutputContentType string
 	}
+
+	executionWatcher struct {
+		events chan ExecutionEvent
+		errors chan error
+	}
+
+	Execution struct {
+		mu            sync.Mutex
+		id            ExecutionID
+		plan          *Plan
+		ctx           context.Context
+		cancel        context.CancelCauseFunc
+		parameters    ferretruntime.Params
+		contentType   string
+		maxWatchers   int
+		state         ExecutionState
+		output        *Output
+		failure       *Failure
+		sequence      uint64
+		lastEvent     ExecutionEvent
+		nextWatcher   uint64
+		subscriptions int
+		watchers      map[uint64]*executionWatcher
+		done          chan struct{}
+		close         lifecycle.Close
+	}
 )
 
 const (
@@ -64,7 +90,6 @@ const (
 
 const (
 	ExecutionEventStarted ExecutionEventKind = iota + 1
-	ExecutionEventOutput
 	ExecutionEventCompleted
 	ExecutionEventFailed
 	ExecutionEventCancelled
@@ -72,34 +97,11 @@ const (
 
 const watcherBufferSize = 8
 
-type executionWatcher struct {
-	events chan ExecutionEvent
-	errors chan error
-}
-
-type Execution struct {
-	mu          sync.Mutex
-	id          ExecutionID
-	plan        *Plan
-	ctx         context.Context
-	cancel      context.CancelCauseFunc
-	parameters  ferretruntime.Params
-	contentType string
-	state       ExecutionState
-	output      *Output
-	failure     *Failure
-	sequence    uint64
-	lastEvent   ExecutionEvent
-	nextWatcher uint64
-	watchers    map[uint64]*executionWatcher
-	done        chan struct{}
-	close       lifecycle.Close
-}
-
 func (c *Connection) Execute(ctx context.Context, input ExecuteInput) (ExecutionSnapshot, error) {
 	if err := ctx.Err(); err != nil {
 		return ExecutionSnapshot{}, err
 	}
+
 	if err := validateID(input.PlanID, "plan ID"); err != nil {
 		return ExecutionSnapshot{}, err
 	}
@@ -108,6 +110,11 @@ func (c *Connection) Execute(ctx context.Context, input ExecuteInput) (Execution
 	if err := c.ensureOpenLocked(); err != nil {
 		c.mu.Unlock()
 		return ExecutionSnapshot{}, err
+	}
+
+	if len(c.executions)+len(c.closingExecutions) >= c.limits.MaxExecutionsPerConnection {
+		c.mu.Unlock()
+		return ExecutionSnapshot{}, resourceExhausted("execution limit reached")
 	}
 	plan := c.plans[input.PlanID]
 	if plan == nil {
@@ -120,6 +127,7 @@ func (c *Connection) Execute(ctx context.Context, input ExecuteInput) (Execution
 		c.mu.Unlock()
 		return ExecutionSnapshot{}, notFound(ErrorPlanNotFound, string(input.PlanID))
 	}
+
 	if err := ctx.Err(); err != nil {
 		plan.mu.Unlock()
 		c.mu.Unlock()
@@ -134,6 +142,7 @@ func (c *Connection) Execute(ctx context.Context, input ExecuteInput) (Execution
 		cancel:      cancel,
 		parameters:  input.Parameters.Clone(),
 		contentType: input.OutputContentType,
+		maxWatchers: c.limits.MaxWatchersPerResource,
 		state:       ExecutionRunning,
 		watchers:    make(map[uint64]*executionWatcher),
 		done:        make(chan struct{}),
@@ -155,9 +164,14 @@ func (e *Execution) run() {
 		if recover() == nil {
 			return
 		}
+
 		if session != nil {
-			_ = session.Close()
+			func() {
+				defer func() { _ = recover() }()
+				_ = session.Close()
+			}()
 		}
+
 		e.finish(nil, errors.New("Ferret execution panicked"))
 	}()
 
@@ -179,7 +193,7 @@ func (e *Execution) run() {
 	err = errors.Join(runErr, closeErr)
 	var result *Output
 	if output != nil {
-		result = &Output{ContentType: output.ContentType, Data: append([]byte(nil), output.Content...)}
+		result = &Output{ContentType: output.ContentType, Content: append([]byte(nil), output.Content...)}
 	}
 	e.finish(result, err)
 }
@@ -198,24 +212,12 @@ func (e *Execution) finish(output *Output, err error) {
 		e.publishLocked(ExecutionEventCancelled, true)
 	case err != nil:
 		e.state = ExecutionFailed
-		e.failure = &Failure{
-			Category:    ErrorExecution,
-			Message:     failureMessage(err),
-			Diagnostics: diagnosticsFromError(err, e.plan.identity),
-		}
+		e.failure = failureFromError(err, e.plan.identity)
 		e.publishLocked(ExecutionEventFailed, true)
 	default:
 		e.state = ExecutionCompleted
 		e.publishLocked(ExecutionEventCompleted, true)
 	}
-}
-
-func failureMessage(err error) string {
-	if len(extractDiagnostics(err)) > 0 {
-		return "Ferret execution failed"
-	}
-
-	return "internal runtime failure"
 }
 
 func (e *Execution) snapshot() ExecutionSnapshot {
@@ -228,8 +230,9 @@ func (e *Execution) snapshot() ExecutionSnapshot {
 func (e *Execution) snapshotLocked() ExecutionSnapshot {
 	result := ExecutionSnapshot{ID: e.id, PlanID: e.plan.id, State: e.state}
 	if e.output != nil {
-		result.Output = &Output{ContentType: e.output.ContentType, Data: append([]byte(nil), e.output.Data...)}
+		result.Output = &Output{ContentType: e.output.ContentType, Content: append([]byte(nil), e.output.Content...)}
 	}
+
 	if e.failure != nil {
 		result.Failure = &Failure{
 			Category:    e.failure.Category,
@@ -281,11 +284,18 @@ func (c *Connection) WatchExecution(id ExecutionID) (ExecutionSubscription, erro
 		return ExecutionSubscription{}, err
 	}
 
-	return execution.subscribe(), nil
+	return execution.subscribe()
 }
 
-func (e *Execution) subscribe() ExecutionSubscription {
+func (e *Execution) subscribe() (ExecutionSubscription, error) {
 	e.mu.Lock()
+	if e.subscriptions >= e.maxWatchers {
+		e.mu.Unlock()
+		return ExecutionSubscription{}, resourceExhausted("execution watcher limit reached")
+	}
+	e.subscriptions++
+	e.nextWatcher++
+	id := e.nextWatcher
 	current := e.lastEvent.clone()
 	if e.state != ExecutionRunning {
 		events := make(chan ExecutionEvent)
@@ -293,10 +303,11 @@ func (e *Execution) subscribe() ExecutionSubscription {
 		close(events)
 		close(errorsChannel)
 		e.mu.Unlock()
-		return ExecutionSubscription{Current: current, Events: events, Errors: errorsChannel, Cancel: func() {}}
+		var once sync.Once
+		return ExecutionSubscription{Current: current, Events: events, Errors: errorsChannel, Cancel: func() {
+			once.Do(func() { e.unsubscribe(id) })
+		}}, nil
 	}
-	e.nextWatcher++
-	id := e.nextWatcher
 	watcher := &executionWatcher{events: make(chan ExecutionEvent, watcherBufferSize), errors: make(chan error, 1)}
 	e.watchers[id] = watcher
 	e.mu.Unlock()
@@ -309,7 +320,7 @@ func (e *Execution) subscribe() ExecutionSubscription {
 		Cancel: func() {
 			once.Do(func() { e.unsubscribe(id) })
 		},
-	}
+	}, nil
 }
 
 func (e *Execution) publishLocked(kind ExecutionEventKind, terminal bool) {
@@ -325,6 +336,7 @@ func (e *Execution) publishLocked(kind ExecutionEventKind, terminal bool) {
 			e.closeWatcherLocked(id, watcher, ErrWatcherLagged)
 		}
 	}
+
 	if terminal {
 		close(e.done)
 	}
@@ -338,11 +350,13 @@ func (e ExecutionEvent) clone() ExecutionEvent {
 func (s ExecutionSnapshot) clone() ExecutionSnapshot {
 	result := s
 	if s.Output != nil {
-		result.Output = &Output{ContentType: s.Output.ContentType, Data: append([]byte(nil), s.Output.Data...)}
+		result.Output = &Output{ContentType: s.Output.ContentType, Content: append([]byte(nil), s.Output.Content...)}
 	}
+
 	if s.Failure != nil {
 		result.Failure = &Failure{Category: s.Failure.Category, Message: s.Failure.Message, Diagnostics: cloneDiagnostics(s.Failure.Diagnostics)}
 	}
+
 	return result
 }
 
@@ -351,6 +365,10 @@ func (e *Execution) unsubscribe(id uint64) {
 	defer e.mu.Unlock()
 	if watcher := e.watchers[id]; watcher != nil {
 		e.closeWatcherLocked(id, watcher, nil)
+	}
+
+	if e.subscriptions > 0 {
+		e.subscriptions--
 	}
 }
 
@@ -371,10 +389,11 @@ func (c *Connection) ReleaseExecution(ctx context.Context, id ExecutionID) error
 	execution := c.executions[id]
 	if execution != nil {
 		delete(c.executions, id)
-		c.releasedExecutions[id] = execution
+		c.closingExecutions[id] = execution
 	} else {
-		execution = c.releasedExecutions[id]
+		execution = c.closingExecutions[id]
 	}
+
 	if execution != nil {
 		execution.plan.mu.Lock()
 		delete(execution.plan.executions, id)
@@ -385,22 +404,33 @@ func (c *Connection) ReleaseExecution(ctx context.Context, id ExecutionID) error
 		return notFound(ErrorExecutionNotFound, string(id))
 	}
 
-	return execution.Close(ctx)
-}
-
-func (e *Execution) Close(ctx context.Context) error {
-	if e.close.Begin() {
-		go func() {
-			e.cancel(context.Canceled)
-			<-e.done
-			e.mu.Lock()
-			for id, watcher := range e.watchers {
-				e.closeWatcherLocked(id, watcher, nil)
-			}
-			e.mu.Unlock()
-			e.close.Finish(nil)
-		}()
+	if execution.close.Begin() {
+		go c.settleExecutionRelease(execution)
 	}
 
-	return e.close.Wait(ctx)
+	return execution.close.Wait(ctx)
+}
+
+func (c *Connection) settleExecutionRelease(execution *Execution) {
+	var err error
+	defer func() {
+		if recover() != nil {
+			err = errors.Join(err, internalError(errors.New("execution cleanup panicked")))
+		}
+
+		c.mu.Lock()
+		if c.closingExecutions[execution.id] == execution {
+			delete(c.closingExecutions, execution.id)
+		}
+		c.mu.Unlock()
+		execution.close.Finish(err)
+	}()
+
+	execution.cancel(context.Canceled)
+	<-execution.done
+	execution.mu.Lock()
+	for id, watcher := range execution.watchers {
+		execution.closeWatcherLocked(id, watcher, nil)
+	}
+	execution.mu.Unlock()
 }

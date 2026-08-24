@@ -12,18 +12,22 @@ option go_package = "github.com/MontFerret/wire/gen/ferret/wire/v1;wirev1";
 service DebugService {
   rpc OpenDebugSession(OpenDebugSessionRequest) returns (OpenDebugSessionResponse);
   rpc StartDebug(StartDebugRequest) returns (StartDebugResponse);
-  rpc SetBreakpoints(SetBreakpointsRequest) returns (SetBreakpointsResponse);
+  // Breakpoints are singular Ferret-owned resources, not DAP source replacements.
+  rpc SetBreakpoint(SetBreakpointRequest) returns (SetBreakpointResponse);
+  rpc DeleteBreakpoint(DeleteBreakpointRequest) returns (DeleteBreakpointResponse);
   rpc Continue(ContinueRequest) returns (ContinueResponse);
   rpc Pause(PauseRequest) returns (PauseResponse);
   rpc Next(NextRequest) returns (NextResponse);
-  rpc StepIn(StepInRequest) returns (StepInResponse);
-  rpc StepOut(StepOutRequest) returns (StepOutResponse);
-  rpc StackTrace(StackTraceRequest) returns (StackTraceResponse);
-  rpc Scopes(ScopesRequest) returns (ScopesResponse);
+  rpc Step(StepRequest) returns (StepResponse);
+  rpc Out(OutRequest) returns (OutResponse);
+  rpc Frames(FramesRequest) returns (FramesResponse);
+  rpc FrameLocals(FrameLocalsRequest) returns (FrameLocalsResponse);
   rpc Variables(VariablesRequest) returns (VariablesResponse);
-  rpc Evaluate(EvaluateRequest) returns (EvaluateResponse);
+  rpc EvaluateFrame(EvaluateFrameRequest) returns (EvaluateFrameResponse);
   rpc StopDebug(StopDebugRequest) returns (StopDebugResponse);
+  // ReleaseDebugSession commits termination and cleanup. The session ID then becomes stale.
   rpc ReleaseDebugSession(ReleaseDebugSessionRequest) returns (ReleaseDebugSessionResponse);
+  // WatchDebug is finite, ordered, and ends after one terminal snapshot.
   rpc WatchDebug(WatchDebugRequest) returns (stream WatchDebugResponse);
 }
 
@@ -53,6 +57,7 @@ enum DebugStopReason {
 message SourceLocation {
   string file = 1;
   int32 line = 2;
+  // A breakpoint column of zero means Ferret's unspecified column.
   int32 column = 3;
 }
 
@@ -65,11 +70,6 @@ message DebugSession {
   repeated uint64 hit_breakpoint_ids = 6;
   Output output = 7;
   Failure failure = 8;
-}
-
-message BreakpointLocation {
-  int32 line = 1;
-  int32 column = 2;
 }
 
 message Breakpoint {
@@ -92,24 +92,16 @@ message Variable {
   string name = 1;
   DebugValue value = 2;
   bool mutable = 3;
+  // parameter distinguishes declared FQL parameters from other frame locals.
+  bool parameter = 4;
 }
 
-message StackFrame {
+// Frame describes the current paused frame or one of its callers. Its index is
+// the value accepted by FrameLocals and EvaluateFrame.
+message Frame {
   int32 index = 1;
   string name = 2;
   SourceLocation location = 3;
-}
-
-enum ScopeKind {
-  SCOPE_KIND_UNSPECIFIED = 0;
-  SCOPE_KIND_LOCALS = 1;
-  SCOPE_KIND_PARAMETERS = 2;
-}
-
-message Scope {
-  ScopeKind kind = 1;
-  string name = 2;
-  repeated Variable variables = 3;
 }
 
 message OpenDebugSessionRequest {
@@ -160,19 +152,19 @@ message NextResponse {
   DebugSession session = 1;
 }
 
-message StepInRequest {
+message StepRequest {
   DebugCommand command = 1;
 }
 
-message StepInResponse {
+message StepResponse {
   DebugSession session = 1;
 }
 
-message StepOutRequest {
+message OutRequest {
   DebugCommand command = 1;
 }
 
-message StepOutResponse {
+message OutResponse {
   DebugSession session = 1;
 }
 
@@ -184,34 +176,41 @@ message StopDebugResponse {
   DebugSession session = 1;
 }
 
-message SetBreakpointsRequest {
+message SetBreakpointRequest {
   ConnectionId connection_id = 1;
   DebugSessionId debug_session_id = 2;
-  string file = 3;
-  repeated BreakpointLocation breakpoints = 4;
+  SourceLocation location = 3;
 }
 
-message SetBreakpointsResponse {
-  repeated Breakpoint breakpoints = 1;
+message SetBreakpointResponse {
+  Breakpoint breakpoint = 1;
 }
 
-message StackTraceRequest {
+message DeleteBreakpointRequest {
+  ConnectionId connection_id = 1;
+  DebugSessionId debug_session_id = 2;
+  uint64 breakpoint_id = 3;
+}
+
+message DeleteBreakpointResponse {}
+
+message FramesRequest {
   ConnectionId connection_id = 1;
   DebugSessionId debug_session_id = 2;
 }
 
-message StackTraceResponse {
-  repeated StackFrame frames = 1;
+message FramesResponse {
+  repeated Frame frames = 1;
 }
 
-message ScopesRequest {
+message FrameLocalsRequest {
   ConnectionId connection_id = 1;
   DebugSessionId debug_session_id = 2;
   int32 frame_index = 3;
 }
 
-message ScopesResponse {
-  repeated Scope scopes = 1;
+message FrameLocalsResponse {
+  repeated Variable variables = 1;
 }
 
 message VariablesRequest {
@@ -224,14 +223,14 @@ message VariablesResponse {
   repeated Variable variables = 1;
 }
 
-message EvaluateRequest {
+message EvaluateFrameRequest {
   ConnectionId connection_id = 1;
   DebugSessionId debug_session_id = 2;
   int32 frame_index = 3;
   string expression = 4;
 }
 
-message EvaluateResponse {
+message EvaluateFrameResponse {
   DebugValue value = 1;
 }
 
@@ -254,10 +253,6 @@ message DebugStopped {
   DebugSession session = 1;
 }
 
-message DebugOutput {
-  Output output = 1;
-}
-
 message DebugCompleted {
   DebugSession session = 1;
 }
@@ -271,13 +266,15 @@ message DebugTerminated {
 }
 
 message WatchDebugResponse {
+  reserved 6;
+  reserved "output";
+
   DebugSessionId debug_session_id = 1;
   uint64 sequence = 2;
   oneof payload {
     DebugStarted started = 3;
     DebugContinued continued = 4;
     DebugStopped stopped = 5;
-    DebugOutput output = 6;
     DebugCompleted completed = 7;
     DebugFailed failed = 8;
     DebugTerminated terminated = 9;

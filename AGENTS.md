@@ -1,49 +1,37 @@
-# Task: Establish Wire AGENTS.md
+# AGENTS.md
 
-Create the canonical `AGENTS.md` for the Wire repository.
-
-Use the attached Ferret `AGENTS.md` as the **style, engineering-discipline, Go-style, validation, and self-review baseline**, but adapt it specifically to Wire.
-
-Do not simply copy Ferret's file.
-
-Wire has substantially different responsibilities:
-
-```text
-Ferret
-    ↑
-   Wire
-    ↑
-    ├── ferretd
-    ├── CLI
-    ├── Lab
-    └── host applications
-```
-
-Wire is a security-sensitive RPC boundary exposing an application's configured Ferret engine to external tooling.
-
-The resulting `AGENTS.md` should establish high-quality engineering standards from the beginning of the project.
+This file is the canonical operating guide for coding agents working in the
+Wire repository. Wire is a security-sensitive RPC boundary that exposes a host
+application's configured Ferret engine to external tooling. Preserve that
+narrow responsibility.
 
 ## Sources of truth
 
-Define repository authorities based on the actual current Wire repository.
+Use the most direct repository authority for facts that can change:
 
-At minimum inspect and reference where applicable:
+* `go.mod` owns the module path, minimum Go version, and Ferret dependency.
+* `Makefile` owns canonical development commands and pinned tool invocations.
+* Protobuf sources under `proto/ferret/wire/v1` own Wire protocol semantics.
+* `buf.yaml` owns protobuf lint and breaking-change policy.
+* `buf.gen.yaml` owns protobuf inputs, generator versions, and output layout.
+* Generated protobuf and gRPC bindings under `gen/ferret/wire/v1` are derived
+  artifacts only.
+* `.github/workflows/ci.yml` owns repository CI coverage and tested platforms.
+* Current handwritten code and tests own implementation behavior.
+* `README.md` owns repository-facing architecture, security, API examples, and
+  development workflow documentation.
 
-- `go.mod` for module path and Go version;
-- `Makefile` for canonical development commands;
-- protobuf sources for Wire protocol semantics;
-- Buf/protobuf generation configuration;
-- generated protobuf/gRPC files as derived artifacts only;
-- CI workflows for repository validation;
-- current implementation and tests for behavior.
+The current module is `github.com/MontFerret/wire`, uses Go 1.25, and adapts the
+Ferret v2 dependency declared in `go.mod`. Verify these values rather than
+copying them into implementation logic.
 
-Do not invent files or development documentation that does not yet exist.
+When generated bindings disagree with protobuf source, protobuf source is
+authoritative. When descriptive documentation disagrees with current source or
+tests, verify the intended contract and correct the stale documentation.
 
-When generated code disagrees with protobuf source, protobuf source is authoritative.
+## Architecture and ownership
 
-## Architecture
-
-Document the fundamental dependency invariant:
+The fundamental dependency direction is:
 
 ```text
 ferret
@@ -53,121 +41,102 @@ wire
 consumers
 ```
 
-Ferret core must never depend on Wire.
-
-Wire adapts Ferret's public execution and debugger APIs for communication across a process boundary.
-
-Wire must not duplicate or redefine Ferret semantics.
-
-Explicitly establish ownership boundaries such as:
+Ferret core must never depend on Wire. Wire adapts Ferret's public execution and
+debugger APIs across a process boundary; it does not redefine them.
 
 | Concern | Owner |
 | --- | --- |
-| FQL/runtime semantics | Ferret |
-| Engine construction/configuration | host application |
+| FQL and runtime semantics | Ferret |
+| Engine construction and configuration | Host application |
 | Output encoding semantics | Ferret |
 | Debugger semantics | Ferret |
-| Wire protocol | protobuf definitions |
-| RPC adaptation | Wire server |
-| Logical client lifecycle | Wire |
-| gRPC transport | Wire transport/server layer |
+| Versioned Wire contract | Protobuf definitions |
+| RPC adaptation | `internal/grpcserver` |
+| Logical connections and resources | `internal/core` |
+| Public server lifecycle | Top-level `wire` package |
+| Thin Go client facade | `client` |
+| Physical gRPC transport and listener | Host and Wire server layer |
 | DAP translation | ferretd, not Wire |
-| LSP/language intelligence | ferretd/compiler tooling, not Wire |
+| LSP and language intelligence | ferretd/compiler tooling, not Wire |
+
+Start in the layer that owns the requested behavior. Do not move Ferret, DAP,
+LSP, transport, or host-configuration semantics into Wire for convenience.
 
 ## Execution boundary
 
-Document this invariant explicitly.
-
-Normal Ferret execution results are exposed through Ferret's existing encoded output abstraction:
+Normal Ferret results cross Wire through Ferret's encoded output abstraction:
 
 ```go
 type Output struct {
-    ContentType string
-    Content     []byte
+	ContentType string
+	Content     []byte
 }
 ```
 
-Wire preserves this abstraction as:
-
-```text
-content type + encoded bytes
-```
-
-Wire must **not** intercept, expose, reconstruct, or create a parallel representation of internal Ferret runtime values for normal execution.
-
-Ferret intentionally shields hosts from runtime value implementation details through its encoding layer.
+The Wire contract is exactly `content type + encoded bytes`. Wire must not
+intercept, expose, reconstruct, or create a parallel representation of internal
+Ferret runtime values for normal execution. Ferret intentionally shields hosts
+from runtime value implementation details through its encoding layer.
 
 Do not introduce:
 
-- Wire-specific Ferret engine options;
-- private codecs used to intercept raw values;
-- runtime-value type switches duplicating Ferret semantics;
-- alternate execution paths bypassing Ferret's public Session API.
+* Wire-specific Ferret engine options;
+* private codecs that intercept raw runtime values;
+* runtime-value type switches that duplicate Ferret semantics;
+* alternate execution paths that bypass Ferret's public `Plan`/`Session` APIs.
 
-Debugger APIs are a separate boundary and may expose structured debugger state where Ferret intentionally provides it.
+Debugger APIs are a separate boundary. They may expose structured frames,
+variables, references, breakpoints, locations, and stop state only where
+Ferret's public debugger API intentionally provides those concepts.
 
 ## Host ownership
 
-Wire must expose an engine supplied by the host.
-
-Conceptually:
+Wire exposes an engine supplied by the host:
 
 ```go
 engine := createApplicationEngine()
-
-wire.Serve(ctx, engine, ...)
+server, err := wire.NewServer(engine)
+err = server.Serve(ctx, listener)
 ```
 
-Wire must never attempt to reconstruct the application's engine configuration.
+Wire borrows the engine and listener. It does not close the engine, construct or
+secure a listener, or reconstruct the application's engine configuration.
+Custom modules, functions, policies, resources, configuration, and application
+state remain host-owned.
 
-Custom:
+Importing Wire must have no side effects. `NewServer` must never listen, bind,
+dial, inspect the environment, or implicitly expose an engine.
 
-- modules;
-- functions;
-- configuration;
-- resources;
-- application state
+## Protocol ownership and compatibility
 
-remain host-owned.
+The versioned protobuf API, currently `ferret.wire.v1`, is the canonical Wire
+contract. Generated Go types are not the source contract and must never be
+hand-edited.
 
-Importing Wire must have no side effects and must never implicitly expose an engine or start a listener.
+Preserve protobuf compatibility within a released protocol version. Prefer
+additive evolution. Never:
 
-## Protocol ownership
+* reuse field numbers or reserved names;
+* silently change a field's meaning;
+* change field types incompatibly;
+* remove existing fields or RPCs without deliberate versioning;
+* couple protocol messages to private Go implementation structures;
+* mirror DAP or LSP structures for a downstream consumer's convenience.
 
-The versioned protobuf API is the canonical Wire contract.
+If an incompatible redesign is necessary after release, introduce the
+appropriate protocol version instead of weakening `v1` compatibility. Run the
+canonical Buf breaking check against the intended base branch for every
+protocol change.
 
-For example:
-
-```proto
-package ferret.wire.v1;
-```
-
-Generated Go bindings are derived artifacts.
-
-Never hand-edit generated protobuf/gRPC code.
-
-Protocol evolution must preserve protobuf compatibility within `v1`.
-
-Prefer additive changes.
-
-Never:
-
-- reuse protobuf field numbers;
-- silently change field meaning;
-- change field types incompatibly;
-- remove existing RPCs/fields without deliberate versioning;
-- couple messages to Go implementation structures;
-- mirror DAP structures merely for ferretd convenience.
-
-If an incompatible protocol redesign becomes necessary, introduce an appropriate new protocol version rather than weakening `v1` compatibility.
+Opaque connection, plan, execution, and debug-session IDs are server-issued.
+Clients must not infer their structure or use one logical connection's IDs from
+another connection.
 
 ## Logical connection lifecycle
 
-Document the distinction between a **Wire connection** and a physical gRPC connection.
-
-A Wire connection is a logical client ownership scope represented by the long-lived Connect stream.
-
-Conceptually:
+A Wire connection is a logical client ownership scope represented by the
+long-lived `RuntimeService.Connect` stream. It is not a physical HTTP/2 or
+socket connection.
 
 ```text
 Wire connection
@@ -176,367 +145,399 @@ Wire connection
 └── debug sessions
 ```
 
-Resources created through a logical connection belong to it.
+Resources created through a logical connection belong to it. When the Connect
+stream terminates, cleanup must:
 
-When the Connect stream terminates:
+1. reject new operations and cancel in-flight creation;
+2. wait for in-flight creation to settle;
+3. close debug sessions;
+4. cancel and release executions;
+5. release plans;
+6. remove associated state and terminate owned goroutines.
 
-- active executions must be cancelled;
-- debug sessions must be closed;
-- plans must be released;
-- associated server state must be removed;
-- owned goroutines/resources must terminate.
+Release is a committed teardown operation. Concurrent callers that observe the
+same in-flight release wait for its retained result. After teardown completes,
+the ID is stale and must return the relevant structured not-found error. Do not
+retain permanent tombstones.
 
-Do not tie resource ownership to:
+Do not tie logical ownership to physical HTTP/2 connections, grpc-go transport
+internals, stats handlers, peer addresses, or socket identity. Do not introduce
+leases, TTLs, reconnect tokens, or heartbeats without a concrete requirement
+for reconnectable ownership.
 
-- physical HTTP/2 connections;
-- grpc-go transport implementation details;
-- experimental stats handlers;
-- socket identity.
+## Concurrency and cancellation
 
-Do not introduce leases, TTLs, or heartbeat machinery unless a concrete future requirement needs reconnectable resource ownership.
-
-## Concurrency and lifecycle
-
-Wire is concurrency-sensitive.
-
-For every stateful resource, ownership and cleanup must be explicit.
+Wire is concurrency-sensitive. Every stateful resource must have explicit
+ownership, synchronization, cancellation, and termination behavior.
 
 Pay particular attention to:
 
-- logical connections;
-- plans;
-- executions;
-- debug sessions;
-- event streams;
-- cancellation;
-- server shutdown;
-- client disconnect;
-- blocked/slow consumers.
+* logical connections and server shutdown;
+* pending, active, and closing resources;
+* plan cascades into executions and debug sessions;
+* debug state transitions and stale value references;
+* unary cancellation combined with logical-session cancellation;
+* event ordering, lag, terminal delivery, and stream exit;
+* blocked or disconnected consumers;
+* panic-safe completion of detached cleanup.
 
-Do not create unbounded event queues.
+Context cancellation must propagate into Ferret operations wherever Ferret's
+public API accepts a context. Inspection and breakpoint operations must not wait
+through a resume and then observe state from a later stop. Prefer the explicit
+Wire state lock plus Ferret's serialized debugger API; do not add a second
+command scheduler.
 
-A slow or disconnected client must not indefinitely block Ferret execution or leak goroutines.
+Use bounded event buffers and non-blocking producers. A slow client must not
+block Ferret execution or leak goroutines. Watcher-limit slots remain owned
+until the corresponding stream handler exits, including after lag or a terminal
+snapshot. Do not create unbounded queues or detached goroutines without a named
+owner and deterministic termination.
 
-Cleanup should be deterministic and idempotent where practical.
+Cleanup should be deterministic and idempotent internally. User-visible
+resource releases become not-found after completed cleanup, as described above.
 
-Context cancellation must propagate through Wire into Ferret operations.
+## Resource limits and security
 
-Avoid detached goroutines without explicit ownership and termination semantics.
+Treat every Wire server as a potential remote-code-execution boundary, even
+when the intended transport is local IPC. Requests and lifecycle identifiers
+are untrusted input.
 
-## Security boundary
+`DefaultServerLimits` is the secure default baseline:
 
-Treat every Wire server as a potential remote-code-execution boundary.
+* 64 logical connections;
+* 128 plans per connection;
+* 128 executions per connection;
+* 32 debug sessions per connection;
+* 8 watch streams per execution or debug session;
+* 256 breakpoints per debug session;
+* 4 MiB inbound gRPC messages;
+* 4 MiB outbound gRPC messages.
 
-Even when currently intended for local IPC, requests are untrusted input.
+Hosts may replace the complete positive limit set with `WithServerLimits`.
+Pending, active, and closing resources all count against the applicable limit.
+Do not add limit bypasses for internal convenience.
 
-Mandatory principles:
+Mandatory security principles:
 
-- no implicit listeners;
-- no externally reachable default listener;
-- validate identifiers and request state;
-- enforce sensible message-size/resource limits;
-- avoid unbounded allocation from client-controlled values;
-- do not leak unnecessary host filesystem/environment/internal details;
-- preserve Ferret's own filesystem/network security policies rather than bypassing them;
-- handle malformed requests safely;
-- do not trust client-provided lifecycle identifiers;
-- do not weaken Ferret security boundaries for Wire convenience.
+* no implicit or externally reachable default listener;
+* validate identifiers, required fields, ranges, and request state;
+* avoid unbounded allocation from client-controlled sizes or nesting;
+* sanitize internal failures and panic values;
+* do not leak unnecessary filesystem, environment, transport, or host details;
+* preserve Ferret filesystem and network policy instead of bypassing it;
+* handle malformed requests without panics or retained state;
+* do not trust client-provided resource ownership;
+* do not weaken Ferret security boundaries for Wire convenience.
 
-Authentication/TLS policy may evolve separately, but unsafe network exposure must never become the default.
+Authentication and TLS policy are host/transport concerns until a separate,
+explicit contract is introduced. Unsafe network exposure must never become the
+default.
 
 ## Generated code
 
-Carry over Ferret's generated-code discipline and adapt it for protobuf.
-
-Protobuf definitions/configuration are source.
-
-Generated Go protobuf/gRPC files are derived output.
-
-Never hand-edit generated files.
+Protobuf definitions and Buf configuration are source. Files under
+`gen/ferret/wire/v1` are derived output and exempt from handwritten style rules.
+Never hand-edit generated protobuf or gRPC code.
 
 When generator inputs change:
 
-1. run the canonical generation command;
-2. inspect the generated diff;
+1. run `make generate`;
+2. inspect the complete generated diff;
 3. commit source and generated changes together;
-4. run generation verification.
+4. run `make check-generate`.
 
-Generated-code changes without corresponding source/configuration changes should be treated as suspicious.
+Generated changes without corresponding protobuf or generation-configuration
+changes are suspicious and require explanation.
 
 ## Client API
 
-Wire may provide a thin handwritten Go facade over generated gRPC clients.
+The handwritten `client` package is a thin domain facade over generated gRPC
+clients. Its responsibilities are limited to:
 
-Its responsibilities should remain narrow:
-
-- logical Connect lifecycle;
-- ownership/propagation of the logical connection ID;
-- ergonomic operation/event APIs;
-- structured error mapping;
-- hiding unnecessary protobuf/gRPC ceremony.
+* logical Connect lifecycle;
+* private ownership and propagation of the logical connection ID;
+* ergonomic plan, execution, debug, and event operations;
+* explicit parameter conversion;
+* structured error mapping;
+* hiding unnecessary protobuf and gRPC ceremony.
 
 Do not create a second comprehensive object model merely to hide protobuf.
-
-Introduce handwritten domain types only where they materially improve API stability, correctness, or ergonomics.
-
-Guiding principle:
+Introduce handwritten domain types only when they materially improve API
+stability, correctness, or ergonomics.
 
 > Hide protocol ceremony, not protocol concepts.
 
-## Go type/file structure
+Client-created watch streams belong to the client's logical lifecycle. Reject
+new operations as soon as close begins. Closing the facade must not close the
+caller-owned `grpc.ClientConnInterface`.
 
-Carry over the Ferret `AGENTS.md` rules for:
+## Public API discipline
 
-- grouped related package-level type declarations;
-- responsibility-based file organization;
-- avoiding `helpers.go` / `utils.go`;
-- keeping cohesive related types together;
-- not creating one-file-per-type fragmentation.
+Treat the top-level `wire` package, the `client` package, and the versioned
+protobuf service as API-sensitive.
 
-These rules should remain mandatory for handwritten Go code.
+* Do not export new symbols unless an external contract requires them.
+* Keep logical connection IDs private in the handwritten client.
+* Add contract-focused doc comments to necessary exported APIs.
+* Preserve encoded-output, host-ownership, and listener-ownership boundaries.
+* Keep protocol concepts versioned and explicit.
+* Call out every intentional protocol or public API change in the final report.
+* Cover deliberately changed edge behavior and the new expected contract.
+
+## Go type and file structure
+
+These rules are mandatory for handwritten Go code:
+
+* Prefer one grouped `type ( ... )` declaration for related package-level types.
+* Group structs, interfaces, aliases, and named primitive types when they form a
+  cohesive responsibility.
+* Do not split files one type at a time merely because types have methods.
+* Keep related lifecycle or protocol-adaptation types together when proximity
+  improves understanding.
+* Split files by responsibility, such as server lifecycle, execution handling,
+  debugger commands, debugger inspection, debugger events, or client lifecycle.
+* Avoid overloaded files that combine unrelated responsibilities.
+* Do not create `helpers.go`, `utils.go`, or similar dumping grounds.
 
 Generated code is exempt.
 
 ## Function and method ownership
 
-Carry over Ferret's rules around:
+These rules are mandatory for handwritten Go code:
 
-- methods for behavior owned by type state/lifecycle;
-- constructors being allowed beside owned types;
-- avoiding unrelated package-level functions mixed into type-centered files;
-- responsibility-focused organization;
-- avoiding arbitrary helper-function dumping grounds.
+* Organize files around cohesive responsibilities rather than individual types.
+* Keep methods close to the state and lifecycle they own.
+* Constructors may live beside the types they construct.
+* A type-centered file must not mix in unrelated package-level functions.
+* If behavior belongs to a connection, plan, execution, debug session, watcher,
+  server, or client lifecycle, prefer a method on that owner.
+* Move genuinely package-level behavior into a predictably named,
+  responsibility-focused file.
+* Do not create arbitrary collections of small helper functions.
 
-Adapt examples to Wire concepts where useful.
+## Go control-flow spacing
 
-## Control-flow spacing
+These rules are mandatory for handwritten Go code. Blank lines separate logical
+units and make control transfer visible.
 
-Carry over Ferret's established Go control-flow spacing conventions exactly.
+### Producer and immediate check
 
-In particular:
+A declaration, assignment, lookup, call, assertion, or parse operation stays
+adjacent to the `if` that immediately validates or consumes it:
 
-- producer + immediate error/state check stay adjacent;
-- independent logical/control-flow blocks are separated;
-- `return`/`break` begin a separate logical group when preceded by another statement;
-- do not introduce artificial leading blank lines.
+```go
+response, err := stream.Recv()
+if err != nil {
+	return err
+}
 
-Generated code is exempt.
+session, ok := sessions[id]
+if !ok {
+	return ErrNotFound
+}
+```
+
+Do not insert a blank line between the producer and its immediate check. If the
+producer/check unit follows separate logic, add a blank line before it.
+
+### Independent control flow
+
+Separate independent control-flow blocks with a blank line:
+
+```go
+if request == nil {
+	return ErrInvalidRequest
+}
+
+if err := ctx.Err(); err != nil {
+	return err
+}
+```
+
+After a completed control-flow block, add a blank line before a separate
+statement or logical unit.
+
+### Return and break
+
+`return` and `break` begin a separate logical group when another statement
+precedes them in the same block:
+
+```go
+snapshot := execution.snapshot()
+
+return snapshot
+```
+
+Do not add an artificial leading blank line at the start of a function or block.
 
 ## Comments
 
-Carry over Ferret's comment philosophy.
+Do not mechanically comment every symbol. Comments should explain contracts,
+ownership, invariants, or non-obvious decisions, including:
 
-Do not mechanically comment everything.
+* protobuf compatibility choices;
+* logical resource ownership and release semantics;
+* cancellation and shutdown behavior;
+* lock ordering and concurrency assumptions;
+* bounded stream behavior;
+* security assumptions and sanitization.
 
-Comments should explain:
-
-- protocol invariants;
-- lifecycle ownership;
-- cancellation semantics;
-- concurrency behavior;
-- security assumptions;
-- non-obvious protobuf compatibility decisions.
-
-Exported public SDK APIs should have useful contract-focused documentation.
-
-Avoid comments that merely restate symbol names.
+Exported public server and client APIs should have useful contract-focused doc
+comments. Avoid comments that merely restate a symbol name or signature.
 
 ## Engineering discipline
-
-Adapt Ferret's engineering-discipline section.
 
 For every non-trivial change:
 
 1. identify the owning Wire subsystem;
-2. identify protocol/API/lifecycle invariants;
+2. identify protocol, API, lifecycle, and security invariants;
 3. choose the smallest coherent implementation;
-4. add/update contract-focused tests;
-5. evaluate concurrency and cleanup;
-6. evaluate security implications;
-7. evaluate protobuf compatibility;
+4. add or update contract-focused tests at the owning layer;
+5. evaluate concurrency, cancellation, and cleanup;
+6. evaluate untrusted-input and resource-exhaustion implications;
+7. evaluate protobuf and public API compatibility;
 8. run narrow validation first;
 9. broaden validation according to risk;
-10. perform mandatory final self-review;
-11. fix findings and rerun affected validation;
-12. report actual validation accurately.
+10. update affected documentation;
+11. perform the mandatory final self-review;
+12. fix findings and rerun affected validation;
+13. report actual validation and limitations accurately.
 
-Do not perform opportunistic refactors unrelated to the task.
+Do not perform opportunistic refactors unrelated to the task. A task is not
+complete merely because the first implementation compiles or tests pass.
 
-## Tests
+## Tests and validation
 
-Require tests at the layer owning the behavior.
+Test behavior at the layer that owns it and add integration coverage when a
+contract crosses layers:
 
-Examples:
+| Behavior | Owning test layer |
+| --- | --- |
+| Protobuf/API compatibility | Buf lint and breaking checks |
+| Server request semantics | `internal/grpcserver` tests |
+| Logical ownership and limits | `internal/core` lifecycle tests |
+| Ferret execution adaptation | Top-level integration tests using public Ferret APIs |
+| Cancellation and cleanup | Lifecycle and integration tests |
+| Debugger commands and inspection | Core and integration debugger tests |
+| Client facade and conversions | `client` contract tests |
 
-- protobuf/API compatibility → protocol checks;
-- server request semantics → server tests;
-- connection ownership → lifecycle tests;
-- execution → integration with Ferret public API;
-- cancellation → cancellation/resource cleanup tests;
-- debugger behavior → debugger adapter tests;
-- client facade → client contract tests.
+Lifecycle-sensitive changes should cover positive behavior and relevant
+cancellation, disconnect, shutdown, stale or unknown IDs, double cleanup,
+concurrent operations, slow consumers, and panic paths. Use bounded test waits
+and deadlines. Check cleanup errors.
 
-Lifecycle-sensitive changes should cover positive behavior plus relevant:
+Run the race detector for concurrency-sensitive changes. Never claim validation
+passed unless the command actually ran successfully.
 
-- cancellation;
-- disconnect;
-- shutdown;
-- stale/unknown IDs;
-- double cleanup;
-- concurrent operations;
-- slow consumers.
+Canonical repository validation is:
 
-Run the race detector for concurrency-sensitive changes.
+```sh
+make fmt
+make check-fmt
+make generate
+make check-generate
+make proto-lint
+make proto-breaking BUF_BREAKING_AGAINST=.git#branch=main
+make check-tidy
+make vet
+make test
+make test-race
+make build
+```
 
-Never claim validation passed unless it actually ran.
+Use the relevant subset for narrow iteration, then broaden according to risk.
+`make generate` is required when generator inputs change.
 
 ## Performance
 
-Adapt Ferret's significant-change philosophy to Wire.
+A change is performance-significant when it can materially affect RPC latency,
+event throughput, allocations per request or event, serialization, buffering,
+synchronization, execution hot paths, resource lookup, cancellation, or
+concurrent clients.
 
-Changes are performance-significant when they can materially affect:
-
-- RPC latency;
-- event throughput;
-- allocations per event/request;
-- serialization;
-- buffering;
-- synchronization;
-- execution hot paths;
-- connection/resource lookup;
-- cancellation;
-- concurrent clients.
-
-Benchmark meaningful hot-path changes when appropriate.
-
-Do not micro-optimize speculative paths at the expense of clarity or correctness.
+For meaningful hot-path changes, run or add a representative benchmark and
+compare `ns/op`, `B/op`, and `allocs/op`. Investigate material regressions. Do
+not micro-optimize speculative paths at the expense of clarity, security, or
+correctness. If the environment cannot run a required benchmark, report that
+fact rather than claiming benchmark validation.
 
 ## Mandatory final self-review
 
-Preserve Ferret's strong second-pass self-review requirement.
-
-For every non-trivial task, inspect the **complete final diff** after implementation and initial validation.
-
-Review explicitly for:
+After implementation and initial validation, inspect the complete final diff.
+This is a second-pass review, not a statement that tests passed.
 
 ### Correctness
 
-- incomplete request handling;
-- invalid state transitions;
-- incorrect error mapping;
-- stale IDs;
-- malformed input behavior.
+Check incomplete request handling, invalid state transitions, incorrect error
+mapping, stale IDs, malformed inputs, unsupported codecs, cancellation, and
+terminal event ordering.
 
-### Lifecycle/concurrency
+### Lifecycle and concurrency
 
-- goroutine leaks;
-- resources surviving connection teardown;
-- missing cancellation;
-- deadlocks;
-- races;
-- blocked event producers;
-- shutdown ordering.
+Check goroutine leaks, retained resources, missing cancellation, unsafe
+`WaitGroup` use, lock ordering, deadlocks, races, blocked producers, watcher-slot
+release, and shutdown ordering.
 
-### Architecture
+### Architecture and API
 
-- Ferret semantics duplicated in Wire;
-- transport details leaking into protocol/domain APIs;
-- DAP/LSP concerns entering Wire;
-- host engine construction leaking into Wire;
-- generated protobuf types unnecessarily contaminating SDK APIs;
-- unnecessary exported API.
+Check for Ferret semantics duplicated in Wire, transport details leaking into
+domain APIs, DAP/LSP concerns entering Wire, host engine construction leaking
+into Wire, unnecessary protobuf contamination of the client facade, and
+unnecessary exported APIs.
 
 ### Security
 
-- unintended listener exposure;
-- missing input/resource limits;
-- information leakage;
-- trust of client-controlled state;
-- Ferret security boundaries being bypassed.
+Check unintended listener exposure, missing limits, unbounded client-controlled
+allocation, information leakage, trust of client-controlled ownership, panic
+sanitization, and Ferret policy bypasses.
 
 ### Protocol compatibility
 
-- field-number reuse;
-- incompatible message changes;
-- accidental RPC removal/change;
-- generated code not synchronized with source.
+Check field-number or name reuse, incompatible field changes, accidental RPC
+changes, missing reservations, generated/source drift, and an incorrect Buf
+comparison base.
 
-### Organization
+### Organization and scope
 
-- unnecessary abstraction;
-- generic helper files;
-- inconsistent method/function ownership;
-- fragmented related types;
-- comment wallpaper;
-- temporary/debug code.
+Check unnecessary abstractions, generic helper files, inconsistent ownership,
+fragmented related types, overloaded files, comment wallpaper, temporary code,
+debugging artifacts, unrelated edits, and scope expansion.
 
-When self-review finds a meaningful issue, fix it and rerun affected validation.
+When review finds a meaningful issue, fix it and rerun every affected command.
+Do not use self-review to justify speculative redesign or unrelated cleanup.
 
-A task is not complete merely because tests pass.
+## CI and documentation synchronization
 
-## CI expectations
+CI uses the Makefile's canonical targets on Linux, macOS, and Windows. Linux
+also runs race, protobuf lint, generation consistency, and pull-request Buf
+breaking checks against the fetched base branch. Keep CI orchestration in the
+workflow and command composition in the Makefile.
 
-Agents should use the repository's canonical Makefile/CI commands rather than recreating command sequences independently.
-
-At minimum, where available, final validation should cover:
-
-- formatting;
-- generation consistency;
-- protobuf lint;
-- protobuf breaking-change checks;
-- Go tests;
-- Go vet/static analysis;
-- race tests for concurrency-sensitive changes;
-- module tidiness.
-
-Use actual repository commands rather than hard-coding commands in this document if the Makefile already owns them.
-
-## Documentation synchronization
-
-Documentation is part of implementation.
-
-Update repository documentation when changing:
-
-- protocol behavior;
-- lifecycle semantics;
-- public SDK APIs;
-- security assumptions;
-- supported transports;
-- development workflow.
-
-Do not create documentation churn for behavior-neutral implementation changes.
-
-If a change affects another Ferret ecosystem repository's public documentation but that repository is unavailable, explicitly identify the required follow-up.
+Documentation is part of implementation. Update `README.md` and protobuf
+comments when changing protocol behavior, lifecycle semantics, public APIs,
+security assumptions, supported transports, or development workflow. Avoid
+documentation churn for behavior-neutral internal changes. If a public change
+requires documentation in another Ferret ecosystem repository that is not in
+scope or available, identify the exact follow-up in the final report.
 
 ## Scope discipline
 
-Wire should remain a narrow bridge between Ferret and external tooling.
-
-Do not allow it to gradually become:
-
-- another Ferret runtime;
-- an LSP implementation;
-- a DAP implementation;
-- a module registry;
-- a plugin manager;
-- an application framework;
-- a distributed execution framework.
-
-New responsibilities require a concrete architectural reason.
+Wire is a narrow bridge between Ferret and external tooling. Do not allow it to
+become another Ferret runtime, an LSP or DAP implementation, a module registry,
+a plugin manager, an application framework, or a distributed execution system.
+New responsibilities require a concrete architectural reason and an explicit
+contract.
 
 ## Final reporting
 
-For non-trivial changes, report:
+For non-trivial changes, report concisely:
 
-- owning subsystem/files changed;
-- protocol/API behavior changed or preserved;
-- lifecycle/concurrency impact;
-- security impact;
-- tests added/updated;
-- exact validation actually run;
-- benchmark results where applicable;
-- documentation impact;
-- mandatory self-review completion and findings corrected;
-- remaining limitations or skipped validation.
-
-Keep reports concise and factual.
+* owning subsystems and files changed;
+* protocol and public API behavior changed or preserved;
+* lifecycle, concurrency, and security impact;
+* tests added or updated;
+* exact validation actually run;
+* benchmark results when applicable;
+* documentation impact;
+* completion of mandatory self-review and corrected findings;
+* remaining limitations or skipped validation.

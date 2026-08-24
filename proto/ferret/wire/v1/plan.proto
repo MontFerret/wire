@@ -7,7 +7,10 @@ import "ferret/wire/v1/runtime.proto";
 option go_package = "github.com/MontFerret/wire/gen/ferret/wire/v1;wirev1";
 
 service PlanService {
+  // Compile creates a connection-owned Ferret plan from FQL source.
   rpc Compile(CompileRequest) returns (CompileResponse);
+  // ReleasePlan cancels and releases the plan and all of its child resources.
+  // The plan ID becomes stale after cleanup completes.
   rpc ReleasePlan(ReleasePlanRequest) returns (ReleasePlanResponse);
 }
 
@@ -37,8 +40,10 @@ message CompileRequest {
 }
 
 message CompileResponse {
+  reserved 2;
+  reserved "diagnostics";
+
   Plan plan = 1;
-  repeated Diagnostic diagnostics = 2;
 }
 
 message ReleasePlanRequest {

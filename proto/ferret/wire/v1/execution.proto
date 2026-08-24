@@ -9,9 +9,12 @@ import "ferret/wire/v1/value.proto";
 option go_package = "github.com/MontFerret/wire/gen/ferret/wire/v1;wirev1";
 
 service ExecutionService {
+  // Execute publishes a connection-owned execution of an existing plan.
   rpc Execute(ExecuteRequest) returns (ExecuteResponse);
   rpc CancelExecution(CancelExecutionRequest) returns (CancelExecutionResponse);
+  // ReleaseExecution commits cancellation and cleanup. The execution ID then becomes stale.
   rpc ReleaseExecution(ReleaseExecutionRequest) returns (ReleaseExecutionResponse);
+  // WatchExecution is finite, ordered, and ends after one terminal snapshot.
   rpc WatchExecution(WatchExecutionRequest) returns (stream WatchExecutionResponse);
 }
 
@@ -27,9 +30,13 @@ enum ExecutionState {
   EXECUTION_STATE_CANCELLED = 4;
 }
 
+// Output is Ferret's encoded output contract. Wire does not expose runtime values.
 message Output {
+  reserved "data";
+
   string content_type = 1;
-  bytes data = 2;
+  // content is already encoded by Ferret using content_type.
+  bytes content = 2;
 }
 
 message Failure {
@@ -50,10 +57,6 @@ message ExecutionStarted {
   Execution execution = 1;
 }
 
-message ExecutionOutput {
-  Output output = 1;
-}
-
 message ExecutionCompleted {
   Execution execution = 1;
 }
@@ -67,11 +70,13 @@ message ExecutionCancelled {
 }
 
 message WatchExecutionResponse {
+  reserved 4;
+  reserved "output";
+
   ExecutionId execution_id = 1;
   uint64 sequence = 2;
   oneof payload {
     ExecutionStarted started = 3;
-    ExecutionOutput output = 4;
     ExecutionCompleted completed = 5;
     ExecutionFailed failed = 6;
     ExecutionCancelled cancelled = 7;

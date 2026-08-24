@@ -8,6 +8,7 @@ func convertRuntimeInfo(value *wirev1.RuntimeInfo) RuntimeInfo {
 		WireVersion:   value.GetWireVersion(),
 		FerretVersion: value.GetFerretVersion(),
 	}
+
 	if identity := value.GetRuntimeIdentity(); identity != nil {
 		result.RuntimeIdentity = &RuntimeIdentity{
 			Name:       identity.GetName(),
@@ -15,6 +16,7 @@ func convertRuntimeInfo(value *wirev1.RuntimeInfo) RuntimeInfo {
 			InstanceID: identity.GetInstanceId(),
 		}
 	}
+
 	for _, capability := range value.GetCapabilities() {
 		switch capability {
 		case wirev1.Capability_CAPABILITY_EXECUTION:
@@ -25,6 +27,7 @@ func convertRuntimeInfo(value *wirev1.RuntimeInfo) RuntimeInfo {
 			result.Capabilities.Cancellation = true
 		}
 	}
+
 	return result
 }
 
@@ -40,20 +43,24 @@ func convertOutput(value *wirev1.Output) *Output {
 	if value == nil {
 		return nil
 	}
-	return &Output{ContentType: value.GetContentType(), Data: append([]byte(nil), value.GetData()...)}
+
+	return &Output{ContentType: value.GetContentType(), Content: append([]byte(nil), value.GetContent()...)}
 }
 
 func convertDiagnostics(values []*wirev1.Diagnostic) []Diagnostic {
 	result := make([]Diagnostic, len(values))
+
 	for i, value := range values {
 		if value == nil {
 			continue
 		}
+
 		spans := make([]DiagnosticSpan, len(value.GetSpans()))
 		for j, span := range value.GetSpans() {
 			if span == nil {
 				continue
 			}
+
 			spans[j] = DiagnosticSpan{
 				Start:   span.GetStartByte(),
 				End:     span.GetEndByte(),
@@ -61,6 +68,7 @@ func convertDiagnostics(values []*wirev1.Diagnostic) []Diagnostic {
 				Primary: span.GetPrimary(),
 			}
 		}
+
 		result[i] = Diagnostic{
 			Kind:           value.GetKind(),
 			Message:        value.GetMessage(),
@@ -70,6 +78,7 @@ func convertDiagnostics(values []*wirev1.Diagnostic) []Diagnostic {
 			Spans:          spans,
 		}
 	}
+
 	return result
 }
 
@@ -77,6 +86,7 @@ func convertFailure(value *wirev1.Failure) *Failure {
 	if value == nil {
 		return nil
 	}
+
 	return &Failure{
 		Category:    clientErrorCategory(value.GetCategory()),
 		Message:     value.GetMessage(),
@@ -115,9 +125,6 @@ func convertExecutionEvent(value *wirev1.WatchExecutionResponse) ExecutionEvent 
 	case *wirev1.WatchExecutionResponse_Started:
 		result.Kind = ExecutionEventStarted
 		result.Execution = convertExecution(payload.Started.GetExecution())
-	case *wirev1.WatchExecutionResponse_Output:
-		result.Kind = ExecutionEventOutput
-		result.Output = convertOutput(payload.Output.GetOutput())
 	case *wirev1.WatchExecutionResponse_Completed:
 		result.Kind = ExecutionEventCompleted
 		result.Execution = convertExecution(payload.Completed.GetExecution())
@@ -128,6 +135,7 @@ func convertExecutionEvent(value *wirev1.WatchExecutionResponse) ExecutionEvent 
 		result.Kind = ExecutionEventCancelled
 		result.Execution = convertExecution(payload.Cancelled.GetExecution())
 	}
+
 	return result
 }
 
@@ -135,6 +143,7 @@ func convertLocation(value *wirev1.SourceLocation) *Location {
 	if value == nil {
 		return nil
 	}
+
 	return &Location{File: value.GetFile(), Line: int(value.GetLine()), Column: int(value.GetColumn())}
 }
 
@@ -199,9 +208,6 @@ func convertDebugEvent(value *wirev1.WatchDebugResponse) DebugEvent {
 	case *wirev1.WatchDebugResponse_Stopped:
 		result.Kind = DebugEventStopped
 		result.Session = convertDebugSession(payload.Stopped.GetSession())
-	case *wirev1.WatchDebugResponse_Output:
-		result.Kind = DebugEventOutput
-		result.Output = convertOutput(payload.Output.GetOutput())
 	case *wirev1.WatchDebugResponse_Completed:
 		result.Kind = DebugEventCompleted
 		result.Session = convertDebugSession(payload.Completed.GetSession())
@@ -212,6 +218,7 @@ func convertDebugEvent(value *wirev1.WatchDebugResponse) DebugEvent {
 		result.Kind = DebugEventTerminated
 		result.Session = convertDebugSession(payload.Terminated.GetSession())
 	}
+
 	return result
 }
 
@@ -232,5 +239,10 @@ func convertDebugValue(value *wirev1.DebugValue) DebugValue {
 }
 
 func convertVariable(value *wirev1.Variable) Variable {
-	return Variable{Name: value.GetName(), Value: convertDebugValue(value.GetValue()), Mutable: value.GetMutable()}
+	return Variable{
+		Name:      value.GetName(),
+		Value:     convertDebugValue(value.GetValue()),
+		Mutable:   value.GetMutable(),
+		Parameter: value.GetParameter(),
+	}
 }
