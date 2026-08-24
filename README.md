@@ -81,6 +81,25 @@ if err := server.Serve(ctx, listener); err != nil {
 The caller owns the gRPC transport. Closing the Wire client closes only its
 logical connection and the remote resources created through it.
 
+After opening a `client.Client`, the common one-shot path creates and releases
+its plan and execution automatically:
+
+```go
+output, err := wireClient.Run(
+    ctx,
+    client.Source{Identity: "example.fql", Content: "RETURN @input"},
+    client.Parameters{"input": "hello"},
+    client.RunOptions{},
+)
+if err != nil {
+    log.Fatal(err)
+}
+fmt.Printf("%s: %s\n", output.ContentType, output.Content)
+```
+
+Use explicit handles when plans must be reused or execution needs watching,
+cancellation, or separately reported cleanup:
+
 ```go
 const socket = "/var/run/my-app/ferret-wire.sock"
 conn, err := grpc.NewClient(

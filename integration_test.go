@@ -295,6 +295,52 @@ func TestExecutionCancellationIsATerminalEvent(t *testing.T) {
 			break
 		}
 	}
+
+	if _, err := execution.Wait(testContext(t)); !errors.Is(err, client.ErrExecutionCancelled) || errors.Is(err, context.Canceled) {
+		t.Fatalf("Wait did not preserve remote cancellation semantics: %v", err)
+	}
+}
+
+func TestConvenienceExecutionAPIs(t *testing.T) {
+	env := newIntegrationEnv(t)
+
+	output, err := env.client.Run(
+		testContext(t),
+		client.Source{Content: "RETURN @value"},
+		client.Parameters{"value": "client"},
+		client.RunOptions{Execute: client.ExecuteOptions{OutputContentType: "application/json"}},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var clientValue string
+	if err := json.Unmarshal(output.Content, &clientValue); err != nil || clientValue != "client" || output.ContentType != "application/json" {
+		t.Fatalf("unexpected Client.Run output: %q, %v", output.Content, err)
+	}
+
+	plan, err := env.client.Compile(testContext(t), client.Source{Content: "RETURN @value"}, client.CompileOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := plan.Run(testContext(t), client.Parameters{"value": "first"}, client.ExecuteOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := plan.Run(testContext(t), client.Parameters{"value": "second"}, client.ExecuteOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var firstValue string
+	if err := json.Unmarshal(first.Content, &firstValue); err != nil || firstValue != "first" {
+		t.Fatalf("unexpected first Plan.Run output: %q, %v", first.Content, err)
+	}
+	var secondValue string
+	if err := json.Unmarshal(second.Content, &secondValue); err != nil || secondValue != "second" {
+		t.Fatalf("unexpected second Plan.Run output: %q, %v", second.Content, err)
+	}
+	if err := plan.Close(testContext(t)); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestConcurrentExecutionsShareAPlan(t *testing.T) {
@@ -375,6 +421,15 @@ func TestExecutionFailureAndPlanReleaseCascade(t *testing.T) {
 			}
 
 			break
+		}
+	}
+
+	if output, waitErr := execution.Wait(testContext(t)); waitErr == nil || output.Content != nil {
+		t.Fatalf("unexpected failed Wait result: %#v, %v", output, waitErr)
+	} else {
+		var failure *client.Failure
+		if !errors.As(waitErr, &failure) || failure.Category != client.ErrorExecution || len(failure.Diagnostics) == 0 {
+			t.Fatalf("Wait lost the structured terminal failure: %#v", waitErr)
 		}
 	}
 

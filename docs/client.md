@@ -42,11 +42,61 @@ defer func() {
 	}
 }()
 
-events, err := execution.Watch(ctx)
+output, err := execution.Wait(ctx)
 ```
 
 Plan metadata is immutable. `Parameters` returns a defensive copy, and
 `Debuggable` reports the compile option reflected by the server.
+
+## Convenience execution
+
+For a one-shot program, `Client.Run` composes compile, execute, wait, and
+ordered cleanup while preserving Ferret's encoded output boundary:
+
+```go
+output, err := wireClient.Run(
+	ctx,
+	client.Source{Identity: "query.fql", Content: "RETURN @input"},
+	client.Parameters{"input": "hello"},
+	client.RunOptions{Execute: client.ExecuteOptions{OutputContentType: "application/json"}},
+)
+```
+
+A caller that owns a reusable plan can run it repeatedly without surrendering
+plan ownership:
+
+```go
+plan, err := wireClient.Compile(ctx, source, client.CompileOptions{})
+if err != nil {
+	return err
+}
+defer func() {
+	if closeErr := plan.Close(context.Background()); closeErr != nil {
+		log.Printf("close plan: %v", closeErr)
+	}
+}()
+
+output, err := plan.Run(ctx, parameters, client.ExecuteOptions{})
+```
+
+The ownership boundary is explicit:
+
+| Operation | Creates | Releases |
+| --- | --- | --- |
+| `Client.Run` | Plan and Execution | Plan and Execution |
+| `Plan.Run` | Execution | Execution only |
+| `Execution.Wait` | Nothing | Nothing |
+
+`Execution.Wait` opens a fresh watch, ignores non-terminal snapshots, and
+returns when the execution completes, fails, or is remotely cancelled. Failed
+terminal snapshots return `*client.Failure`; remote cancellation returns
+`client.ErrExecutionCancelled`. Cancellation of the caller's waiting context
+instead returns that context's error.
+
+Convenience cleanup is synchronous and uses a cancellation-detached context,
+so resources created by `Run` are still released after the request context is
+cancelled. Execution and cleanup errors are joined rather than replacing one
+another.
 
 ## Snapshots and events
 
@@ -103,5 +153,6 @@ The client package is limited to:
 - hiding protobuf and gRPC ceremony without hiding protocol concepts.
 
 Closing the Client never closes the caller-owned gRPC connection. The facade
-does not construct engines or transports, add one-shot compile/execute/wait
-workflows, or duplicate Ferret runtime semantics.
+does not construct engines or transports. Its convenience execution methods
+compose the same handles and watches; they do not duplicate Ferret runtime
+semantics.

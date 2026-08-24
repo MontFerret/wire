@@ -135,6 +135,54 @@ func (e *Execution) Watch(ctx context.Context) (*ExecutionEvents, error) {
 	return &ExecutionEvents{stream: stream, cancel: cancel}, nil
 }
 
+// Wait observes execution events until the remote execution reaches a terminal
+// state. A failed execution returns *Failure, while remote cancellation returns
+// ErrExecutionCancelled. Caller cancellation returns the waiting context's
+// error. Wait does not release the execution or retain mutable snapshot state.
+func (e *Execution) Wait(ctx context.Context) (Output, error) {
+	events, err := e.Watch(ctx)
+	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return Output{}, ctxErr
+		}
+
+		return Output{}, err
+	}
+
+	for {
+		event, receiveErr := events.Recv()
+		if receiveErr != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return Output{}, ctxErr
+			}
+
+			return Output{}, receiveErr
+		}
+
+		if !event.Snapshot.State.terminal() {
+			continue
+		}
+
+		output := event.Snapshot.output()
+		switch event.Snapshot.State {
+		case ExecutionCompleted:
+			if event.Snapshot.Output == nil {
+				return Output{}, errors.New("Wire server returned a completed execution without output")
+			}
+
+			return output, nil
+		case ExecutionFailed:
+			if event.Snapshot.Failure == nil {
+				return output, errors.New("Wire server returned a failed execution without failure details")
+			}
+
+			return output, event.Snapshot.Failure
+		case ExecutionCancelled:
+			return output, ErrExecutionCancelled
+		}
+	}
+}
+
 // Recv blocks for the next ordered execution event. It releases the local
 // stream when a terminal event or error is observed.
 func (events *ExecutionEvents) Recv() (ExecutionEvent, error) {
@@ -156,9 +204,29 @@ func (events *ExecutionEvents) Recv() (ExecutionEvent, error) {
 	}
 
 	event := convertExecutionEvent(value)
-	if event.Kind == ExecutionEventCompleted || event.Kind == ExecutionEventFailed || event.Kind == ExecutionEventCancelled {
+	if event.Snapshot.State.terminal() {
 		events.cancel()
 	}
 
 	return event, nil
+}
+
+func (state ExecutionState) terminal() bool {
+	switch state {
+	case ExecutionCompleted, ExecutionFailed, ExecutionCancelled:
+		return true
+	default:
+		return false
+	}
+}
+
+func (snapshot ExecutionSnapshot) output() Output {
+	if snapshot.Output == nil {
+		return Output{}
+	}
+
+	return Output{
+		ContentType: snapshot.Output.ContentType,
+		Content:     append([]byte(nil), snapshot.Output.Content...),
+	}
 }

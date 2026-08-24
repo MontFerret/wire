@@ -8,9 +8,24 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// ErrClosed reports an operation attempted through a closed Client or resource
-// handle. Closing begins when the first Close call commits teardown.
-var ErrClosed = errors.New("Wire client or resource is closed")
+var (
+	// ErrClosed reports an operation attempted through a closed Client or resource
+	// handle. Closing begins when the first Close call commits teardown.
+	ErrClosed = errors.New("Wire client or resource is closed")
+
+	// ErrExecutionCancelled reports that a remote execution reached its cancelled
+	// terminal state. It is distinct from cancellation of a Wait caller's context.
+	ErrExecutionCancelled = errors.New("remote execution was cancelled")
+)
+
+// Error returns the sanitized terminal failure message.
+func (f *Failure) Error() string {
+	if f == nil {
+		return ""
+	}
+
+	return f.Message
+}
 
 // Error returns the sanitized Wire error message.
 func (e *Error) Error() string {

@@ -48,6 +48,14 @@ type (
 		OutputContentType string
 	}
 
+	// RunOptions composes the existing compile and execute options for Client.Run.
+	RunOptions struct {
+		// Compile controls construction of the temporary plan.
+		Compile CompileOptions
+		// Execute controls the temporary execution and its encoded output.
+		Execute ExecuteOptions
+	}
+
 	// DebugSessionOptions controls encoded debug completion output.
 	DebugSessionOptions struct {
 		OutputContentType string
@@ -81,7 +89,8 @@ type (
 		Spans          []DiagnosticSpan
 	}
 
-	// Failure is a sanitized terminal execution or debug failure.
+	// Failure is a sanitized terminal execution or debug failure. It implements
+	// error so terminal failures remain available through errors.As.
 	Failure struct {
 		Category    ErrorCategory
 		Message     string
