@@ -61,6 +61,21 @@ func (p *Plan) Debuggable() bool {
 	return p != nil && p.debuggable
 }
 
+// Run executes the plan once, waits for encoded output, and releases the
+// execution it creates. Execution and release errors are joined. The caller
+// retains ownership of the Plan.
+func (p *Plan) Run(ctx context.Context, parameters Parameters, options ExecuteOptions) (Output, error) {
+	execution, err := p.Execute(ctx, parameters, options)
+	if err != nil {
+		return Output{}, err
+	}
+
+	output, waitErr := execution.Wait(ctx)
+	closeErr := execution.Close(context.WithoutCancel(ctx))
+
+	return output, errors.Join(waitErr, closeErr)
+}
+
 func (p *Plan) checkOpen() error {
 	if p == nil || p.client == nil || p.id == "" || p.close == nil || p.close.Started() {
 		return ErrClosed

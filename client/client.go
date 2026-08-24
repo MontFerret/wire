@@ -118,6 +118,21 @@ func (c *Client) RuntimeInfo() RuntimeInfo {
 	return result
 }
 
+// Run compiles and executes source once, returning Ferret's encoded output.
+// It releases the Plan and Execution resources it creates before returning and
+// joins operation and release errors.
+func (c *Client) Run(ctx context.Context, source Source, parameters Parameters, options RunOptions) (Output, error) {
+	plan, err := c.Compile(ctx, source, options.Compile)
+	if err != nil {
+		return Output{}, err
+	}
+
+	output, runErr := plan.Run(ctx, parameters, options.Execute)
+	closeErr := plan.Close(context.WithoutCancel(ctx))
+
+	return output, errors.Join(runErr, closeErr)
+}
+
 // Close releases the logical Wire connection without closing the caller-owned
 // gRPC transport. Concurrent callers wait for the same retained result.
 func (c *Client) Close(ctx context.Context) error {
