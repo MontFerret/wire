@@ -43,7 +43,9 @@ jobs:
       - run: make test-race
       - run: make proto-lint
       - run: make check-generate
-      - if: github.event_name == 'pull_request'
+      # PR #1 establishes the unreleased v1 protocol baseline. Every later PR
+      # compares its protocol against the fetched base branch.
+      - if: github.event_name == 'pull_request' && github.event.pull_request.number != 1
         run: git fetch origin "+refs/heads/${{ github.base_ref }}:refs/heads/${{ github.base_ref }}"
-      - if: github.event_name == 'pull_request'
+      - if: github.event_name == 'pull_request' && github.event.pull_request.number != 1
         run: make proto-breaking BUF_BREAKING_AGAINST=".git#branch=${{ github.base_ref }}"
