@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"runtime"
 	"slices"
 	"sync"
 	"testing"
@@ -28,6 +29,11 @@ type handleServer struct {
 	connections             int
 	executions              int
 	calls                   []string
+	releasePlanCalls        int
+	releasePlanEntered      chan struct{}
+	allowPlanRelease        chan struct{}
+	releasePlanOnce         sync.Once
+	releasePlanErr          error
 	releaseExecutionCalls   int
 	releaseExecutionEntered chan struct{}
 	allowExecutionRelease   chan struct{}
@@ -71,7 +77,25 @@ func (s *handleServer) Compile(_ context.Context, request *wirev1.CompileRequest
 }
 
 func (s *handleServer) ReleasePlan(_ context.Context, request *wirev1.ReleasePlanRequest) (*wirev1.ReleasePlanResponse, error) {
-	s.record("release-plan", request.GetConnectionId().GetValue(), request.GetPlanId().GetValue())
+	s.mu.Lock()
+	s.releasePlanCalls++
+	s.calls = append(s.calls, call("release-plan", request.GetConnectionId().GetValue(), request.GetPlanId().GetValue()))
+	entered := s.releasePlanEntered
+	allow := s.allowPlanRelease
+	err := s.releasePlanErr
+	s.mu.Unlock()
+
+	if entered != nil {
+		s.releasePlanOnce.Do(func() { close(entered) })
+	}
+
+	if allow != nil {
+		<-allow
+	}
+
+	if err != nil {
+		return nil, err
+	}
 
 	return &wirev1.ReleasePlanResponse{}, nil
 }
@@ -407,9 +431,10 @@ func TestHandlesBindOwnerAndResourceIdentifiers(t *testing.T) {
 	}
 }
 
-func TestHandleCloseRetainsFailureAndRejectsUse(t *testing.T) {
+func TestHandleCloseContinuesAfterFirstCallerCancellation(t *testing.T) {
 	entered := make(chan struct{})
 	allow := make(chan struct{})
+	t.Cleanup(func() { unblock(allow) })
 	implementation := &handleServer{
 		releaseExecutionEntered: entered,
 		allowExecutionRelease:   allow,
@@ -427,7 +452,8 @@ func TestHandleCloseRetainsFailureAndRejectsUse(t *testing.T) {
 	}
 
 	first := make(chan error, 1)
-	firstCtx := testClientContext(t)
+	firstCtx, cancelFirst := context.WithCancel(context.Background())
+	t.Cleanup(cancelFirst)
 	go func() { first <- execution.Close(firstCtx) }()
 	select {
 	case <-entered:
@@ -435,10 +461,9 @@ func TestHandleCloseRetainsFailureAndRejectsUse(t *testing.T) {
 		t.Fatal("execution close did not reach the server")
 	}
 
-	cancelled, cancel := context.WithCancel(context.Background())
-	cancel()
-	if err := execution.Close(cancelled); !errors.Is(err, context.Canceled) {
-		t.Fatalf("cancelled waiter changed retained cleanup: %v", err)
+	cancelFirst()
+	if err := receiveCloseResult(t, first, "first execution close"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("first close did not stop waiting after cancellation: %v", err)
 	}
 	if err := execution.Cancel(testClientContext(t)); !errors.Is(err, ErrClosed) {
 		t.Fatalf("closed execution accepted cancellation: %v", err)
@@ -447,17 +472,14 @@ func TestHandleCloseRetainsFailureAndRejectsUse(t *testing.T) {
 	second := make(chan error, 1)
 	secondCtx := testClientContext(t)
 	go func() { second <- execution.Close(secondCtx) }()
-	close(allow)
-	want := <-first
+	unblock(allow)
+	want := receiveCloseResult(t, second, "later execution close")
 	var wireErr *Error
 	if !errors.As(want, &wireErr) || wireErr.Code != codes.Internal || wireErr.Message != "retained release failure" {
 		t.Fatalf("unexpected release result: %#v", want)
 	}
 	if err := execution.Close(testClientContext(t)); !errors.As(err, &wireErr) || err.Error() != want.Error() {
 		t.Fatalf("repeated close did not retain the first result: %#v", err)
-	}
-	if err := <-second; !errors.As(err, &wireErr) || err.Error() != want.Error() {
-		t.Fatalf("concurrent close did not retain the first result: %#v", err)
 	}
 
 	implementation.mu.Lock()
@@ -468,7 +490,137 @@ func TestHandleCloseRetainsFailureAndRejectsUse(t *testing.T) {
 	}
 }
 
-func TestAncestorCloseInvalidatesDescendants(t *testing.T) {
+func TestConcurrentHandleCloseReleasesOnce(t *testing.T) {
+	entered := make(chan struct{})
+	allow := make(chan struct{})
+	t.Cleanup(func() { unblock(allow) })
+	implementation := &handleServer{
+		releaseExecutionEntered: entered,
+		allowExecutionRelease:   allow,
+	}
+	connection := startHandleServer(t, implementation)
+	client := openHandleClient(t, connection)
+	plan, err := client.Compile(testClientContext(t), Source{Content: "RETURN 1"}, CompileOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	execution, err := plan.Execute(testClientContext(t), nil, ExecuteOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const callers = 8
+	start := make(chan struct{})
+	results := make(chan error, callers)
+	for range callers {
+		ctx := testClientContext(t)
+		go func() {
+			<-start
+			results <- execution.Close(ctx)
+		}()
+	}
+
+	close(start)
+	select {
+	case <-entered:
+	case <-time.After(10 * time.Second):
+		t.Fatal("execution close did not reach the server")
+	}
+	unblock(allow)
+	for range callers {
+		if err := receiveCloseResult(t, results, "concurrent execution close"); err != nil {
+			t.Fatalf("concurrent close changed the retained success: %v", err)
+		}
+	}
+	if err := execution.Close(testClientContext(t)); err != nil {
+		t.Fatalf("repeated close changed the retained success: %v", err)
+	}
+
+	implementation.mu.Lock()
+	releaseCalls := implementation.releaseExecutionCalls
+	implementation.mu.Unlock()
+	if releaseCalls != 1 {
+		t.Fatalf("concurrent close issued %d release RPCs", releaseCalls)
+	}
+}
+
+func TestDescendantCloseDuringAncestorCloseObservesRetainedResult(t *testing.T) {
+	entered := make(chan struct{})
+	allow := make(chan struct{})
+	t.Cleanup(func() { unblock(allow) })
+	implementation := &handleServer{
+		releasePlanEntered: entered,
+		allowPlanRelease:   allow,
+		releasePlanErr:     status.Error(codes.Internal, "retained ancestor failure"),
+	}
+	connection := startHandleServer(t, implementation)
+	client := openHandleClient(t, connection)
+	plan, err := client.Compile(testClientContext(t), Source{Content: "RETURN 1"}, CompileOptions{Debuggable: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	execution, err := plan.Execute(testClientContext(t), nil, ExecuteOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	debug, err := plan.NewDebugSession(testClientContext(t), nil, DebugSessionOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	planResult := make(chan error, 1)
+	planCtx := testClientContext(t)
+	go func() { planResult <- plan.Close(planCtx) }()
+	select {
+	case <-entered:
+	case <-time.After(10 * time.Second):
+		t.Fatal("plan close did not reach the server")
+	}
+
+	executionResult := make(chan error, 1)
+	executionCtx := testClientContext(t)
+	go func() { executionResult <- execution.Close(executionCtx) }()
+	debugResult := make(chan error, 1)
+	debugCtx := testClientContext(t)
+	go func() { debugResult <- debug.Close(debugCtx) }()
+	waitForCloseStart(t, "execution", execution.close.Started)
+	waitForCloseStart(t, "debug session", debug.close.Started)
+
+	calls := implementation.recordedCalls()
+	if countCall(calls, call("release-execution", "connection-1", "execution-1")) != 0 ||
+		countCall(calls, call("release-debug", "connection-1", "debug-connection-1")) != 0 {
+		t.Fatalf("descendants attempted direct cleanup while ancestor was closing: %v", calls)
+	}
+
+	unblock(allow)
+	want := receiveCloseResult(t, planResult, "plan close")
+	var wireErr *Error
+	if !errors.As(want, &wireErr) || wireErr.Code != codes.Internal || wireErr.Message != "retained ancestor failure" {
+		t.Fatalf("unexpected ancestor release result: %#v", want)
+	}
+	for name, result := range map[string]<-chan error{
+		"execution close":     executionResult,
+		"debug session close": debugResult,
+	} {
+		err := receiveCloseResult(t, result, name)
+		var descendantErr *Error
+		if !errors.As(err, &descendantErr) || descendantErr.Code != wireErr.Code || descendantErr.Message != wireErr.Message {
+			t.Fatalf("%s did not observe the retained ancestor result: %#v", name, err)
+		}
+	}
+
+	calls = implementation.recordedCalls()
+	implementation.mu.Lock()
+	planReleaseCalls := implementation.releasePlanCalls
+	implementation.mu.Unlock()
+	if planReleaseCalls != 1 ||
+		countCall(calls, call("release-execution", "connection-1", "execution-1")) != 0 ||
+		countCall(calls, call("release-debug", "connection-1", "debug-connection-1")) != 0 {
+		t.Fatalf("ancestor cleanup issued unexpected release RPCs: %v", calls)
+	}
+}
+
+func TestDescendantCloseAfterAncestorCloseObservesRetainedResult(t *testing.T) {
 	implementation := &handleServer{}
 	connection := startHandleServer(t, implementation)
 	client := openHandleClient(t, connection)
@@ -502,10 +654,12 @@ func TestAncestorCloseInvalidatesDescendants(t *testing.T) {
 	}
 
 	calls := implementation.recordedCalls()
-	if slices.ContainsFunc(calls, func(value string) bool {
-		return value == call("release-execution", "connection-1", "execution-1") ||
-			value == call("release-debug", "connection-1", "debug-connection-1")
-	}) {
+	implementation.mu.Lock()
+	planReleaseCalls := implementation.releasePlanCalls
+	implementation.mu.Unlock()
+	if planReleaseCalls != 1 ||
+		countCall(calls, call("release-execution", "connection-1", "execution-1")) != 0 ||
+		countCall(calls, call("release-debug", "connection-1", "debug-connection-1")) != 0 {
 		t.Fatalf("descendants duplicated ancestor cleanup: %v", calls)
 	}
 }
@@ -604,4 +758,40 @@ func countCall(calls []string, target string) int {
 	}
 
 	return count
+}
+
+func receiveCloseResult(t *testing.T, result <-chan error, name string) error {
+	t.Helper()
+
+	select {
+	case err := <-result:
+		return err
+	case <-time.After(10 * time.Second):
+		t.Fatalf("%s did not settle", name)
+
+		return nil
+	}
+}
+
+func waitForCloseStart(t *testing.T, name string, started func() bool) {
+	t.Helper()
+	deadline := time.NewTimer(10 * time.Second)
+	defer deadline.Stop()
+
+	for !started() {
+		select {
+		case <-deadline.C:
+			t.Fatalf("%s close did not start", name)
+		default:
+			runtime.Gosched()
+		}
+	}
+}
+
+func unblock(ch chan struct{}) {
+	select {
+	case <-ch:
+	default:
+		close(ch)
+	}
 }

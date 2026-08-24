@@ -18,8 +18,10 @@ Use the most direct repository authority for facts that can change:
   artifacts only.
 * `.github/workflows/ci.yml` owns repository CI coverage and tested platforms.
 * Current handwritten code and tests own implementation behavior.
-* `README.md` owns repository-facing architecture, security, API examples, and
-  development workflow documentation.
+* Documentation under `docs/` owns detailed architecture, design, lifecycle,
+  protocol, and security documentation.
+* `README.md` owns the user-facing overview, setup, examples, and development
+  entry points.
 
 The current module is `github.com/MontFerret/wire`, uses Go 1.25, and adapts the
 Ferret v2 dependency declared in `go.mod`. Verify these values rather than
