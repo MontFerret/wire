@@ -89,6 +89,20 @@ func (p *Plan) Run(ctx context.Context, parameters Parameters, options ExecuteOp
 	return output, errors.Join(waitErr, closeErr)
 }
 
+// Close releases the plan and its remote executions and debug sessions.
+// Concurrent and repeated calls observe one retained release result.
+func (p *Plan) Close(ctx context.Context) error {
+	if p == nil || p.client == nil || p.id == "" || p.close == nil {
+		return ErrClosed
+	}
+
+	if p.close.Begin() {
+		go settleHandleClose(ctx, "plan", p.close, p.release)
+	}
+
+	return p.close.Wait(ctx)
+}
+
 func (p *Plan) checkOpen() error {
 	if p == nil || p.client == nil || p.id == "" || p.close == nil || p.close.Started() {
 		return ErrClosed
@@ -107,20 +121,6 @@ func (p *Plan) ancestorCloseResult(ctx context.Context) (bool, error) {
 	}
 
 	return p.client.closeResult(ctx)
-}
-
-// Close releases the plan and its remote executions and debug sessions.
-// Concurrent and repeated calls observe one retained release result.
-func (p *Plan) Close(ctx context.Context) error {
-	if p == nil || p.client == nil || p.id == "" || p.close == nil {
-		return ErrClosed
-	}
-
-	if p.close.Begin() {
-		go settleHandleClose(ctx, "plan", p.close, p.release)
-	}
-
-	return p.close.Wait(ctx)
 }
 
 func (p *Plan) release(ctx context.Context) error {

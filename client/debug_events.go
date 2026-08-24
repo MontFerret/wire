@@ -74,16 +74,6 @@ const (
 	DebugEventTerminated
 )
 
-// Terminal reports whether the debug session has reached a final state.
-func (state DebugState) Terminal() bool {
-	switch state {
-	case DebugCompleted, DebugFailed, DebugTerminated:
-		return true
-	default:
-		return false
-	}
-}
-
 // Watch opens an ordered event stream tied to both ctx and the Client's
 // logical lifecycle. It begins with the latest state published by the server.
 func (d *DebugSession) Watch(ctx context.Context) (*DebugEvents, error) {
@@ -132,76 +122,12 @@ func (events *DebugEvents) Recv() (DebugEvent, error) {
 	return event, nil
 }
 
-func convertDebugSessionSnapshot(value *wirev1.DebugSession) DebugSessionSnapshot {
-	return DebugSessionSnapshot{
-		State:            convertDebugState(value.GetState()),
-		StopReason:       convertDebugStopReason(value.GetStopReason()),
-		Location:         convertLocation(value.GetLocation()),
-		HitBreakpointIDs: append([]uint64(nil), value.GetHitBreakpointIds()...),
-		Output:           convertOutput(value.GetOutput()),
-		Failure:          convertFailure(value.GetFailure()),
-	}
-}
-
-func convertDebugState(value wirev1.DebugState) DebugState {
-	switch value {
-	case wirev1.DebugState_DEBUG_STATE_CREATED:
-		return DebugCreated
-	case wirev1.DebugState_DEBUG_STATE_RUNNING:
-		return DebugRunning
-	case wirev1.DebugState_DEBUG_STATE_STOPPED:
-		return DebugStopped
-	case wirev1.DebugState_DEBUG_STATE_COMPLETED:
-		return DebugCompleted
-	case wirev1.DebugState_DEBUG_STATE_FAILED:
-		return DebugFailed
-	case wirev1.DebugState_DEBUG_STATE_TERMINATED:
-		return DebugTerminated
+// Terminal reports whether the debug session has reached a final state.
+func (state DebugState) Terminal() bool {
+	switch state {
+	case DebugCompleted, DebugFailed, DebugTerminated:
+		return true
 	default:
-		return 0
+		return false
 	}
-}
-
-func convertDebugStopReason(value wirev1.DebugStopReason) DebugStopReason {
-	switch value {
-	case wirev1.DebugStopReason_DEBUG_STOP_REASON_ENTRY:
-		return DebugStopEntry
-	case wirev1.DebugStopReason_DEBUG_STOP_REASON_BREAKPOINT:
-		return DebugStopBreakpoint
-	case wirev1.DebugStopReason_DEBUG_STOP_REASON_STEP:
-		return DebugStopStep
-	case wirev1.DebugStopReason_DEBUG_STOP_REASON_PAUSE:
-		return DebugStopPause
-	case wirev1.DebugStopReason_DEBUG_STOP_REASON_RUNTIME_ERROR:
-		return DebugStopRuntimeError
-	default:
-		return DebugStopNone
-	}
-}
-
-func convertDebugEvent(value *wirev1.WatchDebugResponse) DebugEvent {
-	result := DebugEvent{Sequence: value.GetSequence()}
-
-	switch payload := value.GetPayload().(type) {
-	case *wirev1.WatchDebugResponse_Started:
-		result.Kind = DebugEventStarted
-		result.Snapshot = convertDebugSessionSnapshot(payload.Started.GetSession())
-	case *wirev1.WatchDebugResponse_Continued:
-		result.Kind = DebugEventContinued
-		result.Snapshot = convertDebugSessionSnapshot(payload.Continued.GetSession())
-	case *wirev1.WatchDebugResponse_Stopped:
-		result.Kind = DebugEventStopped
-		result.Snapshot = convertDebugSessionSnapshot(payload.Stopped.GetSession())
-	case *wirev1.WatchDebugResponse_Completed:
-		result.Kind = DebugEventCompleted
-		result.Snapshot = convertDebugSessionSnapshot(payload.Completed.GetSession())
-	case *wirev1.WatchDebugResponse_Failed:
-		result.Kind = DebugEventFailed
-		result.Snapshot = convertDebugSessionSnapshot(payload.Failed.GetSession())
-	case *wirev1.WatchDebugResponse_Terminated:
-		result.Kind = DebugEventTerminated
-		result.Snapshot = convertDebugSessionSnapshot(payload.Terminated.GetSession())
-	}
-
-	return result
 }

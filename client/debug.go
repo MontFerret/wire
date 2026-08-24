@@ -53,21 +53,6 @@ func (p *Plan) NewDebugSession(ctx context.Context, parameters Parameters, optio
 	return &DebugSession{client: p.client, plan: p, id: value.GetId().GetValue(), close: &lifecycle.Close{}}, nil
 }
 
-func (d *DebugSession) checkOpen() error {
-	if d == nil || d.client == nil || d.plan == nil || d.id == "" || d.close == nil || d.close.Started() {
-		return ErrClosed
-	}
-
-	return d.plan.checkOpen()
-}
-
-func (d *DebugSession) command() *wirev1.DebugCommand {
-	return &wirev1.DebugCommand{
-		ConnectionId:   d.client.connectionProto(),
-		DebugSessionId: &wirev1.DebugSessionId{Value: d.id},
-	}
-}
-
 // Start begins a newly created debug session. Watch publishes the running and
 // subsequent stop or terminal snapshots.
 func (d *DebugSession) Start(ctx context.Context) error {
@@ -160,6 +145,21 @@ func (d *DebugSession) Close(ctx context.Context) error {
 	}
 
 	return d.close.Wait(ctx)
+}
+
+func (d *DebugSession) checkOpen() error {
+	if d == nil || d.client == nil || d.plan == nil || d.id == "" || d.close == nil || d.close.Started() {
+		return ErrClosed
+	}
+
+	return d.plan.checkOpen()
+}
+
+func (d *DebugSession) command() *wirev1.DebugCommand {
+	return &wirev1.DebugCommand{
+		ConnectionId:   d.client.connectionProto(),
+		DebugSessionId: &wirev1.DebugSessionId{Value: d.id},
+	}
 }
 
 func (d *DebugSession) release(ctx context.Context) error {

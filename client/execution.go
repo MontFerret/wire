@@ -91,14 +91,6 @@ func (p *Plan) Execute(ctx context.Context, parameters Parameters, options Execu
 	return &Execution{client: p.client, plan: p, id: value.GetId().GetValue(), close: &lifecycle.Close{}}, nil
 }
 
-func (e *Execution) checkOpen() error {
-	if e == nil || e.client == nil || e.plan == nil || e.id == "" || e.close == nil || e.close.Started() {
-		return ErrClosed
-	}
-
-	return e.plan.checkOpen()
-}
-
 // Cancel requests execution cancellation. The ordered terminal cancellation
 // snapshot remains observable through Watch.
 func (e *Execution) Cancel(ctx context.Context) error {
@@ -109,41 +101,6 @@ func (e *Execution) Cancel(ctx context.Context) error {
 	_, err := e.client.executionClient.CancelExecution(ctx, &wirev1.CancelExecutionRequest{
 		ConnectionId: e.client.connectionProto(),
 		ExecutionId:  &wirev1.ExecutionId{Value: e.id},
-	})
-
-	return decodeError(err)
-}
-
-// Close commits cancellation and remote execution cleanup. Concurrent and
-// repeated calls observe one retained release result.
-func (e *Execution) Close(ctx context.Context) error {
-	if e == nil || e.client == nil || e.plan == nil || e.id == "" || e.close == nil {
-		return ErrClosed
-	}
-
-	if e.close.Begin() {
-		go settleHandleClose(ctx, "execution", e.close, e.release)
-	}
-
-	return e.close.Wait(ctx)
-}
-
-func (e *Execution) release(ctx context.Context) error {
-	if closing, err := e.plan.ancestorCloseResult(ctx); closing {
-		return err
-	}
-
-	return e.client.releaseExecution(ctx, e.id)
-}
-
-func (c *Client) releaseExecution(ctx context.Context, id string) error {
-	if err := c.checkOpen(); err != nil {
-		return err
-	}
-
-	_, err := c.executionClient.ReleaseExecution(ctx, &wirev1.ReleaseExecutionRequest{
-		ConnectionId: c.connectionProto(),
-		ExecutionId:  &wirev1.ExecutionId{Value: id},
 	})
 
 	return decodeError(err)
@@ -218,6 +175,20 @@ func (e *Execution) Wait(ctx context.Context) (Output, error) {
 	}
 }
 
+// Close commits cancellation and remote execution cleanup. Concurrent and
+// repeated calls observe one retained release result.
+func (e *Execution) Close(ctx context.Context) error {
+	if e == nil || e.client == nil || e.plan == nil || e.id == "" || e.close == nil {
+		return ErrClosed
+	}
+
+	if e.close.Begin() {
+		go settleHandleClose(ctx, "execution", e.close, e.release)
+	}
+
+	return e.close.Wait(ctx)
+}
+
 // Recv blocks for the next ordered execution event. It releases the local
 // stream when a terminal event or error is observed.
 func (events *ExecutionEvents) Recv() (ExecutionEvent, error) {
@@ -256,52 +227,20 @@ func (state ExecutionState) Terminal() bool {
 	}
 }
 
-func convertOutput(value *wirev1.Output) *Output {
-	if value == nil {
-		return nil
+func (e *Execution) checkOpen() error {
+	if e == nil || e.client == nil || e.plan == nil || e.id == "" || e.close == nil || e.close.Started() {
+		return ErrClosed
 	}
 
-	return &Output{ContentType: value.GetContentType(), Content: append([]byte(nil), value.GetContent()...)}
+	return e.plan.checkOpen()
 }
 
-func convertExecutionSnapshot(value *wirev1.Execution) ExecutionSnapshot {
-	return ExecutionSnapshot{
-		State:   convertExecutionState(value.GetState()),
-		Output:  convertOutput(value.GetOutput()),
-		Failure: convertFailure(value.GetFailure()),
-	}
-}
-
-func convertExecutionState(value wirev1.ExecutionState) ExecutionState {
-	switch value {
-	case wirev1.ExecutionState_EXECUTION_STATE_RUNNING:
-		return ExecutionRunning
-	case wirev1.ExecutionState_EXECUTION_STATE_COMPLETED:
-		return ExecutionCompleted
-	case wirev1.ExecutionState_EXECUTION_STATE_FAILED:
-		return ExecutionFailed
-	case wirev1.ExecutionState_EXECUTION_STATE_CANCELLED:
-		return ExecutionCancelled
-	default:
-		return 0
-	}
-}
-
-func convertExecutionEvent(value *wirev1.WatchExecutionResponse) ExecutionEvent {
-	result := ExecutionEvent{Sequence: value.GetSequence()}
-
-	switch payload := value.GetPayload().(type) {
-	case *wirev1.WatchExecutionResponse_Started:
-		result.Snapshot = convertExecutionSnapshot(payload.Started.GetExecution())
-	case *wirev1.WatchExecutionResponse_Completed:
-		result.Snapshot = convertExecutionSnapshot(payload.Completed.GetExecution())
-	case *wirev1.WatchExecutionResponse_Failed:
-		result.Snapshot = convertExecutionSnapshot(payload.Failed.GetExecution())
-	case *wirev1.WatchExecutionResponse_Cancelled:
-		result.Snapshot = convertExecutionSnapshot(payload.Cancelled.GetExecution())
+func (e *Execution) release(ctx context.Context) error {
+	if closing, err := e.plan.ancestorCloseResult(ctx); closing {
+		return err
 	}
 
-	return result
+	return e.client.releaseExecution(ctx, e.id)
 }
 
 func (snapshot ExecutionSnapshot) output() Output {
@@ -313,4 +252,17 @@ func (snapshot ExecutionSnapshot) output() Output {
 		ContentType: snapshot.Output.ContentType,
 		Content:     append([]byte(nil), snapshot.Output.Content...),
 	}
+}
+
+func (c *Client) releaseExecution(ctx context.Context, id string) error {
+	if err := c.checkOpen(); err != nil {
+		return err
+	}
+
+	_, err := c.executionClient.ReleaseExecution(ctx, &wirev1.ReleaseExecutionRequest{
+		ConnectionId: c.connectionProto(),
+		ExecutionId:  &wirev1.ExecutionId{Value: id},
+	})
+
+	return decodeError(err)
 }
