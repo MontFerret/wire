@@ -163,8 +163,8 @@ func TestDescendantCloseDuringAncestorCloseObservesRetainedResult(t *testing.T) 
 	debugResult := make(chan error, 1)
 	debugCtx := testClientContext(t)
 	go func() { debugResult <- debug.Close(debugCtx) }()
-	waitForCloseStart(t, "execution", execution.close.Started)
-	waitForCloseStart(t, "debug session", debug.close.Started)
+	waitForCloseStart(t, "execution", func() bool { return !execution.handle.Open() })
+	waitForCloseStart(t, "debug session", func() bool { return !debug.handle.Open() })
 
 	calls := implementation.recordedCalls()
 	if countCall(calls, call("release-execution", "connection-1", "execution-1")) != 0 ||

@@ -19,7 +19,7 @@ type (
 		client *Client
 		plan   *Plan
 		id     string
-		close  *lifecycle.Close
+		handle *lifecycle.Handle
 	}
 )
 
@@ -35,8 +35,8 @@ func (p *Plan) NewDebugSession(ctx context.Context, parameters Parameters, optio
 		return nil, err
 	}
 
-	response, err := p.client.debugClient.OpenDebugSession(ctx, &wirev1.OpenDebugSessionRequest{
-		ConnectionId:      p.client.connectionProto(),
+	response, err := p.client.protocol.debugClient.OpenDebugSession(ctx, &wirev1.OpenDebugSessionRequest{
+		ConnectionId:      p.client.protocol.connectionProto(),
 		PlanId:            &wirev1.PlanId{Value: p.id},
 		Parameters:        converted,
 		OutputContentType: options.OutputContentType,
@@ -50,7 +50,7 @@ func (p *Plan) NewDebugSession(ctx context.Context, parameters Parameters, optio
 		return nil, errors.New("Wire server returned an invalid debug session")
 	}
 
-	return &DebugSession{client: p.client, plan: p, id: value.GetId().GetValue(), close: &lifecycle.Close{}}, nil
+	return &DebugSession{client: p.client, plan: p, id: value.GetId().GetValue(), handle: &lifecycle.Handle{}}, nil
 }
 
 // Start begins a newly created debug session. Watch publishes the running and
@@ -60,7 +60,7 @@ func (d *DebugSession) Start(ctx context.Context) error {
 		return err
 	}
 
-	_, err := d.client.debugClient.StartDebug(ctx, &wirev1.StartDebugRequest{Command: d.command()})
+	_, err := d.client.protocol.debugClient.StartDebug(ctx, &wirev1.StartDebugRequest{Command: d.command()})
 
 	return decodeError(err)
 }
@@ -71,7 +71,7 @@ func (d *DebugSession) Continue(ctx context.Context) error {
 		return err
 	}
 
-	_, err := d.client.debugClient.Continue(ctx, &wirev1.ContinueRequest{Command: d.command()})
+	_, err := d.client.protocol.debugClient.Continue(ctx, &wirev1.ContinueRequest{Command: d.command()})
 
 	return decodeError(err)
 }
@@ -82,7 +82,7 @@ func (d *DebugSession) Pause(ctx context.Context) error {
 		return err
 	}
 
-	_, err := d.client.debugClient.Pause(ctx, &wirev1.PauseRequest{Command: d.command()})
+	_, err := d.client.protocol.debugClient.Pause(ctx, &wirev1.PauseRequest{Command: d.command()})
 
 	return decodeError(err)
 }
@@ -93,7 +93,7 @@ func (d *DebugSession) Next(ctx context.Context) error {
 		return err
 	}
 
-	_, err := d.client.debugClient.Next(ctx, &wirev1.NextRequest{Command: d.command()})
+	_, err := d.client.protocol.debugClient.Next(ctx, &wirev1.NextRequest{Command: d.command()})
 
 	return decodeError(err)
 }
@@ -105,7 +105,7 @@ func (d *DebugSession) Step(ctx context.Context) error {
 		return err
 	}
 
-	_, err := d.client.debugClient.Step(ctx, &wirev1.StepRequest{Command: d.command()})
+	_, err := d.client.protocol.debugClient.Step(ctx, &wirev1.StepRequest{Command: d.command()})
 
 	return decodeError(err)
 }
@@ -116,7 +116,7 @@ func (d *DebugSession) Out(ctx context.Context) error {
 		return err
 	}
 
-	_, err := d.client.debugClient.Out(ctx, &wirev1.OutRequest{Command: d.command()})
+	_, err := d.client.protocol.debugClient.Out(ctx, &wirev1.OutRequest{Command: d.command()})
 
 	return decodeError(err)
 }
@@ -128,7 +128,7 @@ func (d *DebugSession) Stop(ctx context.Context) error {
 		return err
 	}
 
-	_, err := d.client.debugClient.StopDebug(ctx, &wirev1.StopDebugRequest{Command: d.command()})
+	_, err := d.client.protocol.debugClient.StopDebug(ctx, &wirev1.StopDebugRequest{Command: d.command()})
 
 	return decodeError(err)
 }
@@ -136,19 +136,15 @@ func (d *DebugSession) Stop(ctx context.Context) error {
 // Close terminates and releases the remote debug session. Concurrent and
 // repeated calls observe one retained release result.
 func (d *DebugSession) Close(ctx context.Context) error {
-	if d == nil || d.client == nil || d.plan == nil || d.id == "" || d.close == nil {
+	if d == nil || d.client == nil || d.plan == nil || d.id == "" || d.handle == nil {
 		return ErrClosed
 	}
 
-	if d.close.Begin() {
-		go settleHandleClose(ctx, "debug session", d.close, d.release)
-	}
-
-	return d.close.Wait(ctx)
+	return d.handle.Close(ctx, d.release)
 }
 
 func (d *DebugSession) checkOpen() error {
-	if d == nil || d.client == nil || d.plan == nil || d.id == "" || d.close == nil || d.close.Started() {
+	if d == nil || d.client == nil || d.plan == nil || d.id == "" || d.handle == nil || !d.handle.Open() {
 		return ErrClosed
 	}
 
@@ -157,7 +153,7 @@ func (d *DebugSession) checkOpen() error {
 
 func (d *DebugSession) command() *wirev1.DebugCommand {
 	return &wirev1.DebugCommand{
-		ConnectionId:   d.client.connectionProto(),
+		ConnectionId:   d.client.protocol.connectionProto(),
 		DebugSessionId: &wirev1.DebugSessionId{Value: d.id},
 	}
 }
@@ -175,8 +171,8 @@ func (c *Client) releaseDebugSession(ctx context.Context, id string) error {
 		return err
 	}
 
-	_, err := c.debugClient.ReleaseDebugSession(ctx, &wirev1.ReleaseDebugSessionRequest{
-		ConnectionId: c.connectionProto(), DebugSessionId: &wirev1.DebugSessionId{Value: id},
+	_, err := c.protocol.debugClient.ReleaseDebugSession(ctx, &wirev1.ReleaseDebugSessionRequest{
+		ConnectionId: c.protocol.connectionProto(), DebugSessionId: &wirev1.DebugSessionId{Value: id},
 	})
 
 	return decodeError(err)

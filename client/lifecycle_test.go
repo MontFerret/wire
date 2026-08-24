@@ -112,8 +112,8 @@ func TestCloseRejectsNewOperationsAndCancelsFacadeWatchers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan := &Plan{client: client, id: "plan", close: &lifecycle.Close{}}
-	execution := &Execution{client: client, plan: plan, id: "execution", close: &lifecycle.Close{}}
+	plan := &Plan{client: client, id: "plan", handle: &lifecycle.Handle{}}
+	execution := &Execution{client: client, plan: plan, id: "execution", handle: &lifecycle.Handle{}}
 	events, err := execution.Watch(testClientContext(t))
 	if err != nil {
 		t.Fatal(err)

@@ -3,9 +3,7 @@ package client
 import (
 	"context"
 	"errors"
-	"fmt"
 
-	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
 	"github.com/MontFerret/wire/internal/lifecycle"
 )
 
@@ -42,13 +40,13 @@ type (
 		client *Client
 		plan   *Plan
 		id     string
-		close  *lifecycle.Close
+		handle *lifecycle.Handle
 	}
 
 	// ExecutionEvents receives the current execution snapshot followed by ordered
 	// state changes until the terminal event or stream cancellation.
 	ExecutionEvents struct {
-		stream wirev1.ExecutionService_WatchExecutionClient
+		stream *protocolExecutionEvents
 		cancel context.CancelFunc
 	}
 )
@@ -68,27 +66,12 @@ func (p *Plan) Execute(ctx context.Context, parameters Parameters, options Execu
 		return nil, err
 	}
 
-	converted, err := encodeParameters(parameters)
+	id, err := p.client.protocol.execute(ctx, p.id, parameters, options)
 	if err != nil {
 		return nil, err
 	}
 
-	response, err := p.client.executionClient.Execute(ctx, &wirev1.ExecuteRequest{
-		ConnectionId:      p.client.connectionProto(),
-		PlanId:            &wirev1.PlanId{Value: p.id},
-		Parameters:        converted,
-		OutputContentType: options.OutputContentType,
-	})
-	if err != nil {
-		return nil, decodeError(err)
-	}
-
-	value := response.GetExecution()
-	if value == nil || value.GetId().GetValue() == "" {
-		return nil, errors.New("Wire server returned an invalid execution")
-	}
-
-	return &Execution{client: p.client, plan: p, id: value.GetId().GetValue(), close: &lifecycle.Close{}}, nil
+	return &Execution{client: p.client, plan: p, id: id, handle: &lifecycle.Handle{}}, nil
 }
 
 // Cancel requests execution cancellation. The ordered terminal cancellation
@@ -98,12 +81,7 @@ func (e *Execution) Cancel(ctx context.Context) error {
 		return err
 	}
 
-	_, err := e.client.executionClient.CancelExecution(ctx, &wirev1.CancelExecutionRequest{
-		ConnectionId: e.client.connectionProto(),
-		ExecutionId:  &wirev1.ExecutionId{Value: e.id},
-	})
-
-	return decodeError(err)
+	return e.client.protocol.cancelExecution(ctx, e.id)
 }
 
 // Watch opens an ordered event stream tied to both ctx and the Client's
@@ -114,14 +92,11 @@ func (e *Execution) Watch(ctx context.Context) (*ExecutionEvents, error) {
 	}
 
 	watchCtx, cancel := e.client.watchContext(ctx)
-	stream, err := e.client.executionClient.WatchExecution(watchCtx, &wirev1.WatchExecutionRequest{
-		ConnectionId: e.client.connectionProto(),
-		ExecutionId:  &wirev1.ExecutionId{Value: e.id},
-	})
+	stream, err := e.client.protocol.watchExecution(watchCtx, e.id)
 	if err != nil {
 		cancel()
 
-		return nil, decodeError(err)
+		return nil, err
 	}
 
 	return &ExecutionEvents{stream: stream, cancel: cancel}, nil
@@ -178,15 +153,11 @@ func (e *Execution) Wait(ctx context.Context) (Output, error) {
 // Close commits cancellation and remote execution cleanup. Concurrent and
 // repeated calls observe one retained release result.
 func (e *Execution) Close(ctx context.Context) error {
-	if e == nil || e.client == nil || e.plan == nil || e.id == "" || e.close == nil {
+	if e == nil || e.client == nil || e.plan == nil || e.id == "" || e.handle == nil {
 		return ErrClosed
 	}
 
-	if e.close.Begin() {
-		go settleHandleClose(ctx, "execution", e.close, e.release)
-	}
-
-	return e.close.Wait(ctx)
+	return e.handle.Close(ctx, e.release)
 }
 
 // Recv blocks for the next ordered execution event. It releases the local
@@ -196,20 +167,13 @@ func (events *ExecutionEvents) Recv() (ExecutionEvent, error) {
 		return ExecutionEvent{}, errors.New("execution event receiver is nil")
 	}
 
-	value, err := events.stream.Recv()
+	event, err := events.stream.recv()
 	if err != nil {
 		events.cancel()
 
-		return ExecutionEvent{}, decodeError(err)
+		return ExecutionEvent{}, err
 	}
 
-	if value.GetPayload() == nil {
-		events.cancel()
-
-		return ExecutionEvent{}, fmt.Errorf("Wire server returned an empty execution event")
-	}
-
-	event := convertExecutionEvent(value)
 	if event.Snapshot.State.Terminal() {
 		events.cancel()
 	}
@@ -228,7 +192,7 @@ func (state ExecutionState) Terminal() bool {
 }
 
 func (e *Execution) checkOpen() error {
-	if e == nil || e.client == nil || e.plan == nil || e.id == "" || e.close == nil || e.close.Started() {
+	if e == nil || e.client == nil || e.plan == nil || e.id == "" || e.handle == nil || !e.handle.Open() {
 		return ErrClosed
 	}
 
@@ -240,7 +204,11 @@ func (e *Execution) release(ctx context.Context) error {
 		return err
 	}
 
-	return e.client.releaseExecution(ctx, e.id)
+	if err := e.client.checkOpen(); err != nil {
+		return err
+	}
+
+	return e.client.protocol.releaseExecution(ctx, e.id)
 }
 
 func (snapshot ExecutionSnapshot) output() Output {
@@ -252,17 +220,4 @@ func (snapshot ExecutionSnapshot) output() Output {
 		ContentType: snapshot.Output.ContentType,
 		Content:     append([]byte(nil), snapshot.Output.Content...),
 	}
-}
-
-func (c *Client) releaseExecution(ctx context.Context, id string) error {
-	if err := c.checkOpen(); err != nil {
-		return err
-	}
-
-	_, err := c.executionClient.ReleaseExecution(ctx, &wirev1.ReleaseExecutionRequest{
-		ConnectionId: c.connectionProto(),
-		ExecutionId:  &wirev1.ExecutionId{Value: id},
-	})
-
-	return decodeError(err)
 }

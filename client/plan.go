@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 
-	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
 	"github.com/MontFerret/wire/internal/lifecycle"
 )
 
@@ -26,7 +25,7 @@ type (
 		id         string
 		parameters []string
 		debuggable bool
-		close      *lifecycle.Close
+		handle     *lifecycle.Handle
 	}
 )
 
@@ -37,26 +36,17 @@ func (c *Client) Compile(ctx context.Context, source Source, options CompileOpti
 		return nil, err
 	}
 
-	response, err := c.planClient.Compile(ctx, &wirev1.CompileRequest{
-		ConnectionId: c.connectionProto(),
-		Source:       &wirev1.Source{Content: source.Content, Identity: source.Identity},
-		Options:      &wirev1.CompileOptions{Debuggable: options.Debuggable},
-	})
+	compiled, err := c.protocol.compile(ctx, source, options)
 	if err != nil {
-		return nil, decodeError(err)
-	}
-
-	value := response.GetPlan()
-	if value == nil || value.GetId().GetValue() == "" {
-		return nil, errors.New("Wire server returned an invalid compiled plan")
+		return nil, err
 	}
 
 	return &Plan{
 		client:     c,
-		id:         value.GetId().GetValue(),
-		parameters: append([]string(nil), value.GetParameters()...),
-		debuggable: value.GetDebuggable(),
-		close:      &lifecycle.Close{},
+		id:         compiled.id,
+		parameters: compiled.parameters,
+		debuggable: compiled.debuggable,
+		handle:     &lifecycle.Handle{},
 	}, nil
 }
 
@@ -92,19 +82,15 @@ func (p *Plan) Run(ctx context.Context, parameters Parameters, options ExecuteOp
 // Close releases the plan and its remote executions and debug sessions.
 // Concurrent and repeated calls observe one retained release result.
 func (p *Plan) Close(ctx context.Context) error {
-	if p == nil || p.client == nil || p.id == "" || p.close == nil {
+	if p == nil || p.client == nil || p.id == "" || p.handle == nil {
 		return ErrClosed
 	}
 
-	if p.close.Begin() {
-		go settleHandleClose(ctx, "plan", p.close, p.release)
-	}
-
-	return p.close.Wait(ctx)
+	return p.handle.Close(ctx, p.release)
 }
 
 func (p *Plan) checkOpen() error {
-	if p == nil || p.client == nil || p.id == "" || p.close == nil || p.close.Started() {
+	if p == nil || p.client == nil || p.id == "" || p.handle == nil || !p.handle.Open() {
 		return ErrClosed
 	}
 
@@ -112,12 +98,12 @@ func (p *Plan) checkOpen() error {
 }
 
 func (p *Plan) ancestorCloseResult(ctx context.Context) (bool, error) {
-	if p == nil || p.client == nil || p.close == nil {
+	if p == nil || p.client == nil || p.handle == nil {
 		return true, ErrClosed
 	}
 
-	if p.close.Started() {
-		return true, p.close.Wait(ctx)
+	if closing, err := p.handle.CloseResult(ctx); closing {
+		return true, err
 	}
 
 	return p.client.closeResult(ctx)
@@ -128,18 +114,9 @@ func (p *Plan) release(ctx context.Context) error {
 		return err
 	}
 
-	return p.client.releasePlan(ctx, p.id)
-}
-
-func (c *Client) releasePlan(ctx context.Context, id string) error {
-	if err := c.checkOpen(); err != nil {
+	if err := p.client.checkOpen(); err != nil {
 		return err
 	}
 
-	_, err := c.planClient.ReleasePlan(ctx, &wirev1.ReleasePlanRequest{
-		ConnectionId: c.connectionProto(),
-		PlanId:       &wirev1.PlanId{Value: id},
-	})
-
-	return decodeError(err)
+	return p.client.protocol.releasePlan(ctx, p.id)
 }

@@ -4,6 +4,9 @@ The handwritten `client` package is a domain facade over the generated gRPC
 clients. It owns one logical Wire connection while borrowing the caller's
 `grpc.ClientConnInterface`.
 
+This document defines the public resource and ownership model. The private
+implementation layering is defined by [Client Architecture](client-architecture.md).
+
 ## Resource model
 
 Remote resources are exposed as opaque, typed handles:

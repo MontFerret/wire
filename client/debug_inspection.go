@@ -68,8 +68,8 @@ func (d *DebugSession) SetBreakpoint(ctx context.Context, location Location) (Br
 		return Breakpoint{}, errors.New("breakpoint has an invalid line or column")
 	}
 
-	response, err := d.client.debugClient.SetBreakpoint(ctx, &wirev1.SetBreakpointRequest{
-		ConnectionId:   d.client.connectionProto(),
+	response, err := d.client.protocol.debugClient.SetBreakpoint(ctx, &wirev1.SetBreakpointRequest{
+		ConnectionId:   d.client.protocol.connectionProto(),
 		DebugSessionId: &wirev1.DebugSessionId{Value: d.id},
 		Location: &wirev1.SourceLocation{
 			File: location.File, Line: int32(location.Line), Column: int32(location.Column),
@@ -97,8 +97,8 @@ func (d *DebugSession) DeleteBreakpoint(ctx context.Context, breakpointID uint64
 		return errors.New("breakpoint ID must be positive")
 	}
 
-	_, err := d.client.debugClient.DeleteBreakpoint(ctx, &wirev1.DeleteBreakpointRequest{
-		ConnectionId:   d.client.connectionProto(),
+	_, err := d.client.protocol.debugClient.DeleteBreakpoint(ctx, &wirev1.DeleteBreakpointRequest{
+		ConnectionId:   d.client.protocol.connectionProto(),
 		DebugSessionId: &wirev1.DebugSessionId{Value: d.id},
 		BreakpointId:   breakpointID,
 	})
@@ -112,8 +112,8 @@ func (d *DebugSession) Frames(ctx context.Context) ([]Frame, error) {
 		return nil, err
 	}
 
-	response, err := d.client.debugClient.Frames(ctx, &wirev1.FramesRequest{
-		ConnectionId: d.client.connectionProto(), DebugSessionId: &wirev1.DebugSessionId{Value: d.id},
+	response, err := d.client.protocol.debugClient.Frames(ctx, &wirev1.FramesRequest{
+		ConnectionId: d.client.protocol.connectionProto(), DebugSessionId: &wirev1.DebugSessionId{Value: d.id},
 	})
 	if err != nil {
 		return nil, decodeError(err)
@@ -138,8 +138,8 @@ func (d *DebugSession) FrameLocals(ctx context.Context, frameIndex int) ([]Varia
 		return nil, errors.New("frame index is out of range")
 	}
 
-	response, err := d.client.debugClient.FrameLocals(ctx, &wirev1.FrameLocalsRequest{
-		ConnectionId: d.client.connectionProto(), DebugSessionId: &wirev1.DebugSessionId{Value: d.id}, FrameIndex: int32(frameIndex),
+	response, err := d.client.protocol.debugClient.FrameLocals(ctx, &wirev1.FrameLocalsRequest{
+		ConnectionId: d.client.protocol.connectionProto(), DebugSessionId: &wirev1.DebugSessionId{Value: d.id}, FrameIndex: int32(frameIndex),
 	})
 	if err != nil {
 		return nil, decodeError(err)
@@ -160,8 +160,8 @@ func (d *DebugSession) Variables(ctx context.Context, reference uint64) ([]Varia
 		return nil, err
 	}
 
-	response, err := d.client.debugClient.Variables(ctx, &wirev1.VariablesRequest{
-		ConnectionId: d.client.connectionProto(), DebugSessionId: &wirev1.DebugSessionId{Value: d.id}, Reference: reference,
+	response, err := d.client.protocol.debugClient.Variables(ctx, &wirev1.VariablesRequest{
+		ConnectionId: d.client.protocol.connectionProto(), DebugSessionId: &wirev1.DebugSessionId{Value: d.id}, Reference: reference,
 	})
 	if err != nil {
 		return nil, decodeError(err)
@@ -185,8 +185,8 @@ func (d *DebugSession) EvaluateFrame(ctx context.Context, frameIndex int, expres
 		return DebugValue{}, errors.New("frame index is out of range")
 	}
 
-	response, err := d.client.debugClient.EvaluateFrame(ctx, &wirev1.EvaluateFrameRequest{
-		ConnectionId: d.client.connectionProto(), DebugSessionId: &wirev1.DebugSessionId{Value: d.id},
+	response, err := d.client.protocol.debugClient.EvaluateFrame(ctx, &wirev1.EvaluateFrameRequest{
+		ConnectionId: d.client.protocol.connectionProto(), DebugSessionId: &wirev1.DebugSessionId{Value: d.id},
 		FrameIndex: int32(frameIndex), Expression: expression,
 	})
 	if err != nil {

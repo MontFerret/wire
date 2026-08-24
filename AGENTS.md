@@ -37,7 +37,8 @@ Architecture and design documentation lives under [docs/](docs/). Read
 [Wire Architecture](docs/architecture.md) before changing boundaries, protocol
 semantics, lifecycle, concurrency, limits, or security, and update it with
 affected contracts. Read [Client Handles](docs/client.md) before changing the
-handwritten client resource model.
+handwritten client resource model, and [Client Architecture](docs/client-architecture.md)
+before changing its domain, protocol-adapter, or lifecycle boundaries.
 
 Keep detailed rationale in docs rather than this operating guide. Start in the
 layer that owns the requested behavior, preserve the dependency direction from
