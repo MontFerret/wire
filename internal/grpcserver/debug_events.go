@@ -18,7 +18,11 @@ func (s *Server) WatchDebug(request *wirev1.WatchDebugRequest, stream wirev1.Deb
 	defer subscription.Cancel()
 
 	if subscription.Current.Sequence > 0 {
-		if err := stream.Send(debugEvent(subscription.Current)); err != nil {
+		converted, err := debugEvent(subscription.Current)
+		if err != nil {
+			return rpcError(err)
+		}
+		if err := stream.Send(converted); err != nil {
 			return err
 		}
 	}
@@ -34,7 +38,11 @@ func (s *Server) WatchDebug(request *wirev1.WatchDebugRequest, stream wirev1.Deb
 				return subscriptionError(errorsChannel)
 			}
 
-			if err := stream.Send(debugEvent(event)); err != nil {
+			converted, err := debugEvent(event)
+			if err != nil {
+				return rpcError(err)
+			}
+			if err := stream.Send(converted); err != nil {
 				return err
 			}
 		case watchErr, ok := <-errorsChannel:

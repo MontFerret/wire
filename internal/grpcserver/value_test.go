@@ -1,10 +1,12 @@
 package grpcserver
 
 import (
+	"reflect"
+	"regexp"
 	"strings"
 	"testing"
+	"time"
 
-	ferretruntime "github.com/MontFerret/ferret/v2/pkg/runtime"
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
 )
 
@@ -43,22 +45,53 @@ func TestDecodeValueRejectsExcessiveNesting(t *testing.T) {
 	}
 }
 
-func TestDecodeParametersBuildsExplicitFerretValues(t *testing.T) {
+func TestDecodeParametersBuildsTransportNeutralValues(t *testing.T) {
 	parameters, err := decodeParameters(&wirev1.Parameters{Values: map[string]*wirev1.Value{
-		"integer": {Value: &wirev1.Value_IntegerValue{IntegerValue: 42}},
+		"none":     {Value: &wirev1.Value_NoneValue{}},
+		"boolean":  {Value: &wirev1.Value_BooleanValue{BooleanValue: true}},
+		"integer":  {Value: &wirev1.Value_IntegerValue{IntegerValue: 42}},
+		"float":    {Value: &wirev1.Value_FloatValue{FloatValue: 3.5}},
+		"string":   {Value: &wirev1.Value_StringValue{StringValue: "wire"}},
+		"binary":   {Value: &wirev1.Value_BinaryValue{BinaryValue: []byte{1, 2}}},
+		"duration": {Value: &wirev1.Value_DurationNanos{DurationNanos: int64(5 * time.Second)}},
+		"datetime": {Value: &wirev1.Value_DatetimeValue{DatetimeValue: "2026-08-28T12:34:56Z"}},
+		"regexp":   {Value: &wirev1.Value_RegexpValue{RegexpValue: "^wire$"}},
 		"array": {Value: &wirev1.Value_ArrayValue{ArrayValue: &wirev1.ArrayValue{Values: []*wirev1.Value{
 			{Value: &wirev1.Value_BooleanValue{BooleanValue: true}},
+		}}}},
+		"object": {Value: &wirev1.Value_ObjectValue{ObjectValue: &wirev1.ObjectValue{Fields: map[string]*wirev1.Value{
+			"ok": {Value: &wirev1.Value_BooleanValue{BooleanValue: true}},
 		}}}},
 	}})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if value, ok := parameters["integer"].(ferretruntime.Int); !ok || value != 42 {
+	if value, ok := parameters["integer"].(int64); !ok || value != 42 {
 		t.Fatalf("unexpected integer: %#v", parameters["integer"])
 	}
 
-	if _, ok := parameters["array"].(*ferretruntime.Array); !ok {
+	if value, ok := parameters["none"]; !ok || value != nil {
+		t.Fatalf("unexpected none: %#v", parameters["none"])
+	}
+
+	if value, ok := parameters["duration"].(time.Duration); !ok || value != 5*time.Second {
+		t.Fatalf("unexpected duration: %#v", parameters["duration"])
+	}
+
+	if value, ok := parameters["datetime"].(time.Time); !ok || value.Format(time.RFC3339Nano) != "2026-08-28T12:34:56Z" {
+		t.Fatalf("unexpected datetime: %#v", parameters["datetime"])
+	}
+
+	if value, ok := parameters["regexp"].(*regexp.Regexp); !ok || value.String() != "^wire$" {
+		t.Fatalf("unexpected regexp: %#v", parameters["regexp"])
+	}
+
+	if !reflect.DeepEqual(parameters["array"], []any{true}) {
 		t.Fatalf("unexpected array: %#v", parameters["array"])
+	}
+
+	if !reflect.DeepEqual(parameters["object"], map[string]any{"ok": true}) {
+		t.Fatalf("unexpected object: %#v", parameters["object"])
 	}
 }

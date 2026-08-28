@@ -6,8 +6,9 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/MontFerret/ferret/v2"
-	ferretruntime "github.com/MontFerret/ferret/v2/pkg/runtime"
+	"github.com/MontFerret/api"
+	"github.com/MontFerret/api/debugger"
+	"github.com/MontFerret/api/source"
 	"github.com/MontFerret/wire/internal/lifecycle"
 	"github.com/google/uuid"
 )
@@ -16,7 +17,7 @@ import (
 type Connection struct {
 	mu                sync.RWMutex
 	id                ConnectionID
-	engine            *ferret.Engine
+	runtime           api.Runtime
 	ctx               context.Context
 	cancel            context.CancelCauseFunc
 	plans             map[PlanID]*Plan
@@ -33,12 +34,12 @@ type Connection struct {
 	close             lifecycle.Close
 }
 
-func newConnection(id ConnectionID, engine *ferret.Engine, limits Limits) *Connection {
+func newConnection(id ConnectionID, runtime api.Runtime, limits Limits) *Connection {
 	ctx, cancel := context.WithCancelCause(context.Background())
 
 	return &Connection{
 		id:                id,
-		engine:            engine,
+		runtime:           runtime,
 		ctx:               ctx,
 		cancel:            cancel,
 		plans:             make(map[PlanID]*Plan),
@@ -139,61 +140,61 @@ func (c *Connection) PauseDebug(ctx context.Context, id DebugSessionID) (DebugSn
 	return session.snapshotLocked(), nil
 }
 
-func (c *Connection) SetBreakpoint(ctx context.Context, id DebugSessionID, location Location) (Breakpoint, error) {
+func (c *Connection) SetBreakpoint(ctx context.Context, id DebugSessionID, location source.Location) (debugger.Breakpoint, error) {
 	if err := ctx.Err(); err != nil {
-		return Breakpoint{}, err
+		return debugger.Breakpoint{}, err
 	}
 
 	if location.File == "" {
-		return Breakpoint{}, invalidRequest("breakpoint file is required")
+		return debugger.Breakpoint{}, invalidRequest("breakpoint file is required")
 	}
 
 	if location.Line <= 0 {
-		return Breakpoint{}, invalidRequest("breakpoint line must be positive")
+		return debugger.Breakpoint{}, invalidRequest("breakpoint line must be positive")
 	}
 
 	if location.Column < 0 {
-		return Breakpoint{}, invalidRequest("breakpoint column must not be negative")
+		return debugger.Breakpoint{}, invalidRequest("breakpoint column must not be negative")
 	}
 
 	session, err := c.debugSession(id)
 	if err != nil {
-		return Breakpoint{}, err
+		return debugger.Breakpoint{}, err
 	}
 
 	session.mu.Lock()
 	defer session.mu.Unlock()
 	if session.state != DebugCreated && session.state != DebugStopped {
-		return Breakpoint{}, invalidState("breakpoints require a created or stopped debug session", nil)
+		return debugger.Breakpoint{}, invalidState("breakpoints require a created or stopped debug session", nil)
 	}
 
 	if len(session.breakpoints) >= session.maxBreakpoints {
-		return Breakpoint{}, resourceExhausted("breakpoint limit reached")
+		return debugger.Breakpoint{}, resourceExhausted("breakpoint limit reached")
 	}
 
 	if err := ctx.Err(); err != nil {
-		return Breakpoint{}, err
+		return debugger.Breakpoint{}, err
 	}
 
 	value, err := session.debugger.SetBreakpointAt(
-		ferret.DebugSourceLocation{File: location.File, Line: location.Line, Column: location.Column},
-		ferret.DebugBreakpointOptions{BindingMode: ferret.DebugBreakpointBindNextExecutableInFile},
+		location,
+		debugger.BreakpointOptions{BindingMode: debugger.BreakpointBindNextExecutableInFile},
 	)
 	if err != nil {
-		return Breakpoint{}, invalidState("set breakpoint failed", err)
+		return debugger.Breakpoint{}, invalidState("set breakpoint failed", err)
 	}
 
-	session.breakpoints[uint64(value.ID)] = value
+	session.breakpoints[value.ID] = value
 
-	return convertBreakpoint(value), nil
+	return value, nil
 }
 
-func (c *Connection) DeleteBreakpoint(ctx context.Context, id DebugSessionID, breakpointID uint64) error {
+func (c *Connection) DeleteBreakpoint(ctx context.Context, id DebugSessionID, breakpointID debugger.BreakpointID) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 
-	if breakpointID == 0 {
+	if breakpointID <= 0 {
 		return invalidRequest("breakpoint ID must be positive")
 	}
 
@@ -226,7 +227,7 @@ func (c *Connection) DeleteBreakpoint(ctx context.Context, id DebugSessionID, br
 	return nil
 }
 
-func (c *Connection) Frames(ctx context.Context, id DebugSessionID) ([]Frame, error) {
+func (c *Connection) Frames(ctx context.Context, id DebugSessionID) ([]debugger.Frame, error) {
 	session, err := c.debugSession(id)
 	if err != nil {
 		return nil, err
@@ -243,15 +244,10 @@ func (c *Connection) Frames(ctx context.Context, id DebugSessionID) ([]Frame, er
 		return nil, invalidState("frames failed", err)
 	}
 
-	result := make([]Frame, len(values))
-	for i, value := range values {
-		result[i] = Frame{Index: i, Name: value.Name, Location: convertDebugLocation(value.Location)}
-	}
-
-	return result, nil
+	return append([]debugger.Frame(nil), values...), nil
 }
 
-func (c *Connection) FrameLocals(ctx context.Context, id DebugSessionID, frame int) ([]Variable, error) {
+func (c *Connection) FrameLocals(ctx context.Context, id DebugSessionID, frame int) ([]debugger.Variable, error) {
 	if frame < 0 {
 		return nil, invalidRequest("frame index must not be negative")
 	}
@@ -269,23 +265,14 @@ func (c *Connection) FrameLocals(ctx context.Context, id DebugSessionID, frame i
 
 	values, err := session.debugger.FrameLocals(frame)
 	if err != nil {
-		if errors.Is(err, ferretruntime.ErrNotFound) || errors.Is(err, ferretruntime.ErrInvalidArgument) {
-			return nil, invalidRequest("frame index was not found")
-		}
-
 		return nil, invalidState("frame locals failed", err)
 	}
 
-	result := make([]Variable, len(values))
-	for i, value := range values {
-		result[i] = convertVariable(value)
-	}
-
-	return result, nil
+	return append([]debugger.Variable(nil), values...), nil
 }
 
-func (c *Connection) Variables(ctx context.Context, id DebugSessionID, reference uint64) ([]Variable, error) {
-	if reference == 0 {
+func (c *Connection) Variables(ctx context.Context, id DebugSessionID, reference debugger.ValueReference) ([]debugger.Variable, error) {
+	if reference <= 0 {
 		return nil, invalidRequest("value reference must be positive")
 	}
 
@@ -300,41 +287,32 @@ func (c *Connection) Variables(ctx context.Context, id DebugSessionID, reference
 		return nil, err
 	}
 
-	values, err := session.debugger.Variables(ferret.DebugValueReference(reference))
+	values, err := session.debugger.Variables(reference)
 	if err != nil {
-		if errors.Is(err, ferretruntime.ErrNotFound) {
-			return nil, notFound(ErrorValueReferenceNotFound, fmt.Sprint(reference))
-		}
-
 		return nil, invalidState("variables failed", err)
 	}
 
-	result := make([]Variable, len(values))
-	for i, value := range values {
-		result[i] = convertVariable(value)
-	}
-
-	return result, nil
+	return append([]debugger.Variable(nil), values...), nil
 }
 
-func (c *Connection) EvaluateFrame(ctx context.Context, id DebugSessionID, frame int, expression string) (DebugValue, error) {
+func (c *Connection) EvaluateFrame(ctx context.Context, id DebugSessionID, frame int, expression string) (debugger.Value, error) {
 	if frame < 0 {
-		return DebugValue{}, invalidRequest("frame index must not be negative")
+		return debugger.Value{}, invalidRequest("frame index must not be negative")
 	}
 
 	if expression == "" {
-		return DebugValue{}, invalidRequest("expression is required")
+		return debugger.Value{}, invalidRequest("expression is required")
 	}
 
 	session, err := c.debugSession(id)
 	if err != nil {
-		return DebugValue{}, err
+		return debugger.Value{}, err
 	}
 
 	session.mu.Lock()
 	defer session.mu.Unlock()
 	if err := session.requireStoppedLocked(ctx); err != nil {
-		return DebugValue{}, err
+		return debugger.Value{}, err
 	}
 
 	evaluateCtx, cancel := session.operationContext(ctx)
@@ -342,14 +320,10 @@ func (c *Connection) EvaluateFrame(ctx context.Context, id DebugSessionID, frame
 
 	value, err := session.debugger.EvaluateFrame(evaluateCtx, frame, expression)
 	if err != nil {
-		if errors.Is(err, ferretruntime.ErrNotFound) || errors.Is(err, ferretruntime.ErrInvalidArgument) {
-			return DebugValue{}, invalidRequest("frame index was not found")
-		}
-
-		return DebugValue{}, invalidState("evaluation failed", err)
+		return debugger.Value{}, invalidState("evaluation failed", err)
 	}
 
-	return convertDebugValue(value), nil
+	return value, nil
 }
 
 func (c *Connection) OpenDebugSession(ctx context.Context, input OpenDebugInput) (DebugSnapshot, error) {
@@ -393,40 +367,40 @@ func (c *Connection) OpenDebugSession(ctx context.Context, input OpenDebugInput)
 	plan.mu.Unlock()
 	c.mu.Unlock()
 
-	options := []ferret.SessionOption{ferret.WithSessionRuntimeParams(input.Parameters)}
+	options := []api.SessionOption{api.WithParams(cloneParameters(input.Parameters))}
 	if input.OutputContentType != "" {
-		options = append(options, ferret.WithOutputContentType(input.OutputContentType))
+		options = append(options, api.WithOutputContentType(input.OutputContentType))
 	}
 
 	openCtx, cancelOpen := c.operationContext(ctx)
 	defer cancelOpen()
 
-	debugger, err := plan.plan.NewDebugSession(openCtx, options...)
+	runtimeDebugger, err := plan.plan.NewDebugSession(openCtx, options...)
 	if err != nil {
-		if unsupportedOutputCodec(err) {
-			return DebugSnapshot{}, &DomainError{
-				Category: ErrorUnsupported,
-				Message:  "output content type is not supported",
-				Cause:    err,
-			}
+		if !isNil(runtimeDebugger) {
+			return DebugSnapshot{}, errors.Join(internalError(err), closeAPIDebugSession(runtimeDebugger))
 		}
 
 		return DebugSnapshot{}, internalError(err)
 	}
 
+	if isNil(runtimeDebugger) {
+		return DebugSnapshot{}, internalError(errors.New("runtime returned no debug session"))
+	}
+
 	if err := openCtx.Err(); err != nil {
-		return DebugSnapshot{}, errors.Join(err, debugger.Close())
+		return DebugSnapshot{}, errors.Join(err, closeAPIDebugSession(runtimeDebugger))
 	}
 
 	debugCtx, cancel := context.WithCancelCause(c.ctx)
 	created := &DebugSession{
 		id:             DebugSessionID(uuid.NewString()),
 		plan:           plan,
-		debugger:       debugger,
+		debugger:       runtimeDebugger,
 		ctx:            debugCtx,
 		cancel:         cancel,
 		state:          DebugCreated,
-		breakpoints:    make(map[uint64]ferret.DebugBreakpoint),
+		breakpoints:    make(map[debugger.BreakpointID]debugger.Breakpoint),
 		maxWatchers:    c.limits.MaxWatchersPerResource,
 		maxBreakpoints: c.limits.MaxBreakpointsPerDebugSession,
 		watchers:       make(map[uint64]*debugWatcher),
@@ -435,26 +409,26 @@ func (c *Connection) OpenDebugSession(ctx context.Context, input OpenDebugInput)
 	c.mu.Lock()
 	if err := c.ensureOpenLocked(); err != nil {
 		c.mu.Unlock()
-		return DebugSnapshot{}, errors.Join(err, debugger.Close())
+		return DebugSnapshot{}, errors.Join(err, closeAPIDebugSession(runtimeDebugger))
 	}
 
 	current := c.plans[input.PlanID]
 	if current != plan {
 		c.mu.Unlock()
-		return DebugSnapshot{}, errors.Join(notFound(ErrorPlanNotFound, string(input.PlanID)), debugger.Close())
+		return DebugSnapshot{}, errors.Join(notFound(ErrorPlanNotFound, string(input.PlanID)), closeAPIDebugSession(runtimeDebugger))
 	}
 
 	plan.mu.Lock()
 	if plan.closing {
 		plan.mu.Unlock()
 		c.mu.Unlock()
-		return DebugSnapshot{}, errors.Join(notFound(ErrorPlanNotFound, string(input.PlanID)), debugger.Close())
+		return DebugSnapshot{}, errors.Join(notFound(ErrorPlanNotFound, string(input.PlanID)), closeAPIDebugSession(runtimeDebugger))
 	}
 
 	if err := ctx.Err(); err != nil {
 		plan.mu.Unlock()
 		c.mu.Unlock()
-		return DebugSnapshot{}, errors.Join(err, debugger.Close())
+		return DebugSnapshot{}, errors.Join(err, closeAPIDebugSession(runtimeDebugger))
 	}
 
 	plan.debug[created.id] = struct{}{}

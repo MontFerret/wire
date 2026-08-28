@@ -14,7 +14,7 @@ type (
 		OutputContentType string
 	}
 
-	// DebugSession is one remote Ferret debugger session owned by its Plan.
+	// DebugSession is one remote Unified API debugger session owned by its Plan.
 	DebugSession struct {
 		client *Client
 		plan   *Plan
@@ -23,7 +23,7 @@ type (
 	}
 )
 
-// NewDebugSession creates a Ferret debug session for a plan compiled with
+// NewDebugSession creates a Unified API debug session for a plan compiled with
 // CompileOptions.Debuggable.
 func (p *Plan) NewDebugSession(ctx context.Context, parameters Parameters, options DebugSessionOptions) (*DebugSession, error) {
 	if err := p.checkOpen(); err != nil {

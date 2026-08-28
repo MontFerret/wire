@@ -1,6 +1,11 @@
 package grpcserver
 
 import (
+	"fmt"
+	"math"
+
+	"github.com/MontFerret/api/debugger"
+	"github.com/MontFerret/api/source"
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
 	"github.com/MontFerret/wire/internal/core"
 )
@@ -122,25 +127,48 @@ func executionEvent(value core.ExecutionEvent) *wirev1.WatchExecutionResponse {
 	return result
 }
 
-func location(value core.Location) *wirev1.SourceLocation {
-	if value == (core.Location{}) {
-		return nil
+func sourceLocation(value source.Location) (*wirev1.SourceLocation, error) {
+	if value == (source.Location{}) {
+		return nil, nil
 	}
 
-	return &wirev1.SourceLocation{File: value.File, Line: int32(value.Line), Column: int32(value.Column)}
+	if value.Line <= 0 || value.Line > math.MaxInt32 || value.Column < 0 || value.Column > math.MaxInt32 {
+		return nil, runtimeConversionError("runtime returned an invalid source location")
+	}
+
+	return &wirev1.SourceLocation{File: value.File, Line: int32(value.Line), Column: int32(value.Column)}, nil
 }
 
-func debugSession(value core.DebugSnapshot) *wirev1.DebugSession {
+func sourceRange(value source.Range) (*wirev1.SourceLocation, error) {
+	return sourceLocation(value.Location)
+}
+
+func debugSession(value core.DebugSnapshot) (*wirev1.DebugSession, error) {
+	location, err := sourceRange(value.Location)
+	if err != nil {
+		return nil, err
+	}
+
+	hitIDs := make([]uint64, len(value.HitBreakpointIDs))
+	for i, id := range value.HitBreakpointIDs {
+		converted, err := debuggerIDToProto(id, "hit breakpoint ID", false)
+		if err != nil {
+			return nil, err
+		}
+
+		hitIDs[i] = converted
+	}
+
 	return &wirev1.DebugSession{
 		Id:               &wirev1.DebugSessionId{Value: string(value.ID)},
 		PlanId:           &wirev1.PlanId{Value: string(value.PlanID)},
 		State:            debugState(value.State),
 		StopReason:       debugStopReason(value.StopReason),
-		Location:         location(value.Location),
-		HitBreakpointIds: append([]uint64(nil), value.HitBreakpointIDs...),
+		Location:         location,
+		HitBreakpointIds: hitIDs,
 		Output:           output(value.Output),
 		Failure:          failure(value.Failure),
-	}
+	}, nil
 }
 
 func debugState(value core.DebugState) wirev1.DebugState {
@@ -162,29 +190,33 @@ func debugState(value core.DebugState) wirev1.DebugState {
 	}
 }
 
-func debugStopReason(value core.DebugStopReason) wirev1.DebugStopReason {
+func debugStopReason(value debugger.Reason) wirev1.DebugStopReason {
 	switch value {
-	case core.DebugStopEntry:
+	case debugger.ReasonEntry:
 		return wirev1.DebugStopReason_DEBUG_STOP_REASON_ENTRY
-	case core.DebugStopBreakpoint:
+	case debugger.ReasonBreakpoint:
 		return wirev1.DebugStopReason_DEBUG_STOP_REASON_BREAKPOINT
-	case core.DebugStopStep:
+	case debugger.ReasonStep:
 		return wirev1.DebugStopReason_DEBUG_STOP_REASON_STEP
-	case core.DebugStopPause:
+	case debugger.ReasonPause:
 		return wirev1.DebugStopReason_DEBUG_STOP_REASON_PAUSE
-	case core.DebugStopRuntimeError:
+	case debugger.ReasonRuntimeError:
 		return wirev1.DebugStopReason_DEBUG_STOP_REASON_RUNTIME_ERROR
 	default:
 		return wirev1.DebugStopReason_DEBUG_STOP_REASON_UNSPECIFIED
 	}
 }
 
-func debugEvent(value core.DebugEvent) *wirev1.WatchDebugResponse {
+func debugEvent(value core.DebugEvent) (*wirev1.WatchDebugResponse, error) {
 	result := &wirev1.WatchDebugResponse{
 		DebugSessionId: &wirev1.DebugSessionId{Value: string(value.Session)},
 		Sequence:       value.Sequence,
 	}
-	snapshot := debugSession(value.Snapshot)
+	snapshot, err := debugSession(value.Snapshot)
+	if err != nil {
+		return nil, err
+	}
+
 	switch value.Kind {
 	case core.DebugEventStarted:
 		result.Payload = &wirev1.WatchDebugResponse_Started{Started: &wirev1.DebugStarted{Session: snapshot}}
@@ -200,30 +232,124 @@ func debugEvent(value core.DebugEvent) *wirev1.WatchDebugResponse {
 		result.Payload = &wirev1.WatchDebugResponse_Terminated{Terminated: &wirev1.DebugTerminated{Session: snapshot}}
 	}
 
-	return result
+	return result, nil
 }
 
-func breakpoint(value core.Breakpoint) *wirev1.Breakpoint {
-	return &wirev1.Breakpoint{
-		Id:              value.ID,
-		File:            value.File,
-		RequestedLine:   int32(value.RequestedLine),
-		RequestedColumn: int32(value.RequestedColumn),
-		Line:            int32(value.Line),
-		Column:          int32(value.Column),
-		Verified:        value.Verified,
+func breakpoint(value debugger.Breakpoint) (*wirev1.Breakpoint, error) {
+	if value.PointID < 0 || value.FunctionID < 0 {
+		return nil, runtimeConversionError("runtime returned invalid breakpoint metadata")
 	}
+
+	id, err := debuggerIDToProto(value.ID, "breakpoint ID", false)
+	if err != nil {
+		return nil, err
+	}
+
+	requested, err := sourceLocation(value.RequestedLocation)
+	if err != nil {
+		return nil, err
+	}
+
+	if requested == nil {
+		return nil, runtimeConversionError("runtime returned no requested breakpoint location")
+	}
+
+	if requested.File == "" {
+		return nil, runtimeConversionError("runtime returned a breakpoint with no source file")
+	}
+
+	resolved, err := sourceRange(value.Location)
+	if err != nil {
+		return nil, err
+	}
+
+	if value.Bound && resolved == nil {
+		return nil, runtimeConversionError("runtime returned a bound breakpoint with no resolved location")
+	}
+
+	if resolved != nil && resolved.File != requested.File {
+		return nil, runtimeConversionError("runtime returned breakpoint locations in different files")
+	}
+
+	result := &wirev1.Breakpoint{
+		Id:              id,
+		File:            requested.File,
+		RequestedLine:   requested.Line,
+		RequestedColumn: requested.Column,
+		Verified:        value.Bound,
+	}
+	if resolved != nil {
+		result.Line = resolved.Line
+		result.Column = resolved.Column
+	}
+
+	return result, nil
 }
 
-func debugValue(value core.DebugValue) *wirev1.DebugValue {
-	return &wirev1.DebugValue{Type: value.Type, Display: value.Display, Reference: value.Reference}
+func frame(value debugger.Frame, index int) (*wirev1.Frame, error) {
+	if index < 0 || index > math.MaxInt32 {
+		return nil, runtimeConversionError("runtime returned too many frames")
+	}
+
+	if value.FunctionID < 0 {
+		return nil, runtimeConversionError("runtime returned an invalid frame function ID")
+	}
+
+	location, err := sourceLocation(value.Location)
+	if err != nil {
+		return nil, err
+	}
+
+	return &wirev1.Frame{Index: int32(index), Name: value.Name, Location: location}, nil
 }
 
-func variable(value core.Variable) *wirev1.Variable {
+func debugValue(value debugger.Value) (*wirev1.DebugValue, error) {
+	reference, err := debuggerIDToProto(value.Reference, "debug value reference", true)
+	if err != nil {
+		return nil, err
+	}
+
+	return &wirev1.DebugValue{Type: value.Type, Display: value.Display, Reference: reference}, nil
+}
+
+func variable(value debugger.Variable) (*wirev1.Variable, error) {
+	converted, err := debugValue(value.Value)
+	if err != nil {
+		return nil, err
+	}
+
 	return &wirev1.Variable{
 		Name:      value.Name,
-		Value:     debugValue(value.Value),
+		Value:     converted,
 		Mutable:   value.Mutable,
-		Parameter: value.Parameter,
+		Parameter: value.Param,
+	}, nil
+}
+
+func debuggerIDFromProto[T ~int](value uint64, name string) (T, error) {
+	if value == 0 {
+		return 0, &core.DomainError{Category: core.ErrorInvalidRequest, Message: name + " must be positive"}
+	}
+
+	if value > uint64(^uint(0)>>1) {
+		return 0, &core.DomainError{Category: core.ErrorInvalidRequest, Message: name + " is out of range"}
+	}
+
+	return T(value), nil
+}
+
+func debuggerIDToProto[T ~int](value T, name string, zeroAllowed bool) (uint64, error) {
+	if value < 0 || (!zeroAllowed && value == 0) {
+		return 0, runtimeConversionError("runtime returned an invalid %s", name)
+	}
+
+	return uint64(value), nil
+}
+
+func runtimeConversionError(format string, args ...any) error {
+	return &core.DomainError{
+		Category: core.ErrorInternal,
+		Message:  "internal runtime failure",
+		Cause:    fmt.Errorf(format, args...),
 	}
 }

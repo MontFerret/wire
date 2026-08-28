@@ -30,12 +30,12 @@ enum ExecutionState {
   EXECUTION_STATE_CANCELLED = 4;
 }
 
-// Output is Ferret's encoded output contract. Wire does not expose runtime values.
+// Output is the Unified API encoded output contract. Wire does not expose runtime values.
 message Output {
   reserved "data";
 
   string content_type = 1;
-  // content is already encoded by Ferret using content_type.
+  // content is already encoded by the runtime using content_type.
   bytes content = 2;
 }
 

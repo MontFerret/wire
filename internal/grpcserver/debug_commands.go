@@ -3,6 +3,8 @@ package grpcserver
 import (
 	"context"
 
+	"github.com/MontFerret/api/debugger"
+	"github.com/MontFerret/api/source"
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
 	"github.com/MontFerret/wire/internal/core"
 )
@@ -27,7 +29,12 @@ func (s *Server) OpenDebugSession(ctx context.Context, request *wirev1.OpenDebug
 		return nil, rpcError(err)
 	}
 
-	return &wirev1.OpenDebugSessionResponse{Session: debugSession(snapshot)}, nil
+	converted, err := debugSession(snapshot)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+
+	return &wirev1.OpenDebugSessionResponse{Session: converted}, nil
 }
 
 func (s *Server) debugCommand(command *wirev1.DebugCommand) (*core.Connection, core.DebugSessionID, error) {
@@ -54,7 +61,12 @@ func (s *Server) StartDebug(ctx context.Context, request *wirev1.StartDebugReque
 		return nil, rpcError(err)
 	}
 
-	return &wirev1.StartDebugResponse{Session: debugSession(snapshot)}, nil
+	converted, err := debugSession(snapshot)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+
+	return &wirev1.StartDebugResponse{Session: converted}, nil
 }
 
 func (s *Server) Continue(ctx context.Context, request *wirev1.ContinueRequest) (*wirev1.ContinueResponse, error) {
@@ -68,7 +80,12 @@ func (s *Server) Continue(ctx context.Context, request *wirev1.ContinueRequest) 
 		return nil, rpcError(err)
 	}
 
-	return &wirev1.ContinueResponse{Session: debugSession(snapshot)}, nil
+	converted, err := debugSession(snapshot)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+
+	return &wirev1.ContinueResponse{Session: converted}, nil
 }
 
 func (s *Server) Pause(ctx context.Context, request *wirev1.PauseRequest) (*wirev1.PauseResponse, error) {
@@ -82,7 +99,12 @@ func (s *Server) Pause(ctx context.Context, request *wirev1.PauseRequest) (*wire
 		return nil, rpcError(err)
 	}
 
-	return &wirev1.PauseResponse{Session: debugSession(snapshot)}, nil
+	converted, err := debugSession(snapshot)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+
+	return &wirev1.PauseResponse{Session: converted}, nil
 }
 
 func (s *Server) Next(ctx context.Context, request *wirev1.NextRequest) (*wirev1.NextResponse, error) {
@@ -96,7 +118,12 @@ func (s *Server) Next(ctx context.Context, request *wirev1.NextRequest) (*wirev1
 		return nil, rpcError(err)
 	}
 
-	return &wirev1.NextResponse{Session: debugSession(snapshot)}, nil
+	converted, err := debugSession(snapshot)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+
+	return &wirev1.NextResponse{Session: converted}, nil
 }
 
 func (s *Server) Step(ctx context.Context, request *wirev1.StepRequest) (*wirev1.StepResponse, error) {
@@ -110,7 +137,12 @@ func (s *Server) Step(ctx context.Context, request *wirev1.StepRequest) (*wirev1
 		return nil, rpcError(err)
 	}
 
-	return &wirev1.StepResponse{Session: debugSession(snapshot)}, nil
+	converted, err := debugSession(snapshot)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+
+	return &wirev1.StepResponse{Session: converted}, nil
 }
 
 func (s *Server) Out(ctx context.Context, request *wirev1.OutRequest) (*wirev1.OutResponse, error) {
@@ -124,7 +156,12 @@ func (s *Server) Out(ctx context.Context, request *wirev1.OutRequest) (*wirev1.O
 		return nil, rpcError(err)
 	}
 
-	return &wirev1.OutResponse{Session: debugSession(snapshot)}, nil
+	converted, err := debugSession(snapshot)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+
+	return &wirev1.OutResponse{Session: converted}, nil
 }
 
 func (s *Server) StopDebug(ctx context.Context, request *wirev1.StopDebugRequest) (*wirev1.StopDebugResponse, error) {
@@ -138,7 +175,12 @@ func (s *Server) StopDebug(ctx context.Context, request *wirev1.StopDebugRequest
 		return nil, rpcError(err)
 	}
 
-	return &wirev1.StopDebugResponse{Session: debugSession(snapshot)}, nil
+	converted, err := debugSession(snapshot)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+
+	return &wirev1.StopDebugResponse{Session: converted}, nil
 }
 
 func (s *Server) SetBreakpoint(ctx context.Context, request *wirev1.SetBreakpointRequest) (*wirev1.SetBreakpointResponse, error) {
@@ -148,14 +190,20 @@ func (s *Server) SetBreakpoint(ctx context.Context, request *wirev1.SetBreakpoin
 	}
 
 	requested := request.GetLocation()
-	value, err := connection.SetBreakpoint(ctx, core.DebugSessionID(request.GetDebugSessionId().GetValue()), core.Location{
-		File: requested.GetFile(), Line: int(requested.GetLine()), Column: int(requested.GetColumn()),
+	value, err := connection.SetBreakpoint(ctx, core.DebugSessionID(request.GetDebugSessionId().GetValue()), source.Location{
+		Position: source.Position{Line: int(requested.GetLine()), Column: int(requested.GetColumn())},
+		File:     requested.GetFile(),
 	})
 	if err != nil {
 		return nil, rpcError(err)
 	}
 
-	return &wirev1.SetBreakpointResponse{Breakpoint: breakpoint(value)}, nil
+	converted, err := breakpoint(value)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+
+	return &wirev1.SetBreakpointResponse{Breakpoint: converted}, nil
 }
 
 func (s *Server) DeleteBreakpoint(ctx context.Context, request *wirev1.DeleteBreakpointRequest) (*wirev1.DeleteBreakpointResponse, error) {
@@ -164,7 +212,12 @@ func (s *Server) DeleteBreakpoint(ctx context.Context, request *wirev1.DeleteBre
 		return nil, err
 	}
 
-	if err := connection.DeleteBreakpoint(ctx, core.DebugSessionID(request.GetDebugSessionId().GetValue()), request.GetBreakpointId()); err != nil {
+	id, err := debuggerIDFromProto[debugger.BreakpointID](request.GetBreakpointId(), "breakpoint ID")
+	if err != nil {
+		return nil, rpcError(err)
+	}
+
+	if err := connection.DeleteBreakpoint(ctx, core.DebugSessionID(request.GetDebugSessionId().GetValue()), id); err != nil {
 		return nil, rpcError(err)
 	}
 

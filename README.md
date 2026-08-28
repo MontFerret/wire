@@ -1,19 +1,19 @@
 # Ferret Wire
 
-Ferret Wire is a versioned gRPC boundary for embedding a configured [Ferret](https://github.com/MontFerret/ferret) engine in another process. It lets a host expose compilation, execution, and source-level debugging without moving engine construction, module registration, network policy, or listener security into this library.
+Ferret Wire is a versioned gRPC boundary for hosting an implementation of the [Unified Ferret API](https://github.com/MontFerret/api) in another process. It lets a host expose compilation, execution, and source-level debugging without moving runtime construction, configuration, policy, or listener security into this library.
 
-This module targets Go 1.25 and Ferret `v2.0.0-alpha.50`. The v1 protobuf package is `ferret.wire.v1`; its sources live in `proto/ferret/wire/v1`, and the checked-in Go bindings live in `gen/ferret/wire/v1`.
+This module targets Go 1.25 and Unified API `v1.0.0-alpha.7`. The v1 protobuf package is `ferret.wire.v1`; its sources live in `proto/ferret/wire/v1`, and the checked-in Go bindings live in `gen/ferret/wire/v1`.
 
 ## Ownership and architecture
 
 ```text
 host application                         client application
-  owns configured *ferret.Engine           owns grpc.ClientConnInterface
+  owns configured api.Runtime              owns grpc.ClientConnInterface
   owns and secures net.Listener             owns transport lifetime
              |                                         |
              v                                         v
        wire.Server  <-------- ferret.wire.v1 ------ client.Client
-        borrows engine                            owns Connect stream
+        borrows runtime                           owns Connect stream
              |
        logical Connection
         ├── Plans
@@ -22,7 +22,7 @@ host application                         client application
         └── bounded watch streams
 ```
 
-`NewServer` only constructs state. It does not listen, dial, inspect the environment, or close the supplied engine. `Serve` is the only operation that accepts a listener, and the caller retains responsibility for the endpoint.
+`NewServer` only constructs state. It does not listen, dial, inspect the environment, or close the supplied runtime. `Serve` is the only operation that accepts a listener, and the caller retains responsibility for the endpoint. `Shutdown` releases Wire-owned resources while leaving the runtime open.
 
 Every `Connect` server stream creates one logical ownership scope. It is deliberately independent of the physical HTTP/2 connection: several logical connections can share one `grpc.ClientConn`, but their IDs and resources remain isolated. Cancelling the Connect stream or calling `CloseConnection` first cancels and waits for pending creation, then settles debug sessions, executions, and plans in that order. Concurrent callers that observe the same in-flight release wait for its retained result. Once cleanup completes, the ID is stale and returns the corresponding structured not-found error. Cancelling one waiter does not abandon committed cleanup.
 
@@ -30,53 +30,38 @@ Unary execution and debug resume calls publish work before returning. Once publi
 
 ## Protocol contracts
 
-- Compilation returns opaque UUIDs, declared parameters, debug capability, and Ferret diagnostics. Diagnostic locations are labeled, half-open UTF-8 byte spans, not LSP ranges.
+- Compilation returns opaque UUIDs, declared parameters, and debug capability. The current Unified API has no portable diagnostic contract, so generic runtime compilation failures carry the stable Wire category without runtime-specific diagnostic payloads.
 - Parameter values use an explicit protobuf oneof: none, boolean, signed 64-bit integer, double, string, binary, duration nanoseconds, RFC3339Nano datetime, regexp, array, or string-keyed object. Missing variants, malformed values, and nesting beyond 64 levels are rejected.
-- Execution and debug completion carry Ferret's canonical output contract unchanged: `content_type` plus encoded `content` bytes. Wire does not intercept internal Ferret runtime values and emits output only in the ordered terminal snapshot.
-- Debug RPCs follow Ferret concepts: singular `SetBreakpoint` and `DeleteBreakpoint`, `Frames`, `FrameLocals`, `Step`, `Out`, `Variables`, and `EvaluateFrame`. Source lines are 1-based, breakpoint column `0` means Ferret's unspecified column, frame indices are zero-based, variables carry a parameter marker, and expandable value references become stale after every resume.
-- Unary failures use normal gRPC codes and an attached `ferret.wire.v1.ErrorDetail`. Compilation errors include structured diagnostics. Execution and debug failures are terminal events so watchers observe one ordered outcome.
+- Execution and debug completion carry the Unified API output contract unchanged: `content_type` plus encoded `content` bytes. Wire does not intercept or reinterpret runtime values and emits output only in the ordered terminal snapshot.
+- Debug RPCs follow Unified API concepts: singular `SetBreakpoint` and `DeleteBreakpoint`, `Frames`, `FrameLocals`, `Step`, `Out`, `Variables`, and `EvaluateFrame`. Source lines are 1-based, breakpoint column `0` means unspecified, frame indices are zero-based, variables carry a parameter marker, and expandable value references become stale after every resume.
+- The handwritten Go client returns canonical `api/debugger` and `api/source` inspection values. Protobuf v1 cannot carry source spans or breakpoint/frame point and function IDs, so those fields remain zero instead of being inferred.
+- Unary failures use normal gRPC codes and an attached `ferret.wire.v1.ErrorDetail`. Execution and debug failures are terminal events so watchers observe one ordered outcome.
 - `ResourceExhausted` reports finite-cap violations, while missing breakpoints and other stale resources report structured not-found categories and resource metadata.
 
 `DefaultServerLimits` bounds client-controlled state to 64 logical connections; 128 plans and 128 executions per connection; 32 debug sessions per connection; 8 watchers per execution or debug session; 256 breakpoints per debug session; and 4 MiB for both inbound and outbound gRPC messages. Pending, active, and closing resources all count. Hosts may replace the complete positive limit set with `WithServerLimits`.
 
-The exact Ferret module version is read from Go build metadata. Development and replaced builds, whose dependency version is unavailable, fall back to `compiler.Version`.
+The legacy v1 `ferret_version` metadata field remains present for wire compatibility but is empty because `api.Runtime` exposes no portable runtime-version contract. `WithRuntimeIdentity` continues to publish explicit host application identity.
 
 The Go client converts parameters without reflection. `client.Parameters` accepts `nil`, booleans, signed integer types, unsigned integers that fit in `int64`, `float32`/`float64`, strings, `[]byte`, `time.Duration`, `time.Time`, `regexp.Regexp` or `*regexp.Regexp`, `[]any`, and `map[string]any`. Other Go types are rejected locally.
 
-## Unix-socket example
+## Runtime host example
 
-The host chooses the endpoint and configures the engine. This example uses an application-private Unix socket; production code should also set appropriate directory and socket permissions.
+The host chooses and configures both the runtime implementation and endpoint. This function accepts caller-owned values and does not close either one:
 
 ```go
-engine, err := ferret.New(
-    ferret.WithFunctionsRegistrar(func(ns runtime.Namespace) {
-        ns.Function().A0().Add("HOST_NAME", func(context.Context) (runtime.Value, error) {
-            return runtime.NewString("example-host"), nil
-        })
-    }),
-)
-if err != nil {
-    log.Fatal(err)
-}
-defer engine.Close() // the application, not Wire, owns the engine
+func serveRuntime(ctx context.Context, runtime api.Runtime, listener net.Listener) error {
+    server, err := wire.NewServer(runtime, wire.WithRuntimeIdentity(wire.RuntimeIdentity{
+        Name: "my-app", Version: "1.0.0", InstanceID: "worker-1",
+    }))
+    if err != nil {
+        return err
+    }
 
-const socket = "/var/run/my-app/ferret-wire.sock"
-listener, err := net.Listen("unix", socket)
-if err != nil {
-    log.Fatal(err)
-}
-defer listener.Close()
-
-server, err := wire.NewServer(engine, wire.WithRuntimeIdentity(wire.RuntimeIdentity{
-    Name: "my-app", Version: "1.0.0", InstanceID: "worker-1",
-}))
-if err != nil {
-    log.Fatal(err)
-}
-if err := server.Serve(ctx, listener); err != nil {
-    log.Fatal(err)
+    return server.Serve(ctx, listener)
 }
 ```
+
+For an application-private Unix socket, the caller creates `net.Listen("unix", socket)`, applies appropriate directory and socket permissions, and closes both the listener and runtime after the Wire server has shut down.
 
 The caller owns the gRPC transport. Closing the Wire client closes only its
 logical connection and the remote resources created through it.
@@ -126,7 +111,7 @@ defer func() {
 
 plan, err := wireClient.Compile(ctx, client.Source{
     Identity: "example.fql",
-    Content:  "RETURN {host: HOST_NAME(), input: @input}",
+    Content:  "RETURN {input: @input}",
 }, client.CompileOptions{})
 if err != nil {
     log.Fatal(err)
@@ -166,16 +151,17 @@ for {
 }
 ```
 
-Wire failures expose stable client error categories and structured diagnostics
-through `*client.Error`. The underlying gRPC status remains available through
-error unwrapping and `status.Code(err)`; remote connection and resource IDs are
-not part of the high-level client error model.
+Wire failures expose stable client error categories through `*client.Error`.
+Its diagnostics remain empty until the Unified API provides a portable
+diagnostic contract. The underlying gRPC status remains available through error
+unwrapping and `status.Code(err)`; remote connection and resource IDs are not
+part of the high-level client error model.
 
 ## Security and trust model
 
-Wire supplies no default endpoint, authentication, authorization, TLS policy, TCP listener, named-pipe implementation, listener discovery, or externally reachable binding. Callers must choose and secure the listener, authenticate peers where required, enforce filesystem permissions for local sockets, and decide which Ferret capabilities and host functions are safe for those peers. FQL source and parameters are trusted according to the host's policy; parameters may contain secrets and therefore require a confidential transport.
+Wire supplies no default endpoint, authentication, authorization, TLS policy, TCP listener, named-pipe implementation, listener discovery, or externally reachable binding. Callers must choose and secure the listener, authenticate peers where required, enforce filesystem permissions for local sockets, and decide which runtime capabilities and host functions are safe for those peers. FQL source and parameters are trusted according to the host's policy; parameters may contain secrets and therefore require a confidential transport.
 
-Generic internal errors and cleanup panics are sanitized and do not expose raw causes, panic values, filesystem paths, environment data, or host internals. Expected Ferret compilation/runtime diagnostics and the source identity supplied by the caller remain observable protocol data. Server limits reduce accidental and hostile resource exhaustion, but hosts must still decide which engine capabilities are safe to expose.
+Compilation failures, execution failures, generic internal errors, and cleanup panics are sanitized and do not expose runtime error text, raw causes, panic values, filesystem paths, environment data, or host internals. Source identity remains part of the caller-supplied protocol input. Server limits reduce accidental and hostile resource exhaustion, but hosts must still decide which runtime capabilities are safe to expose.
 
 Windows named pipes and remote TCP/TLS can be added later by supplying ordinary `net.Listener` and gRPC dialer implementations. Transport choice does not change the logical connection or protocol semantics.
 
@@ -183,7 +169,10 @@ Windows named pipes and remote TCP/TLS can be added later by supplying ordinary 
 
 Wire does not provide runtime introspection, Ferret module discovery, language intelligence, LSP, DAP translation, listener policy, downstream ferretd/CLI/Lab integration, TTLs, or heartbeats. It makes no changes to Ferret core or other MontFerret repositories.
 
-Ferret accepts a context at the engine compilation boundary, but compiler CPU work is not internally cancellable. Wire does not attempt to interrupt or work around that implementation detail. Likewise, it does not synthesize intermediate output from logs.
+Wire forwards cancellation to Unified API compile and session operations. Whether
+an implementation can promptly interrupt its internal work remains a runtime
+concern; Wire does not attempt implementation-specific interruption. It also
+does not synthesize intermediate output from logs.
 
 ## Development
 

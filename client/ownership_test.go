@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/MontFerret/api/debugger"
+	"github.com/MontFerret/api/source"
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -204,7 +206,8 @@ func (s *handleServer) SetBreakpoint(_ context.Context, request *wirev1.SetBreak
 
 	return &wirev1.SetBreakpointResponse{Breakpoint: &wirev1.Breakpoint{
 		Id: 1, File: request.GetLocation().GetFile(), RequestedLine: request.GetLocation().GetLine(),
-		Line: request.GetLocation().GetLine(), Verified: true,
+		RequestedColumn: request.GetLocation().GetColumn(), Line: request.GetLocation().GetLine(),
+		Column: request.GetLocation().GetColumn(), Verified: true,
 	}}, nil
 }
 
@@ -217,25 +220,29 @@ func (s *handleServer) DeleteBreakpoint(_ context.Context, request *wirev1.Delet
 func (s *handleServer) Frames(_ context.Context, request *wirev1.FramesRequest) (*wirev1.FramesResponse, error) {
 	s.record("frames", request.GetConnectionId().GetValue(), request.GetDebugSessionId().GetValue())
 
-	return &wirev1.FramesResponse{Frames: []*wirev1.Frame{{Index: 0, Name: "main"}}}, nil
+	return &wirev1.FramesResponse{Frames: []*wirev1.Frame{{
+		Index: 0, Name: "main", Location: &wirev1.SourceLocation{File: "query.fql", Line: 1},
+	}}}, nil
 }
 
 func (s *handleServer) FrameLocals(_ context.Context, request *wirev1.FrameLocalsRequest) (*wirev1.FrameLocalsResponse, error) {
 	s.record("frame-locals", request.GetConnectionId().GetValue(), request.GetDebugSessionId().GetValue())
 
-	return &wirev1.FrameLocalsResponse{Variables: []*wirev1.Variable{{Name: "value", Value: &wirev1.DebugValue{Display: "1"}}}}, nil
+	return &wirev1.FrameLocalsResponse{Variables: []*wirev1.Variable{{
+		Name: "value", Value: &wirev1.DebugValue{Type: "int", Display: "1", Reference: 2}, Parameter: true,
+	}}}, nil
 }
 
 func (s *handleServer) Variables(_ context.Context, request *wirev1.VariablesRequest) (*wirev1.VariablesResponse, error) {
 	s.record("variables", request.GetConnectionId().GetValue(), request.GetDebugSessionId().GetValue())
 
-	return &wirev1.VariablesResponse{Variables: []*wirev1.Variable{{Name: "nested", Value: &wirev1.DebugValue{Display: "2"}}}}, nil
+	return &wirev1.VariablesResponse{Variables: []*wirev1.Variable{{Name: "nested", Value: &wirev1.DebugValue{Type: "int", Display: "2"}}}}, nil
 }
 
 func (s *handleServer) EvaluateFrame(_ context.Context, request *wirev1.EvaluateFrameRequest) (*wirev1.EvaluateFrameResponse, error) {
 	s.record("evaluate", request.GetConnectionId().GetValue(), request.GetDebugSessionId().GetValue())
 
-	return &wirev1.EvaluateFrameResponse{Value: &wirev1.DebugValue{Display: "3"}}, nil
+	return &wirev1.EvaluateFrameResponse{Value: &wirev1.DebugValue{Type: "int", Display: "3", Reference: 3}}, nil
 }
 
 func (s *handleServer) ReleaseDebugSession(_ context.Context, request *wirev1.ReleaseDebugSessionRequest) (*wirev1.ReleaseDebugSessionResponse, error) {
@@ -288,7 +295,8 @@ func executionProto(id string, planID string) *wirev1.Execution {
 func debugProto(id string) *wirev1.DebugSession {
 	return &wirev1.DebugSession{
 		Id: &wirev1.DebugSessionId{Value: id}, PlanId: &wirev1.PlanId{Value: "plan"},
-		State: wirev1.DebugState_DEBUG_STATE_STOPPED,
+		State: wirev1.DebugState_DEBUG_STATE_STOPPED, StopReason: wirev1.DebugStopReason_DEBUG_STOP_REASON_BREAKPOINT,
+		Location: &wirev1.SourceLocation{File: "query.fql", Line: 1}, HitBreakpointIds: []uint64{1},
 	}
 }
 
@@ -344,30 +352,44 @@ func TestHandleOperationsUseBoundOwnerResources(t *testing.T) {
 		}
 	}
 
-	breakpoint, err := debug.SetBreakpoint(testClientContext(t), Location{File: "query.fql", Line: 1})
+	breakpoint, err := debug.SetBreakpoint(testClientContext(t), source.Location{
+		Position: source.Position{Line: 1},
+		File:     "query.fql",
+	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if breakpoint.ID != 1 || !breakpoint.Bound || breakpoint.RequestedLocation.File != "query.fql" ||
+		breakpoint.Location.File != "query.fql" || breakpoint.Location.Span != (source.Span{}) ||
+		breakpoint.PointID != 0 || breakpoint.FunctionID != 0 {
+		t.Fatalf("unexpected Unified API breakpoint: %#v", breakpoint)
 	}
 	if err := debug.DeleteBreakpoint(testClientContext(t), breakpoint.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := debug.Frames(testClientContext(t)); err != nil {
-		t.Fatal(err)
+	frames, err := debug.Frames(testClientContext(t))
+	if err != nil || len(frames) != 1 || frames[0].Name != "main" || frames[0].FunctionID != 0 || frames[0].Location.File != "query.fql" {
+		t.Fatalf("unexpected Unified API frames: %#v, %v", frames, err)
 	}
-	if _, err := debug.FrameLocals(testClientContext(t), 0); err != nil {
-		t.Fatal(err)
+	locals, err := debug.FrameLocals(testClientContext(t), 0)
+	if err != nil || len(locals) != 1 || !locals[0].Param || locals[0].Value.Reference != 2 {
+		t.Fatalf("unexpected Unified API locals: %#v, %v", locals, err)
 	}
-	if _, err := debug.Variables(testClientContext(t), 1); err != nil {
-		t.Fatal(err)
+	variables, err := debug.Variables(testClientContext(t), debugger.ValueReference(1))
+	if err != nil || len(variables) != 1 || variables[0].Value.Display != "2" {
+		t.Fatalf("unexpected Unified API variables: %#v, %v", variables, err)
 	}
-	if _, err := debug.EvaluateFrame(testClientContext(t), 0, "1 + 2"); err != nil {
-		t.Fatal(err)
+	evaluated, err := debug.EvaluateFrame(testClientContext(t), 0, "1 + 2")
+	if err != nil || evaluated.Reference != 3 || evaluated.Display != "3" {
+		t.Fatalf("unexpected Unified API value: %#v, %v", evaluated, err)
 	}
 	debugEvents, err := debug.Watch(testClientContext(t))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if event, err := debugEvents.Recv(); err != nil || event.Snapshot.State != DebugStopped {
+	if event, err := debugEvents.Recv(); err != nil || event.Snapshot.State != DebugStopped ||
+		event.Snapshot.StopReason != debugger.ReasonBreakpoint || event.Snapshot.Location == nil ||
+		event.Snapshot.Location.File != "query.fql" || len(event.Snapshot.HitBreakpointIDs) != 1 || event.Snapshot.HitBreakpointIDs[0] != 1 {
 		t.Fatalf("unexpected debug event: %#v, %v", event, err)
 	}
 

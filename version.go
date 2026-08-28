@@ -5,8 +5,7 @@ import "runtime/debug"
 const (
 	apiIdentity = "ferret.wire.v1"
 
-	wireModulePath   = "github.com/MontFerret/wire"
-	ferretModulePath = "github.com/MontFerret/ferret/v2"
+	wireModulePath = "github.com/MontFerret/wire"
 )
 
 func moduleVersion(path, fallback string) string {

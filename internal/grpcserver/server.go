@@ -12,11 +12,11 @@ type Server struct {
 	wirev1.UnimplementedExecutionServiceServer
 	wirev1.UnimplementedDebugServiceServer
 
-	runtime *core.Runtime
+	host *core.Host
 }
 
-func New(runtime *core.Runtime) *Server {
-	return &Server{runtime: runtime}
+func New(host *core.Host) *Server {
+	return &Server{host: host}
 }
 
 func (s *Server) Register(registrar grpc.ServiceRegistrar) {
@@ -27,7 +27,7 @@ func (s *Server) Register(registrar grpc.ServiceRegistrar) {
 }
 
 func (s *Server) connection(id *wirev1.ConnectionId) (*core.Connection, error) {
-	connection, err := s.runtime.Connection(core.ConnectionID(id.GetValue()))
+	connection, err := s.host.Connection(core.ConnectionID(id.GetValue()))
 	if err != nil {
 		return nil, rpcError(err)
 	}

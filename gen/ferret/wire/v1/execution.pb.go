@@ -120,11 +120,11 @@ func (x *ExecutionId) GetValue() string {
 	return ""
 }
 
-// Output is Ferret's encoded output contract. Wire does not expose runtime values.
+// Output is the Unified API encoded output contract. Wire does not expose runtime values.
 type Output struct {
 	state       protoimpl.MessageState `protogen:"open.v1"`
 	ContentType string                 `protobuf:"bytes,1,opt,name=content_type,json=contentType,proto3" json:"content_type,omitempty"`
-	// content is already encoded by Ferret using content_type.
+	// content is already encoded by the runtime using content_type.
 	Content       []byte `protobuf:"bytes,2,opt,name=content,proto3" json:"content,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

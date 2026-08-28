@@ -1,26 +1,22 @@
 # Wire Architecture
 
 Wire is a security-sensitive RPC boundary that exposes a host application's
-configured Ferret engine to external tooling. It adapts Ferret's public
-execution and debugger APIs across a process boundary without redefining their
-semantics.
+configured Unified API runtime to external tooling. It adapts the API's
+execution and debugger contracts across a process boundary without assuming a
+particular runtime implementation.
 
 ## Boundaries and ownership
 
 The dependency direction is:
 
 ```text
-ferret
-   ↑
-wire
-   ↑
-consumers
+consumers → protobuf/gRPC → Wire lifecycle host → Unified API → runtime implementation
 ```
 
 | Concern | Owner |
 | --- | --- |
-| FQL, runtime, output encoding, and debugger semantics | Ferret |
-| Engine construction, configuration, policies, and application state | Host application |
+| FQL, runtime, output encoding, and debugger semantics | Unified API and runtime implementation |
+| Runtime construction, configuration, policies, and application state | Host application |
 | Versioned RPC contract | Protobuf definitions |
 | RPC adaptation | `internal/grpcserver` |
 | Logical connections and resources | `internal/core` |
@@ -29,13 +25,13 @@ consumers
 | Physical transport, listener, authentication, and TLS | Host and Wire server layer |
 | DAP translation, LSP, and language intelligence | ferretd and compiler tooling |
 
-Ferret core must never depend on Wire. Wire must not absorb DAP, LSP,
+Runtime implementations must never depend on Wire. Wire must not absorb DAP, LSP,
 transport-security, or host-configuration semantics for downstream
 convenience.
 
 ## Execution and host boundaries
 
-Normal results cross Wire through Ferret's encoded output abstraction:
+Normal results cross Wire through the Unified API encoded output abstraction:
 
 ```go
 type Output struct {
@@ -45,24 +41,30 @@ type Output struct {
 ```
 
 The contract is exactly content type plus encoded bytes. Wire does not expose,
-reconstruct, or maintain a parallel representation of internal Ferret runtime
-values. It does not add Wire-specific engine options, private raw-value codecs,
-runtime-value type switches, or execution paths that bypass Ferret's public
-`Plan` and `Session` APIs. Debugger values are a separate structured boundary
-defined by Ferret's public debugger API.
+reconstruct, or maintain a parallel representation of implementation-specific
+runtime values. It does not add Wire-specific runtime options, private raw-value
+codecs, runtime-value type switches, or execution paths that bypass `api.Plan`
+and `api.Session`. Debugger values are the separate structured boundary defined
+by `api/debugger`.
 
-The host supplies both the configured engine and listener:
+The host supplies both the configured runtime and listener:
 
 ```go
-engine := createApplicationEngine()
-server, err := wire.NewServer(engine)
+runtime := createApplicationRuntime()
+server, err := wire.NewServer(runtime)
 err = server.Serve(ctx, listener)
 ```
 
-Wire borrows both. It does not close the engine, construct or secure a
+Wire borrows both. It does not close the runtime, construct or secure a
 listener, or reconstruct the application's modules, functions, policies,
 resources, or configuration. Importing Wire has no side effects, and
 `NewServer` does not listen, bind, dial, or inspect the environment.
+
+The v1 `ferret_version` field is retained for protocol compatibility but is
+empty because `api.Runtime` has no portable runtime-version contract. Likewise,
+the current API has no neutral diagnostic or error taxonomy; Wire preserves
+stable protocol categories and sanitized messages without inspecting
+implementation-specific errors.
 
 ## Protocol contract
 
@@ -81,6 +83,20 @@ Connection, plan, execution, and debug-session IDs are opaque and
 server-issued. They are scoped to one logical connection and cannot be inferred
 or transferred to another connection. The handwritten Go client keeps these
 IDs private; see [Client Handles](client.md).
+
+Core debugger state and client inspection values use the canonical
+`api/debugger` and `api/source` types. Protobuf messages remain transport
+representations and are converted explicitly at the gRPC server and client
+boundaries. Both directions validate coordinates, IDs, references, and enum
+values before conversion; invalid runtime values become sanitized internal
+failures, while malformed server responses become local client errors.
+
+The v1 protobuf schema predates some Unified API metadata. A transported
+`source.Range` therefore has a zero span, and transported breakpoints and
+frames have zero point or function IDs. The client preserves those zero values
+rather than deriving metadata that was not sent. Frame indices are derived
+from the order of the runtime's frame slice and are validated in the inverse
+client conversion.
 
 ## Logical lifecycle and concurrency
 
@@ -107,13 +123,13 @@ transport internals, peer addresses, or socket identity. Leases, TTLs,
 heartbeats, and reconnect tokens require a separate explicit contract.
 
 Every stateful resource has explicit synchronization, cancellation, ownership,
-and termination. Context cancellation propagates into Ferret operations where
-its public API accepts a context. Debug inspection cannot wait through a resume
-and then inspect a later stop. Wire uses its explicit state lock and Ferret's
-serialized debugger API rather than introducing a second command scheduler.
+and termination. Context cancellation propagates into Unified API operations.
+Debug inspection cannot wait through a resume and then inspect a later stop.
+Wire uses its explicit state lock and the Unified API debugger session rather
+than introducing a second command scheduler.
 
 Event buffers are bounded and producers are non-blocking. Slow clients cannot
-block Ferret execution or create unbounded queues. Watcher slots remain owned
+block runtime execution or create unbounded queues. Watcher slots remain owned
 until the stream handler exits, including after lag or a terminal snapshot.
 Detached cleanup has a named owner, is panic-safe, and terminates
 deterministically.
@@ -140,8 +156,8 @@ Hosts may replace the complete positive set with `WithServerLimits`. Pending,
 active, and closing resources all count. Implementations validate identifiers,
 required fields, ranges, and state; bound client-controlled allocations; and
 sanitize internal failures and panic values. They do not leak unnecessary host
-details, trust client-provided ownership, bypass Ferret filesystem or network
-policies, or introduce limit bypasses.
+details, trust client-provided ownership, bypass host runtime policies, or
+introduce limit bypasses.
 
 Listener exposure, peer authentication, authorization, and TLS remain host
 transport concerns until separately specified. Wire never creates an unsafe

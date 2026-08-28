@@ -5,8 +5,8 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/MontFerret/ferret/v2"
-	"github.com/MontFerret/ferret/v2/pkg/source"
+	"github.com/MontFerret/api"
+	"github.com/MontFerret/api/source"
 	"github.com/MontFerret/wire/internal/lifecycle"
 	"github.com/google/uuid"
 )
@@ -15,8 +15,7 @@ type (
 	Plan struct {
 		mu         sync.Mutex
 		id         PlanID
-		plan       *ferret.Plan
-		identity   string
+		plan       api.Plan
 		parameters []string
 		debuggable bool
 		closing    bool
@@ -60,32 +59,40 @@ func (c *Connection) Compile(ctx context.Context, input CompileInput) (PlanSnaps
 	defer cancel()
 
 	src := source.New(input.Identity, input.Content)
-	var compiled *ferret.Plan
-	var err error
-	if input.Debuggable {
-		compiled, err = c.engine.CompileDebug(compileCtx, src)
-	} else {
-		compiled, err = c.engine.Compile(compileCtx, src)
+	compiled, err, panicked := c.compileAPIPlan(compileCtx, src, input.Debuggable)
+	if panicked {
+		return PlanSnapshot{}, internalError(err)
+	}
+	if err != nil {
+		compileErr := &DomainError{
+			Category: ErrorCompilation,
+			Message:  "compilation failed",
+			Cause:    err,
+		}
+		if !isNil(compiled) {
+			return PlanSnapshot{}, errors.Join(compileErr, closeAPIPlan(compiled))
+		}
+
+		return PlanSnapshot{}, compileErr
 	}
 
-	if err != nil {
-		return PlanSnapshot{}, &DomainError{
-			Category:    ErrorCompilation,
-			Message:     "compilation failed",
-			Diagnostics: diagnosticsFromError(err, input.Identity),
-			Cause:       err,
-		}
+	if isNil(compiled) {
+		return PlanSnapshot{}, internalError(errors.New("runtime returned no plan"))
 	}
 
 	if err := compileCtx.Err(); err != nil {
-		return PlanSnapshot{}, errors.Join(err, compiled.Close())
+		return PlanSnapshot{}, errors.Join(err, closeAPIPlan(compiled))
+	}
+
+	parameters, err := apiPlanParameters(compiled)
+	if err != nil {
+		return PlanSnapshot{}, errors.Join(err, closeAPIPlan(compiled))
 	}
 
 	created := &Plan{
 		id:         PlanID(uuid.NewString()),
 		plan:       compiled,
-		identity:   input.Identity,
-		parameters: compiled.Params(),
+		parameters: parameters,
 		debuggable: input.Debuggable,
 		executions: make(map[ExecutionID]struct{}),
 		debug:      make(map[DebugSessionID]struct{}),
@@ -94,17 +101,56 @@ func (c *Connection) Compile(ctx context.Context, input CompileInput) (PlanSnaps
 	c.mu.Lock()
 	if err := c.ensureOpenLocked(); err != nil {
 		c.mu.Unlock()
-		return PlanSnapshot{}, errors.Join(err, compiled.Close())
+		return PlanSnapshot{}, errors.Join(err, closeAPIPlan(compiled))
 	}
 
 	if err := ctx.Err(); err != nil {
 		c.mu.Unlock()
-		return PlanSnapshot{}, errors.Join(err, compiled.Close())
+		return PlanSnapshot{}, errors.Join(err, closeAPIPlan(compiled))
 	}
 	c.plans[created.id] = created
 	c.mu.Unlock()
 
 	return created.snapshot(), nil
+}
+
+func (c *Connection) compileAPIPlan(ctx context.Context, src source.File, debug bool) (compiled api.Plan, err error, panicked bool) {
+	defer func() {
+		if recover() != nil {
+			compiled = nil
+			err = errors.New("runtime compilation panicked")
+			panicked = true
+		}
+	}()
+
+	if debug {
+		compiled, err = c.runtime.CompileDebug(ctx, src)
+	} else {
+		compiled, err = c.runtime.Compile(ctx, src)
+	}
+
+	return
+}
+
+func apiPlanParameters(plan api.Plan) (parameters []string, err error) {
+	defer func() {
+		if recover() != nil {
+			parameters = nil
+			err = internalError(errors.New("runtime plan metadata panicked"))
+		}
+	}()
+
+	return append([]string(nil), plan.Params()...), nil
+}
+
+func closeAPIPlan(plan api.Plan) (err error) {
+	defer func() {
+		if recover() != nil {
+			err = internalError(errors.New("runtime plan cleanup panicked"))
+		}
+	}()
+
+	return plan.Close()
 }
 
 func (p *Plan) snapshot() PlanSnapshot {
@@ -189,6 +235,6 @@ func (c *Connection) settlePlanRelease(plan *Plan) error {
 		err := c.ReleaseExecution(context.Background(), child)
 		result = errors.Join(result, ignoreMissingResource(err, ErrorExecutionNotFound))
 	}
-	result = errors.Join(result, plan.plan.Close())
+	result = errors.Join(result, closeAPIPlan(plan.plan))
 	return result
 }

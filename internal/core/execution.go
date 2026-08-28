@@ -5,8 +5,7 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/MontFerret/ferret/v2"
-	ferretruntime "github.com/MontFerret/ferret/v2/pkg/runtime"
+	"github.com/MontFerret/api"
 	"github.com/MontFerret/wire/internal/lifecycle"
 	"github.com/google/uuid"
 )
@@ -51,7 +50,7 @@ type (
 
 	ExecuteInput struct {
 		PlanID            PlanID
-		Parameters        ferretruntime.Params
+		Parameters        map[string]any
 		OutputContentType string
 	}
 
@@ -66,7 +65,7 @@ type (
 		plan          *Plan
 		ctx           context.Context
 		cancel        context.CancelCauseFunc
-		parameters    ferretruntime.Params
+		parameters    map[string]any
 		contentType   string
 		maxWatchers   int
 		state         ExecutionState
@@ -141,7 +140,7 @@ func (c *Connection) Execute(ctx context.Context, input ExecuteInput) (Execution
 		plan:        plan,
 		ctx:         executionCtx,
 		cancel:      cancel,
-		parameters:  input.Parameters.Clone(),
+		parameters:  cloneParameters(input.Parameters),
 		contentType: input.OutputContentType,
 		maxWatchers: c.limits.MaxWatchersPerResource,
 		state:       ExecutionRunning,
@@ -160,46 +159,68 @@ func (c *Connection) Execute(ctx context.Context, input ExecuteInput) (Execution
 }
 
 func (e *Execution) run() {
-	var session *ferret.Session
+	var session api.Session
+	closeAttempted := false
 	defer func() {
 		if recover() == nil {
 			return
 		}
 
-		if session != nil {
-			func() {
-				defer func() { _ = recover() }()
-				_ = session.Close()
-			}()
+		if !isNil(session) && !closeAttempted {
+			closeAttempted = true
+			_ = closeAPISession(session)
 		}
 
-		e.finish(nil, errors.New("Ferret execution panicked"))
+		e.finish(nil, errors.New("runtime execution panicked"), ErrorInternal)
 	}()
 
-	options := []ferret.SessionOption{ferret.WithSessionRuntimeParams(e.parameters)}
+	options := []api.SessionOption{api.WithParams(cloneParameters(e.parameters))}
 	if e.contentType != "" {
-		options = append(options, ferret.WithOutputContentType(e.contentType))
+		options = append(options, api.WithOutputContentType(e.contentType))
 	}
 
 	var err error
 	session, err = e.plan.plan.NewSession(e.ctx, options...)
 	if err != nil {
-		e.finish(nil, err)
+		if !isNil(session) {
+			closeAttempted = true
+			err = errors.Join(err, closeAPISession(session))
+			session = nil
+		}
+
+		e.finish(nil, err, ErrorInternal)
+		return
+	}
+
+	if isNil(session) {
+		e.finish(nil, errors.New("runtime returned no session"), ErrorInternal)
 		return
 	}
 
 	output, runErr := session.Run(e.ctx)
-	closeErr := session.Close()
+	closeAttempted = true
+	closeErr := closeAPISession(session)
 	session = nil
 	err = errors.Join(runErr, closeErr)
-	var result *Output
-	if output != nil {
-		result = &Output{ContentType: output.ContentType, Content: append([]byte(nil), output.Content...)}
+	result := &Output{ContentType: output.ContentType, Content: append([]byte(nil), output.Content...)}
+	category := ErrorInternal
+	if runErr != nil {
+		category = ErrorExecution
 	}
-	e.finish(result, err)
+	e.finish(result, err, category)
 }
 
-func (e *Execution) finish(output *Output, err error) {
+func closeAPISession(session api.Session) (err error) {
+	defer func() {
+		if recover() != nil {
+			err = internalError(errors.New("runtime session cleanup panicked"))
+		}
+	}()
+
+	return session.Close()
+}
+
+func (e *Execution) finish(output *Output, err error, category ErrorCategory) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.state != ExecutionRunning {
@@ -213,11 +234,38 @@ func (e *Execution) finish(output *Output, err error) {
 		e.publishLocked(ExecutionEventCancelled, true)
 	case err != nil:
 		e.state = ExecutionFailed
-		e.failure = failureFromError(err, e.plan.identity)
+		e.failure = failureFromError(category)
 		e.publishLocked(ExecutionEventFailed, true)
 	default:
 		e.state = ExecutionCompleted
 		e.publishLocked(ExecutionEventCompleted, true)
+	}
+}
+
+func cloneParameters(values map[string]any) map[string]any {
+	result := make(map[string]any, len(values))
+	for name, value := range values {
+		result[name] = cloneParameter(value)
+	}
+
+	return result
+}
+
+func cloneParameter(value any) any {
+	switch value := value.(type) {
+	case []byte:
+		return append([]byte(nil), value...)
+	case []any:
+		result := make([]any, len(value))
+		for i, item := range value {
+			result[i] = cloneParameter(item)
+		}
+
+		return result
+	case map[string]any:
+		return cloneParameters(value)
+	default:
+		return value
 	}
 }
 

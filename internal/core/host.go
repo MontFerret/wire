@@ -5,7 +5,7 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/MontFerret/ferret/v2"
+	"github.com/MontFerret/api"
 	"github.com/MontFerret/wire/internal/lifecycle"
 	"github.com/google/uuid"
 )
@@ -16,10 +16,10 @@ type (
 		close      lifecycle.Close
 	}
 
-	// Runtime owns logical Wire connections while borrowing a host Engine.
-	Runtime struct {
+	// Host owns logical Wire connections while borrowing a runtime.
+	Host struct {
 		mu          sync.RWMutex
-		engine      *ferret.Engine
+		runtime     api.Runtime
 		info        RuntimeInfo
 		limits      Limits
 		connections map[ConnectionID]*Connection
@@ -28,17 +28,17 @@ type (
 	}
 )
 
-func NewRuntime(engine *ferret.Engine, info RuntimeInfo, limits Limits) (*Runtime, error) {
-	if engine == nil {
-		return nil, invalidRequest("Ferret engine is required")
+func NewHost(runtime api.Runtime, info RuntimeInfo, limits Limits) (*Host, error) {
+	if isNil(runtime) {
+		return nil, invalidRequest("runtime is required")
 	}
 
 	if err := limits.validate(); err != nil {
 		return nil, err
 	}
 
-	return &Runtime{
-		engine:      engine,
+	return &Host{
+		runtime:     runtime,
 		info:        info,
 		limits:      limits,
 		connections: make(map[ConnectionID]*Connection),
@@ -46,37 +46,37 @@ func NewRuntime(engine *ferret.Engine, info RuntimeInfo, limits Limits) (*Runtim
 	}, nil
 }
 
-func (r *Runtime) Info() RuntimeInfo {
-	return r.info
+func (h *Host) Info() RuntimeInfo {
+	return h.info
 }
 
-func (r *Runtime) OpenConnection() (*Connection, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.closed {
+func (h *Host) OpenConnection() (*Connection, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.closed {
 		return nil, invalidState("server is shutting down", nil)
 	}
 
-	if len(r.connections)+len(r.closing) >= r.limits.MaxConnections {
+	if len(h.connections)+len(h.closing) >= h.limits.MaxConnections {
 		return nil, resourceExhausted("logical connection limit reached")
 	}
 
 	id := ConnectionID(uuid.NewString())
-	connection := newConnection(id, r.engine, r.limits)
+	connection := newConnection(id, h.runtime, h.limits)
 
-	r.connections[id] = connection
+	h.connections[id] = connection
 
 	return connection, nil
 }
 
-func (r *Runtime) Connection(id ConnectionID) (*Connection, error) {
+func (h *Host) Connection(id ConnectionID) (*Connection, error) {
 	if err := validateID(id, "connection ID"); err != nil {
 		return nil, err
 	}
 
-	r.mu.RLock()
-	connection := r.connections[id]
-	r.mu.RUnlock()
+	h.mu.RLock()
+	connection := h.connections[id]
+	h.mu.RUnlock()
 	if connection == nil {
 		return nil, notFound(ErrorConnectionNotFound, string(id))
 	}
@@ -84,65 +84,65 @@ func (r *Runtime) Connection(id ConnectionID) (*Connection, error) {
 	return connection, nil
 }
 
-func (r *Runtime) CloseConnection(ctx context.Context, id ConnectionID) error {
+func (h *Host) CloseConnection(ctx context.Context, id ConnectionID) error {
 	if err := validateID(id, "connection ID"); err != nil {
 		return err
 	}
 
-	r.mu.Lock()
-	connection := r.connections[id]
-	closing := r.closing[id]
+	h.mu.Lock()
+	connection := h.connections[id]
+	closing := h.closing[id]
 	if connection != nil {
-		delete(r.connections, id)
+		delete(h.connections, id)
 		closing = &closingConnection{connection: connection}
-		r.closing[id] = closing
+		h.closing[id] = closing
 	}
-	r.mu.Unlock()
+	h.mu.Unlock()
 	if closing == nil {
 		return notFound(ErrorConnectionNotFound, string(id))
 	}
 
 	if closing.close.Begin() {
-		go r.settleConnectionClose(id, closing)
+		go h.settleConnectionClose(id, closing)
 	}
 
 	return closing.close.Wait(ctx)
 }
 
-func (r *Runtime) settleConnectionClose(id ConnectionID, closing *closingConnection) {
+func (h *Host) settleConnectionClose(id ConnectionID, closing *closingConnection) {
 	var err error
 	defer func() {
 		if recover() != nil {
 			err = errors.Join(err, internalError(errors.New("logical connection cleanup panicked")))
 		}
 
-		r.mu.Lock()
-		if r.closing[id] == closing {
-			delete(r.closing, id)
+		h.mu.Lock()
+		if h.closing[id] == closing {
+			delete(h.closing, id)
 		}
-		r.mu.Unlock()
+		h.mu.Unlock()
 		closing.close.Finish(err)
 	}()
 
 	err = closing.connection.Close(context.Background())
 }
 
-func (r *Runtime) Close(ctx context.Context) error {
-	r.mu.Lock()
-	r.closed = true
-	for id, connection := range r.connections {
-		r.closing[id] = &closingConnection{connection: connection}
+func (h *Host) Close(ctx context.Context) error {
+	h.mu.Lock()
+	h.closed = true
+	for id, connection := range h.connections {
+		h.closing[id] = &closingConnection{connection: connection}
 	}
-	clear(r.connections)
-	connections := make(map[ConnectionID]*closingConnection, len(r.closing))
-	for id, closing := range r.closing {
+	clear(h.connections)
+	connections := make(map[ConnectionID]*closingConnection, len(h.closing))
+	for id, closing := range h.closing {
 		connections[id] = closing
 	}
-	r.mu.Unlock()
+	h.mu.Unlock()
 
 	for id, closing := range connections {
 		if closing.close.Begin() {
-			go r.settleConnectionClose(id, closing)
+			go h.settleConnectionClose(id, closing)
 		}
 	}
 

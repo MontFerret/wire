@@ -27,7 +27,7 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type PlanServiceClient interface {
-	// Compile creates a connection-owned Ferret plan from FQL source.
+	// Compile creates a connection-owned runtime plan from FQL source.
 	Compile(ctx context.Context, in *CompileRequest, opts ...grpc.CallOption) (*CompileResponse, error)
 	// ReleasePlan cancels and releases the plan and all of its child resources.
 	// The plan ID becomes stale after cleanup completes.
@@ -66,7 +66,7 @@ func (c *planServiceClient) ReleasePlan(ctx context.Context, in *ReleasePlanRequ
 // All implementations must embed UnimplementedPlanServiceServer
 // for forward compatibility.
 type PlanServiceServer interface {
-	// Compile creates a connection-owned Ferret plan from FQL source.
+	// Compile creates a connection-owned runtime plan from FQL source.
 	Compile(context.Context, *CompileRequest) (*CompileResponse, error)
 	// ReleasePlan cancels and releases the plan and all of its child resources.
 	// The plan ID becomes stale after cleanup completes.
