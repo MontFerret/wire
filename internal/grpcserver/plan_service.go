@@ -3,6 +3,7 @@ package grpcserver
 import (
 	"context"
 
+	"github.com/MontFerret/api"
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
 	"github.com/MontFerret/wire/internal/core"
 )
@@ -14,8 +15,10 @@ func (s *Server) Compile(ctx context.Context, request *wirev1.CompileRequest) (*
 	}
 
 	snapshot, err := connection.Compile(ctx, core.CompileInput{
-		Content:    request.GetSource().GetContent(),
-		Identity:   request.GetSource().GetIdentity(),
+		Source: api.Source{
+			Name:    request.GetSource().GetIdentity(),
+			Content: request.GetSource().GetContent(),
+		},
 		Debuggable: request.GetOptions().GetDebuggable(),
 	})
 	if err != nil {

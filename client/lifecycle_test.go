@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/MontFerret/api"
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
 	"github.com/MontFerret/wire/internal/lifecycle"
 	"google.golang.org/grpc"
@@ -132,7 +133,7 @@ func TestCloseRejectsNewOperationsAndCancelsFacadeWatchers(t *testing.T) {
 		t.Fatal("client close did not reach the server")
 	}
 
-	if _, err := client.Compile(context.Background(), Source{Content: "RETURN 1"}, CompileOptions{}); !errors.Is(err, ErrClosed) {
+	if _, err := client.Compile(context.Background(), api.Source{Content: "RETURN 1"}, CompileOptions{}); !errors.Is(err, ErrClosed) {
 		t.Fatalf("client accepted a new operation after close started: %v", err)
 	}
 	close(server.allowClose)

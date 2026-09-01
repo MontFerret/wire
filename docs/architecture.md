@@ -91,6 +91,10 @@ boundaries. Both directions validate coordinates, IDs, references, and enum
 values before conversion; invalid runtime values become sanitized internal
 failures, while malformed server responses become local client errors.
 
+Compilation uses `api.Source` throughout the client and core. Only the gRPC
+boundaries translate between its `Name` and the v1 protobuf source identity
+field.
+
 The v1 protobuf schema predates some Unified API metadata. A transported
 `source.Range` therefore has a zero span, and transported breakpoints and
 frames have zero point or function IDs. The client preserves those zero values

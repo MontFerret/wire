@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/MontFerret/api"
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -221,7 +222,7 @@ func TestExecutionWaitRejectsIncompleteTerminalSnapshots(t *testing.T) {
 func openTestExecution(t *testing.T, server *clientTestServer) (*Client, *Plan, *Execution) {
 	t.Helper()
 	client := openTestClient(t, startClientTestServer(t, server))
-	plan, err := client.Compile(testClientContext(t), Source{Content: "RETURN 1"}, CompileOptions{})
+	plan, err := client.Compile(testClientContext(t), api.Source{Content: "RETURN 1"}, CompileOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}

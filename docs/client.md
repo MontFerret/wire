@@ -42,8 +42,12 @@ protobuf transport cannot carry every Unified API debugger field. Returned
 therefore remain at their zero values. Breakpoint binding mode also remains its
 Unified API zero value. Wire does not infer or fabricate the missing metadata.
 
+Compilation and one-shot execution accept `api.Source` directly. Its `Name`
+maps to the protocol's legacy source identity field.
+
 ```go
-plan, err := wireClient.Compile(ctx, source, client.CompileOptions{})
+src := api.NewSource("query.fql", "RETURN @input")
+plan, err := wireClient.Compile(ctx, src, client.CompileOptions{})
 if err != nil {
 	return err
 }
@@ -77,7 +81,7 @@ ordered cleanup while preserving the Unified API encoded output boundary:
 ```go
 output, err := wireClient.Run(
 	ctx,
-	client.Source{Identity: "query.fql", Content: "RETURN @input"},
+	api.NewSource("query.fql", "RETURN @input"),
 	client.Parameters{"input": "hello"},
 	client.RunOptions{Execute: client.ExecuteOptions{OutputContentType: "application/json"}},
 )
@@ -87,7 +91,8 @@ A caller that owns a reusable plan can run it repeatedly without surrendering
 plan ownership:
 
 ```go
-plan, err := wireClient.Compile(ctx, source, client.CompileOptions{})
+src := api.NewSource("query.fql", "RETURN @input")
+plan, err := wireClient.Compile(ctx, src, client.CompileOptions{})
 if err != nil {
 	return err
 }

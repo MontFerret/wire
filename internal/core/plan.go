@@ -6,7 +6,6 @@ import (
 	"sync"
 
 	"github.com/MontFerret/api"
-	"github.com/MontFerret/api/source"
 	"github.com/MontFerret/wire/internal/lifecycle"
 	"github.com/google/uuid"
 )
@@ -25,8 +24,7 @@ type (
 	}
 
 	CompileInput struct {
-		Content    string
-		Identity   string
+		Source     api.Source
 		Debuggable bool
 	}
 
@@ -42,12 +40,12 @@ func (c *Connection) Compile(ctx context.Context, input CompileInput) (PlanSnaps
 		return PlanSnapshot{}, err
 	}
 
-	if input.Content == "" {
+	if input.Source.Content == "" {
 		return PlanSnapshot{}, invalidRequest("source content is required")
 	}
 
-	if input.Identity == "" {
-		input.Identity = "anonymous"
+	if input.Source.Name == "" {
+		input.Source.Name = "anonymous"
 	}
 
 	if err := c.beginPlanCreation(); err != nil {
@@ -58,8 +56,7 @@ func (c *Connection) Compile(ctx context.Context, input CompileInput) (PlanSnaps
 	compileCtx, cancel := c.operationContext(ctx)
 	defer cancel()
 
-	src := source.New(input.Identity, input.Content)
-	compiled, err, panicked := c.compileAPIPlan(compileCtx, src, input.Debuggable)
+	compiled, err, panicked := c.compileAPIPlan(compileCtx, input.Source, input.Debuggable)
 	if panicked {
 		return PlanSnapshot{}, internalError(err)
 	}
@@ -114,7 +111,7 @@ func (c *Connection) Compile(ctx context.Context, input CompileInput) (PlanSnaps
 	return created.snapshot(), nil
 }
 
-func (c *Connection) compileAPIPlan(ctx context.Context, src source.File, debug bool) (compiled api.Plan, err error, panicked bool) {
+func (c *Connection) compileAPIPlan(ctx context.Context, src api.Source, debug bool) (compiled api.Plan, err error, panicked bool) {
 	defer func() {
 		if recover() != nil {
 			compiled = nil

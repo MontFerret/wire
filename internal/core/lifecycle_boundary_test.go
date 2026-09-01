@@ -11,7 +11,6 @@ import (
 
 	"github.com/MontFerret/api"
 	"github.com/MontFerret/api/debugger"
-	"github.com/MontFerret/api/result"
 	"github.com/MontFerret/api/source"
 )
 
@@ -19,7 +18,7 @@ func TestPendingCompileCountsAgainstLimitAndConnectionCloseWaits(t *testing.T) {
 	started := make(chan struct{})
 	release := make(chan struct{})
 	plan := &spyPlan{}
-	runtime := &spyRuntime{compile: func(context.Context, source.File, bool) (api.Plan, error) {
+	runtime := &spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 		close(started)
 		<-release
 
@@ -38,11 +37,11 @@ func TestPendingCompileCountsAgainstLimitAndConnectionCloseWaits(t *testing.T) {
 
 	compileResult := make(chan error, 1)
 	go func() {
-		_, compileErr := connection.Compile(context.Background(), CompileInput{Content: "RETURN 1"})
+		_, compileErr := connection.Compile(context.Background(), CompileInput{Source: api.Source{Content: "RETURN 1"}})
 		compileResult <- compileErr
 	}()
 	<-started
-	if _, err := connection.Compile(context.Background(), CompileInput{Content: "RETURN 2"}); !hasCategory(err, ErrorResourceExhausted) {
+	if _, err := connection.Compile(context.Background(), CompileInput{Source: api.Source{Content: "RETURN 2"}}); !hasCategory(err, ErrorResourceExhausted) {
 		t.Fatalf("pending compile did not count against limit: %v", err)
 	}
 
@@ -77,7 +76,7 @@ func TestPendingDebugCreationCountsAgainstLimitAndConnectionCloseWaits(t *testin
 	}}
 	limits := testLimits()
 	limits.MaxDebugSessionsPerConnection = 1
-	host, err := NewHost(&spyRuntime{compile: func(context.Context, source.File, bool) (api.Plan, error) {
+	host, err := NewHost(&spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 		return plan, nil
 	}}, RuntimeInfo{}, limits)
 	if err != nil {
@@ -87,7 +86,7 @@ func TestPendingDebugCreationCountsAgainstLimitAndConnectionCloseWaits(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	compiled, err := connection.Compile(context.Background(), CompileInput{Content: "RETURN 1", Debuggable: true})
+	compiled, err := connection.Compile(context.Background(), CompileInput{Source: api.Source{Content: "RETURN 1"}, Debuggable: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,7 +121,7 @@ func TestClosingPlanCountsAgainstLimitUntilCleanupSettles(t *testing.T) {
 		return nil
 	}}
 	compileCalls := 0
-	runtime := &spyRuntime{compile: func(context.Context, source.File, bool) (api.Plan, error) {
+	runtime := &spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 		compileCalls++
 		if compileCalls == 1 {
 			return firstPlan, nil
@@ -140,7 +139,7 @@ func TestClosingPlanCountsAgainstLimitUntilCleanupSettles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	compiled, err := connection.Compile(context.Background(), CompileInput{Content: "RETURN 1"})
+	compiled, err := connection.Compile(context.Background(), CompileInput{Source: api.Source{Content: "RETURN 1"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +147,7 @@ func TestClosingPlanCountsAgainstLimitUntilCleanupSettles(t *testing.T) {
 	releaseResult := make(chan error, 1)
 	go func() { releaseResult <- connection.ReleasePlan(context.Background(), compiled.ID) }()
 	<-started
-	if _, err := connection.Compile(context.Background(), CompileInput{Content: "RETURN 2"}); !hasCategory(err, ErrorResourceExhausted) {
+	if _, err := connection.Compile(context.Background(), CompileInput{Source: api.Source{Content: "RETURN 2"}}); !hasCategory(err, ErrorResourceExhausted) {
 		t.Fatalf("closing plan did not count against limit: %v", err)
 	}
 	close(release)
@@ -158,7 +157,7 @@ func TestClosingPlanCountsAgainstLimitUntilCleanupSettles(t *testing.T) {
 	if err := connection.ReleasePlan(context.Background(), compiled.ID); !hasCategory(err, ErrorPlanNotFound) {
 		t.Fatalf("released plan did not become stale: %v", err)
 	}
-	if _, err := connection.Compile(context.Background(), CompileInput{Content: "RETURN 2"}); err != nil {
+	if _, err := connection.Compile(context.Background(), CompileInput{Source: api.Source{Content: "RETURN 2"}}); err != nil {
 		t.Fatalf("settled cleanup did not release the plan slot: %v", err)
 	}
 }
@@ -174,10 +173,10 @@ func TestConcurrentPlanReleaseSharesResultAndClosesOnce(t *testing.T) {
 
 		return closeErr
 	}}
-	connection := newTestConnection(t, &spyRuntime{compile: func(context.Context, source.File, bool) (api.Plan, error) {
+	connection := newTestConnection(t, &spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 		return plan, nil
 	}})
-	compiled, err := connection.Compile(context.Background(), CompileInput{Content: "RETURN 1"})
+	compiled, err := connection.Compile(context.Background(), CompileInput{Source: api.Source{Content: "RETURN 1"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -210,17 +209,17 @@ func TestConcurrentPlanReleaseSharesResultAndClosesOnce(t *testing.T) {
 func TestResourceLimitsAndConnectionIsolationRemainWireOwned(t *testing.T) {
 	plan := &spyPlan{
 		newSession: func(context.Context, sessionOptions) (api.Session, error) {
-			return &spySession{run: func(ctx context.Context) (result.Output, error) {
+			return &spySession{run: func(ctx context.Context) (api.Output, error) {
 				<-ctx.Done()
 
-				return result.Output{}, ctx.Err()
+				return api.Output{}, ctx.Err()
 			}}, nil
 		},
 		newDebugSession: func(context.Context, sessionOptions) (debugger.Session, error) {
 			return &spyDebugger{}, nil
 		},
 	}
-	runtime := &spyRuntime{compile: func(context.Context, source.File, bool) (api.Plan, error) {
+	runtime := &spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 		return plan, nil
 	}}
 	limits := testLimits()
@@ -243,11 +242,11 @@ func TestResourceLimitsAndConnectionIsolationRemainWireOwned(t *testing.T) {
 	if _, err := host.OpenConnection(); !hasCategory(err, ErrorResourceExhausted) {
 		t.Fatalf("connection limit was bypassed: %v", err)
 	}
-	compiled, err := owner.Compile(context.Background(), CompileInput{Content: "RETURN 1", Debuggable: true})
+	compiled, err := owner.Compile(context.Background(), CompileInput{Source: api.Source{Content: "RETURN 1"}, Debuggable: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := owner.Compile(context.Background(), CompileInput{Content: "RETURN 2"}); !hasCategory(err, ErrorResourceExhausted) {
+	if _, err := owner.Compile(context.Background(), CompileInput{Source: api.Source{Content: "RETURN 2"}}); !hasCategory(err, ErrorResourceExhausted) {
 		t.Fatalf("plan limit was bypassed: %v", err)
 	}
 	execution, err := owner.Execute(context.Background(), ExecuteInput{PlanID: compiled.ID})
@@ -281,10 +280,10 @@ func TestResourceLimitsAndConnectionIsolationRemainWireOwned(t *testing.T) {
 
 func TestPlanClosePanicIsSanitizedAndDoesNotRetainResource(t *testing.T) {
 	plan := &spyPlan{close: func() error { panic("plan close secret") }}
-	connection := newTestConnection(t, &spyRuntime{compile: func(context.Context, source.File, bool) (api.Plan, error) {
+	connection := newTestConnection(t, &spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 		return plan, nil
 	}})
-	compiled, err := connection.Compile(context.Background(), CompileInput{Content: "RETURN 1"})
+	compiled, err := connection.Compile(context.Background(), CompileInput{Source: api.Source{Content: "RETURN 1"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -309,7 +308,7 @@ func TestConcurrentConnectionCloseSharesResultAndThenBecomesStale(t *testing.T) 
 
 		return nil
 	}}
-	host, err := NewHost(&spyRuntime{compile: func(context.Context, source.File, bool) (api.Plan, error) {
+	host, err := NewHost(&spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 		return plan, nil
 	}}, RuntimeInfo{}, testLimits())
 	if err != nil {
@@ -319,7 +318,7 @@ func TestConcurrentConnectionCloseSharesResultAndThenBecomesStale(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := connection.Compile(context.Background(), CompileInput{Content: "RETURN 1"}); err != nil {
+	if _, err := connection.Compile(context.Background(), CompileInput{Source: api.Source{Content: "RETURN 1"}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -354,17 +353,17 @@ func TestConnectionCloseCancelsExecutionAndReleasesWireResources(t *testing.T) {
 	started := make(chan struct{})
 	finished := make(chan struct{})
 	var finishOnce sync.Once
-	session := &spySession{run: func(ctx context.Context) (result.Output, error) {
+	session := &spySession{run: func(ctx context.Context) (api.Output, error) {
 		close(started)
 		<-ctx.Done()
 		finishOnce.Do(func() { close(finished) })
 
-		return result.Output{}, ctx.Err()
+		return api.Output{}, ctx.Err()
 	}}
 	plan := &spyPlan{newSession: func(context.Context, sessionOptions) (api.Session, error) {
 		return session, nil
 	}}
-	runtime := &spyRuntime{compile: func(context.Context, source.File, bool) (api.Plan, error) {
+	runtime := &spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 		return plan, nil
 	}}
 	host, err := NewHost(runtime, RuntimeInfo{}, testLimits())
@@ -375,7 +374,7 @@ func TestConnectionCloseCancelsExecutionAndReleasesWireResources(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	compiled, err := connection.Compile(context.Background(), CompileInput{Content: "RETURN BLOCK()"})
+	compiled, err := connection.Compile(context.Background(), CompileInput{Source: api.Source{Content: "RETURN BLOCK()"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -408,18 +407,18 @@ func TestConnectionCloseCancelsExecutionAndReleasesWireResources(t *testing.T) {
 
 func TestSessionClosePanicIsContainedAndAttemptedOnce(t *testing.T) {
 	session := &spySession{
-		run: func(context.Context) (result.Output, error) {
-			return result.Output{ContentType: "application/json", Content: []byte("1")}, nil
+		run: func(context.Context) (api.Output, error) {
+			return api.Output{ContentType: "application/json", Content: []byte("1")}, nil
 		},
 		close: func() error { panic("close secret") },
 	}
 	plan := &spyPlan{newSession: func(context.Context, sessionOptions) (api.Session, error) {
 		return session, nil
 	}}
-	connection := newTestConnection(t, &spyRuntime{compile: func(context.Context, source.File, bool) (api.Plan, error) {
+	connection := newTestConnection(t, &spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 		return plan, nil
 	}})
-	compiled, err := connection.Compile(context.Background(), CompileInput{Content: "RETURN 1"})
+	compiled, err := connection.Compile(context.Background(), CompileInput{Source: api.Source{Content: "RETURN 1"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -445,10 +444,10 @@ func TestDebugClosePanicTerminatesWatcherAndBecomesStale(t *testing.T) {
 	plan := &spyPlan{newDebugSession: func(context.Context, sessionOptions) (debugger.Session, error) {
 		return debugSession, nil
 	}}
-	connection := newTestConnection(t, &spyRuntime{compile: func(context.Context, source.File, bool) (api.Plan, error) {
+	connection := newTestConnection(t, &spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 		return plan, nil
 	}})
-	compiled, err := connection.Compile(context.Background(), CompileInput{Content: "RETURN 1", Debuggable: true})
+	compiled, err := connection.Compile(context.Background(), CompileInput{Source: api.Source{Content: "RETURN 1"}, Debuggable: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -491,11 +490,11 @@ func TestPlanReleaseSettlesChildrenBeforeClosingAPIPlan(t *testing.T) {
 	}
 	executionStarted := make(chan struct{})
 	executionSession := &spySession{
-		run: func(ctx context.Context) (result.Output, error) {
+		run: func(ctx context.Context) (api.Output, error) {
 			close(executionStarted)
 			<-ctx.Done()
 
-			return result.Output{}, ctx.Err()
+			return api.Output{}, ctx.Err()
 		},
 		close: func() error {
 			record("execution")
@@ -521,10 +520,10 @@ func TestPlanReleaseSettlesChildrenBeforeClosingAPIPlan(t *testing.T) {
 			return nil
 		},
 	}
-	connection := newTestConnection(t, &spyRuntime{compile: func(context.Context, source.File, bool) (api.Plan, error) {
+	connection := newTestConnection(t, &spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 		return plan, nil
 	}})
-	compiled, err := connection.Compile(context.Background(), CompileInput{Content: "RETURN 1", Debuggable: true})
+	compiled, err := connection.Compile(context.Background(), CompileInput{Source: api.Source{Content: "RETURN 1"}, Debuggable: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -572,7 +571,7 @@ func TestDebugUsesUnifiedSessionAndPreservesWireState(t *testing.T) {
 		resume: func(context.Context) (*debugger.Event, error) {
 			return &debugger.Event{
 				Reason: debugger.ReasonCompleted,
-				Output: &result.Output{ContentType: "application/json", Content: debugContent},
+				Output: &api.Output{ContentType: "application/json", Content: debugContent},
 			}, nil
 		},
 		frames: []debugger.Frame{{
@@ -597,10 +596,10 @@ func TestDebugUsesUnifiedSessionAndPreservesWireState(t *testing.T) {
 	plan := &spyPlan{newDebugSession: func(context.Context, sessionOptions) (debugger.Session, error) {
 		return debugSession, nil
 	}}
-	connection := newTestConnection(t, &spyRuntime{compile: func(context.Context, source.File, bool) (api.Plan, error) {
+	connection := newTestConnection(t, &spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 		return plan, nil
 	}})
-	compiled, err := connection.Compile(context.Background(), CompileInput{Content: "RETURN 7", Identity: "debug.fql", Debuggable: true})
+	compiled, err := connection.Compile(context.Background(), CompileInput{Source: api.Source{Name: "debug.fql", Content: "RETURN 7"}, Debuggable: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -673,6 +672,170 @@ func TestDebugUsesUnifiedSessionAndPreservesWireState(t *testing.T) {
 	if err := connection.ReleasePlan(testContext(t), compiled.ID); err != nil {
 		t.Fatal(err)
 	}
+	if closeCalls := debugSession.closes(); closeCalls != 1 {
+		t.Fatalf("completed debug session closed %d times", closeCalls)
+	}
+}
+
+func TestDebugSessionCloseIsRetainedAcrossTerminalAndRelease(t *testing.T) {
+	tests := []struct {
+		name       string
+		start      func(context.Context) (*debugger.Event, error)
+		wantState  DebugState
+		closeError error
+	}{
+		{
+			name: "completed",
+			start: func(context.Context) (*debugger.Event, error) {
+				return &debugger.Event{Reason: debugger.ReasonCompleted}, nil
+			},
+			wantState: DebugCompleted,
+		},
+		{
+			name: "command failure",
+			start: func(context.Context) (*debugger.Event, error) {
+				return nil, errors.New("runtime command failed")
+			},
+			wantState: DebugFailed,
+		},
+		{
+			name: "retained close failure",
+			start: func(context.Context) (*debugger.Event, error) {
+				return &debugger.Event{Reason: debugger.ReasonCompleted}, nil
+			},
+			wantState:  DebugCompleted,
+			closeError: errors.New("runtime close failed"),
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			runtimeDebugger := &spyDebugger{
+				start: test.start,
+				close: func() error { return test.closeError },
+			}
+			plan := &spyPlan{newDebugSession: func(context.Context, sessionOptions) (debugger.Session, error) {
+				return runtimeDebugger, nil
+			}}
+			connection := newTestConnection(t, &spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
+				return plan, nil
+			}})
+			compiled, err := connection.Compile(context.Background(), CompileInput{
+				Source:     api.Source{Content: "RETURN 1"},
+				Debuggable: true,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			opened, err := connection.OpenDebugSession(context.Background(), OpenDebugInput{PlanID: compiled.ID})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := connection.StartDebug(context.Background(), opened.ID); err != nil {
+				t.Fatal(err)
+			}
+			waitDebugState(t, connection, opened.ID, test.wantState)
+
+			releaseErr := connection.ReleaseDebugSession(testContext(t), opened.ID)
+			if !errors.Is(releaseErr, test.closeError) {
+				t.Fatalf("unexpected retained close result: %v", releaseErr)
+			}
+			if closeCalls := runtimeDebugger.closes(); closeCalls != 1 {
+				t.Fatalf("runtime debug session closed %d times", closeCalls)
+			}
+		})
+	}
+}
+
+func TestDebugSessionStopAndParentCascadeCloseOnce(t *testing.T) {
+	t.Run("explicit stop", func(t *testing.T) {
+		runtimeDebugger := &spyDebugger{}
+		connection, compiled, opened := openTestDebugSession(t, runtimeDebugger)
+
+		if _, err := connection.StopDebug(testContext(t), opened.ID); err != nil {
+			t.Fatal(err)
+		}
+		if err := connection.ReleaseDebugSession(testContext(t), opened.ID); err != nil {
+			t.Fatal(err)
+		}
+		if closeCalls := runtimeDebugger.closes(); closeCalls != 1 {
+			t.Fatalf("stopped runtime debug session closed %d times", closeCalls)
+		}
+		if err := connection.ReleasePlan(testContext(t), compiled.ID); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("running cancellation", func(t *testing.T) {
+		started := make(chan struct{})
+		commandReturned := make(chan struct{})
+		runtimeDebugger := &spyDebugger{start: func(ctx context.Context) (*debugger.Event, error) {
+			defer close(commandReturned)
+			close(started)
+			<-ctx.Done()
+
+			return nil, ctx.Err()
+		}, close: func() error {
+			select {
+			case <-commandReturned:
+				return nil
+			case <-time.After(5 * time.Second):
+				return errors.New("debug command did not return before close")
+			}
+		}}
+		connection, compiled, opened := openTestDebugSession(t, runtimeDebugger)
+		if _, err := connection.StartDebug(context.Background(), opened.ID); err != nil {
+			t.Fatal(err)
+		}
+		<-started
+		if _, err := connection.StopDebug(testContext(t), opened.ID); err != nil {
+			t.Fatal(err)
+		}
+		if err := connection.ReleaseDebugSession(testContext(t), opened.ID); err != nil {
+			t.Fatal(err)
+		}
+		if closeCalls := runtimeDebugger.closes(); closeCalls != 1 {
+			t.Fatalf("cancelled runtime debug session closed %d times", closeCalls)
+		}
+		if err := connection.ReleasePlan(testContext(t), compiled.ID); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("plan cascade", func(t *testing.T) {
+		runtimeDebugger := &spyDebugger{}
+		connection, compiled, _ := openTestDebugSession(t, runtimeDebugger)
+
+		if err := connection.ReleasePlan(testContext(t), compiled.ID); err != nil {
+			t.Fatal(err)
+		}
+		if closeCalls := runtimeDebugger.closes(); closeCalls != 1 {
+			t.Fatalf("cascaded runtime debug session closed %d times", closeCalls)
+		}
+	})
+}
+
+func openTestDebugSession(t *testing.T, runtimeDebugger debugger.Session) (*Connection, PlanSnapshot, DebugSnapshot) {
+	t.Helper()
+	plan := &spyPlan{newDebugSession: func(context.Context, sessionOptions) (debugger.Session, error) {
+		return runtimeDebugger, nil
+	}}
+	connection := newTestConnection(t, &spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
+		return plan, nil
+	}})
+	compiled, err := connection.Compile(context.Background(), CompileInput{
+		Source:     api.Source{Content: "RETURN 1"},
+		Debuggable: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	opened, err := connection.OpenDebugSession(context.Background(), OpenDebugInput{PlanID: compiled.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return connection, compiled, opened
 }
 
 func TestSlowExecutionWatcherIsDetachedWithoutBlockingCompletion(t *testing.T) {
@@ -680,13 +843,13 @@ func TestSlowExecutionWatcherIsDetachedWithoutBlockingCompletion(t *testing.T) {
 	limits.MaxWatchersPerResource = 1
 	release := make(chan struct{})
 	plan := &spyPlan{newSession: func(context.Context, sessionOptions) (api.Session, error) {
-		return &spySession{run: func(context.Context) (result.Output, error) {
+		return &spySession{run: func(context.Context) (api.Output, error) {
 			<-release
 
-			return result.Output{}, nil
+			return api.Output{}, nil
 		}}, nil
 	}}
-	host, err := NewHost(&spyRuntime{compile: func(context.Context, source.File, bool) (api.Plan, error) {
+	host, err := NewHost(&spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 		return plan, nil
 	}}, RuntimeInfo{}, limits)
 	if err != nil {
@@ -696,7 +859,7 @@ func TestSlowExecutionWatcherIsDetachedWithoutBlockingCompletion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	compiled, err := connection.Compile(context.Background(), CompileInput{Content: "RETURN 1"})
+	compiled, err := connection.Compile(context.Background(), CompileInput{Source: api.Source{Content: "RETURN 1"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -745,7 +908,7 @@ func TestSlowDebugWatcherIsDetachedAndRetainsSlotUntilCancelled(t *testing.T) {
 	plan := &spyPlan{newDebugSession: func(context.Context, sessionOptions) (debugger.Session, error) {
 		return &spyDebugger{}, nil
 	}}
-	host, err := NewHost(&spyRuntime{compile: func(context.Context, source.File, bool) (api.Plan, error) {
+	host, err := NewHost(&spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 		return plan, nil
 	}}, RuntimeInfo{}, limits)
 	if err != nil {
@@ -755,7 +918,7 @@ func TestSlowDebugWatcherIsDetachedAndRetainsSlotUntilCancelled(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	compiled, err := connection.Compile(context.Background(), CompileInput{Content: "RETURN 1", Debuggable: true})
+	compiled, err := connection.Compile(context.Background(), CompileInput{Source: api.Source{Content: "RETURN 1"}, Debuggable: true})
 	if err != nil {
 		t.Fatal(err)
 	}

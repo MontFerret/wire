@@ -13,8 +13,6 @@ import (
 
 	"github.com/MontFerret/api"
 	"github.com/MontFerret/api/debugger"
-	"github.com/MontFerret/api/result"
-	"github.com/MontFerret/api/source"
 	"github.com/MontFerret/wire"
 	"github.com/MontFerret/wire/client"
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
@@ -28,8 +26,8 @@ import (
 type (
 	apiRuntimeSpy struct {
 		mu         sync.Mutex
-		compile    func(context.Context, source.File, bool) (api.Plan, error)
-		sources    []source.File
+		compile    func(context.Context, api.Source, bool) (api.Plan, error)
+		sources    []api.Source
 		debug      []bool
 		closeCalls int
 	}
@@ -44,7 +42,7 @@ type (
 
 	apiSessionSpy struct {
 		mu         sync.Mutex
-		run        func(context.Context) (result.Output, error)
+		run        func(context.Context) (api.Output, error)
 		close      func() error
 		closeCalls int
 	}
@@ -60,6 +58,7 @@ type (
 		conn     *grpc.ClientConn
 		client   *client.Client
 		serveErr chan error
+		shutdown bool
 	}
 )
 
@@ -68,12 +67,12 @@ func TestUnifiedRuntimeCompileExecuteAndBorrowedOwnership(t *testing.T) {
 	plan := &apiPlanSpy{
 		params: []string{"input"},
 		newSession: func(context.Context, apiSessionOptions) (api.Session, error) {
-			return &apiSessionSpy{run: func(context.Context) (result.Output, error) {
-				return result.Output{ContentType: "application/json", Content: outputBytes}, nil
+			return &apiSessionSpy{run: func(context.Context) (api.Output, error) {
+				return api.Output{ContentType: "application/json", Content: outputBytes}, nil
 			}}, nil
 		},
 	}
-	runtime := &apiRuntimeSpy{compile: func(context.Context, source.File, bool) (api.Plan, error) {
+	runtime := &apiRuntimeSpy{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 		return plan, nil
 	}}
 	env := newIntegrationEnv(t, runtime, wire.WithRuntimeIdentity(wire.RuntimeIdentity{
@@ -88,9 +87,9 @@ func TestUnifiedRuntimeCompileExecuteAndBorrowedOwnership(t *testing.T) {
 		t.Fatalf("unexpected identity or capabilities: %#v", info)
 	}
 
-	compiled, err := env.client.Compile(context.Background(), client.Source{
-		Identity: "unified.fql",
-		Content:  "RETURN @input",
+	compiled, err := env.client.Compile(context.Background(), api.Source{
+		Name:    "unified.fql",
+		Content: "RETURN @input",
 	}, client.CompileOptions{})
 	if err != nil {
 		t.Fatal(err)
@@ -131,10 +130,10 @@ func TestUnifiedRuntimeCompileExecuteAndBorrowedOwnership(t *testing.T) {
 	}
 
 	runtime.mu.Lock()
-	sources := append([]source.File(nil), runtime.sources...)
+	sources := append([]api.Source(nil), runtime.sources...)
 	debug := append([]bool(nil), runtime.debug...)
 	runtime.mu.Unlock()
-	if len(sources) != 1 || sources[0] != (source.File{Name: "unified.fql", Content: "RETURN @input"}) || debug[0] {
+	if len(sources) != 1 || sources[0] != (api.Source{Name: "unified.fql", Content: "RETURN @input"}) || debug[0] {
 		t.Fatalf("unexpected compile delegation: %#v %#v", sources, debug)
 	}
 	plan.mu.Lock()
@@ -154,6 +153,7 @@ func TestUnifiedRuntimeCompileExecuteAndBorrowedOwnership(t *testing.T) {
 	if err := env.server.Shutdown(testContext(t)); err != nil {
 		t.Fatal(err)
 	}
+	env.shutdown = true
 	plan.mu.Lock()
 	planCloseCalls := plan.closeCalls
 	plan.mu.Unlock()
@@ -166,7 +166,59 @@ func TestUnifiedRuntimeCompileExecuteAndBorrowedOwnership(t *testing.T) {
 	if runtimeCloseCalls != 0 {
 		t.Fatalf("Wire closed borrowed API runtime %d times", runtimeCloseCalls)
 	}
-	if _, err := runtime.Run(context.Background(), source.NewAnonymous("RETURN 1")); err != nil {
+	if _, err := runtime.Run(context.Background(), api.NewAnonymousSource("RETURN 1")); err != nil {
+		t.Fatalf("borrowed runtime is no longer usable: %v", err)
+	}
+}
+
+func TestServerShutdownClosesOwnedResourcesWithoutClosingRuntime(t *testing.T) {
+	started := make(chan struct{})
+	session := &apiSessionSpy{run: func(ctx context.Context) (api.Output, error) {
+		close(started)
+		<-ctx.Done()
+
+		return api.Output{}, ctx.Err()
+	}}
+	plan := &apiPlanSpy{newSession: func(context.Context, apiSessionOptions) (api.Session, error) {
+		return session, nil
+	}}
+	runtime := &apiRuntimeSpy{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
+		return plan, nil
+	}}
+	env := newIntegrationEnv(t, runtime)
+	compiled, err := env.client.Compile(context.Background(), api.Source{Name: "shutdown.fql", Content: "RETURN 1"}, client.CompileOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := compiled.Execute(context.Background(), nil, client.ExecuteOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	<-started
+
+	if err := env.server.Shutdown(testContext(t)); err != nil {
+		t.Fatal(err)
+	}
+	env.shutdown = true
+
+	session.mu.Lock()
+	sessionCloseCalls := session.closeCalls
+	session.mu.Unlock()
+	if sessionCloseCalls != 1 {
+		t.Fatalf("shutdown closed API session %d times", sessionCloseCalls)
+	}
+	plan.mu.Lock()
+	planCloseCalls := plan.closeCalls
+	plan.mu.Unlock()
+	if planCloseCalls != 1 {
+		t.Fatalf("shutdown closed API plan %d times", planCloseCalls)
+	}
+	runtime.mu.Lock()
+	runtimeCloseCalls := runtime.closeCalls
+	runtime.mu.Unlock()
+	if runtimeCloseCalls != 0 {
+		t.Fatalf("shutdown closed borrowed API runtime %d times", runtimeCloseCalls)
+	}
+	if _, err := runtime.Run(context.Background(), api.NewAnonymousSource("RETURN 1")); err != nil {
 		t.Fatalf("borrowed runtime is no longer usable: %v", err)
 	}
 }
@@ -187,11 +239,11 @@ func TestNewServerRejectsNilAndTypedNilRuntime(t *testing.T) {
 
 func TestGenericRuntimeFailuresAreStructuredAndSanitized(t *testing.T) {
 	secret := errors.New("runtime compiler secret")
-	runtime := &apiRuntimeSpy{compile: func(context.Context, source.File, bool) (api.Plan, error) {
+	runtime := &apiRuntimeSpy{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 		return nil, secret
 	}}
 	env := newIntegrationEnv(t, runtime)
-	_, err := env.client.Compile(context.Background(), client.Source{Content: "broken"}, client.CompileOptions{})
+	_, err := env.client.Compile(context.Background(), api.Source{Content: "broken"}, client.CompileOptions{})
 	var wireErr *client.Error
 	if !errors.As(err, &wireErr) || wireErr.Category != client.ErrorCompilation {
 		t.Fatalf("unexpected compile error: %v", err)
@@ -203,11 +255,11 @@ func TestGenericRuntimeFailuresAreStructuredAndSanitized(t *testing.T) {
 
 func TestMessageLimitsRemainAtTheGRPCBoundary(t *testing.T) {
 	plan := &apiPlanSpy{newSession: func(context.Context, apiSessionOptions) (api.Session, error) {
-		return &apiSessionSpy{run: func(context.Context) (result.Output, error) {
-			return result.Output{ContentType: "application/json", Content: []byte(strings.Repeat("x", 2048))}, nil
+		return &apiSessionSpy{run: func(context.Context) (api.Output, error) {
+			return api.Output{ContentType: "application/json", Content: []byte(strings.Repeat("x", 2048))}, nil
 		}}, nil
 	}}
-	runtime := &apiRuntimeSpy{compile: func(context.Context, source.File, bool) (api.Plan, error) {
+	runtime := &apiRuntimeSpy{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 		return plan, nil
 	}}
 	limits := wire.DefaultServerLimits()
@@ -232,7 +284,7 @@ func TestMessageLimitsRemainAtTheGRPCBoundary(t *testing.T) {
 		t.Fatalf("unexpected inbound message result: %v", err)
 	}
 
-	compiled, err := env.client.Compile(context.Background(), client.Source{Content: "large"}, client.CompileOptions{})
+	compiled, err := env.client.Compile(context.Background(), api.Source{Content: "large"}, client.CompileOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -248,19 +300,19 @@ func TestMessageLimitsRemainAtTheGRPCBoundary(t *testing.T) {
 	}
 }
 
-func (r *apiRuntimeSpy) Run(context.Context, source.File, ...api.SessionOption) (result.Output, error) {
-	return result.Output{ContentType: "application/json", Content: []byte("1")}, nil
+func (r *apiRuntimeSpy) Run(context.Context, api.Source, ...api.SessionOption) (api.Output, error) {
+	return api.Output{ContentType: "application/json", Content: []byte("1")}, nil
 }
 
-func (r *apiRuntimeSpy) Compile(ctx context.Context, src source.File, _ ...api.PlanOption) (api.Plan, error) {
+func (r *apiRuntimeSpy) Compile(ctx context.Context, src api.Source, _ ...api.PlanOption) (api.Plan, error) {
 	return r.compilePlan(ctx, src, false)
 }
 
-func (r *apiRuntimeSpy) CompileDebug(ctx context.Context, src source.File, _ ...api.PlanOption) (api.Plan, error) {
+func (r *apiRuntimeSpy) CompileDebug(ctx context.Context, src api.Source, _ ...api.PlanOption) (api.Plan, error) {
 	return r.compilePlan(ctx, src, true)
 }
 
-func (r *apiRuntimeSpy) compilePlan(ctx context.Context, src source.File, debug bool) (api.Plan, error) {
+func (r *apiRuntimeSpy) compilePlan(ctx context.Context, src api.Source, debug bool) (api.Plan, error) {
 	r.mu.Lock()
 	r.sources = append(r.sources, src)
 	r.debug = append(r.debug, debug)
@@ -320,9 +372,9 @@ func (p *apiPlanSpy) Close() error {
 	return nil
 }
 
-func (s *apiSessionSpy) Run(ctx context.Context) (result.Output, error) {
+func (s *apiSessionSpy) Run(ctx context.Context) (api.Output, error) {
 	if s.run == nil {
-		return result.Output{}, nil
+		return api.Output{}, nil
 	}
 
 	return s.run(ctx)
@@ -398,7 +450,7 @@ func newIntegrationEnv(t *testing.T, runtime api.Runtime, options ...wire.Server
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		if err := wireClient.Close(ctx); err != nil && !errors.Is(err, client.ErrClosed) {
+		if err := wireClient.Close(ctx); err != nil && !errors.Is(err, client.ErrClosed) && !env.shutdown {
 			t.Errorf("client cleanup failed: %v", err)
 		}
 		if err := server.Shutdown(ctx); err != nil {

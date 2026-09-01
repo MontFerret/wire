@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/MontFerret/api"
 	"github.com/MontFerret/api/debugger"
 	"github.com/MontFerret/api/source"
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
@@ -306,7 +307,7 @@ func TestHandleOperationsUseBoundOwnerResources(t *testing.T) {
 	first := openHandleClient(t, connection)
 	second := openHandleClient(t, connection)
 
-	plan, err := first.Compile(testClientContext(t), Source{Content: "RETURN @input"}, CompileOptions{Debuggable: true})
+	plan, err := first.Compile(testClientContext(t), api.Source{Content: "RETURN @input"}, CompileOptions{Debuggable: true})
 	if err != nil {
 		t.Fatal(err)
 	}

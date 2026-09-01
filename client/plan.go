@@ -4,23 +4,18 @@ import (
 	"context"
 	"errors"
 
+	"github.com/MontFerret/api"
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
 	"github.com/MontFerret/wire/internal/lifecycle"
 )
 
 type (
-	// Source is FQL content plus its diagnostic and debugger identity.
-	Source struct {
-		Content  string
-		Identity string
-	}
-
-	// CompileOptions controls Ferret plan construction.
+	// CompileOptions controls runtime plan construction.
 	CompileOptions struct {
 		Debuggable bool
 	}
 
-	// Plan is a compiled remote Ferret program owned by one Client.
+	// Plan is a compiled remote runtime plan owned by one Client.
 	Plan struct {
 		client     *Client
 		id         string
@@ -30,16 +25,15 @@ type (
 	}
 )
 
-// Compile creates a connection-owned plan through Ferret's public compiler.
-// Compilation diagnostics are returned through Error.
-func (c *Client) Compile(ctx context.Context, source Source, options CompileOptions) (*Plan, error) {
+// Compile creates a connection-owned plan through the hosted runtime.
+func (c *Client) Compile(ctx context.Context, src api.Source, options CompileOptions) (*Plan, error) {
 	if err := c.checkOpen(); err != nil {
 		return nil, err
 	}
 
 	response, err := c.planClient.Compile(ctx, &wirev1.CompileRequest{
 		ConnectionId: c.connectionProto(),
-		Source:       &wirev1.Source{Content: source.Content, Identity: source.Identity},
+		Source:       &wirev1.Source{Content: src.Content, Identity: src.Name},
 		Options:      &wirev1.CompileOptions{Debuggable: options.Debuggable},
 	})
 	if err != nil {

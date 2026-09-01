@@ -2,7 +2,7 @@
 
 Ferret Wire is a versioned gRPC boundary for hosting an implementation of the [Unified Ferret API](https://github.com/MontFerret/api) in another process. It lets a host expose compilation, execution, and source-level debugging without moving runtime construction, configuration, policy, or listener security into this library.
 
-This module targets Go 1.25 and Unified API `v1.0.0-alpha.7`. The v1 protobuf package is `ferret.wire.v1`; its sources live in `proto/ferret/wire/v1`, and the checked-in Go bindings live in `gen/ferret/wire/v1`.
+This module targets Go 1.25 and Unified API `v1.0.0-alpha.10`. The v1 protobuf package is `ferret.wire.v1`; its sources live in `proto/ferret/wire/v1`, and the checked-in Go bindings live in `gen/ferret/wire/v1`.
 
 ## Ownership and architecture
 
@@ -72,7 +72,7 @@ its plan and execution automatically:
 ```go
 output, err := wireClient.Run(
     ctx,
-    client.Source{Identity: "example.fql", Content: "RETURN @input"},
+    api.NewSource("example.fql", "RETURN @input"),
     client.Parameters{"input": "hello"},
     client.RunOptions{},
 )
@@ -109,10 +109,11 @@ defer func() {
     }
 }()
 
-plan, err := wireClient.Compile(ctx, client.Source{
-    Identity: "example.fql",
-    Content:  "RETURN {input: @input}",
-}, client.CompileOptions{})
+plan, err := wireClient.Compile(
+    ctx,
+    api.NewSource("example.fql", "RETURN {input: @input}"),
+    client.CompileOptions{},
+)
 if err != nil {
     log.Fatal(err)
 }

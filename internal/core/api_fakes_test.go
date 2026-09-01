@@ -6,15 +6,14 @@ import (
 
 	"github.com/MontFerret/api"
 	"github.com/MontFerret/api/debugger"
-	"github.com/MontFerret/api/result"
 	"github.com/MontFerret/api/source"
 )
 
 type (
 	spyRuntime struct {
 		mu             sync.Mutex
-		compile        func(context.Context, source.File, bool) (api.Plan, error)
-		compileSources []source.File
+		compile        func(context.Context, api.Source, bool) (api.Plan, error)
+		compileSources []api.Source
 		compileDebug   []bool
 		closeCalls     int
 	}
@@ -33,7 +32,7 @@ type (
 
 	spySession struct {
 		mu         sync.Mutex
-		run        func(context.Context) (result.Output, error)
+		run        func(context.Context) (api.Output, error)
 		close      func() error
 		runCalls   int
 		closeCalls int
@@ -56,19 +55,19 @@ type (
 	}
 )
 
-func (r *spyRuntime) Run(context.Context, source.File, ...api.SessionOption) (result.Output, error) {
-	return result.Output{}, nil
+func (r *spyRuntime) Run(context.Context, api.Source, ...api.SessionOption) (api.Output, error) {
+	return api.Output{}, nil
 }
 
-func (r *spyRuntime) Compile(ctx context.Context, src source.File, _ ...api.PlanOption) (api.Plan, error) {
+func (r *spyRuntime) Compile(ctx context.Context, src api.Source, _ ...api.PlanOption) (api.Plan, error) {
 	return r.compilePlan(ctx, src, false)
 }
 
-func (r *spyRuntime) CompileDebug(ctx context.Context, src source.File, _ ...api.PlanOption) (api.Plan, error) {
+func (r *spyRuntime) CompileDebug(ctx context.Context, src api.Source, _ ...api.PlanOption) (api.Plan, error) {
 	return r.compilePlan(ctx, src, true)
 }
 
-func (r *spyRuntime) compilePlan(ctx context.Context, src source.File, debug bool) (api.Plan, error) {
+func (r *spyRuntime) compilePlan(ctx context.Context, src api.Source, debug bool) (api.Plan, error) {
 	r.mu.Lock()
 	r.compileSources = append(r.compileSources, src)
 	r.compileDebug = append(r.compileDebug, debug)
@@ -90,11 +89,11 @@ func (r *spyRuntime) Close() error {
 	return nil
 }
 
-func (r *spyRuntime) snapshot() ([]source.File, []bool, int) {
+func (r *spyRuntime) snapshot() ([]api.Source, []bool, int) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	return append([]source.File(nil), r.compileSources...), append([]bool(nil), r.compileDebug...), r.closeCalls
+	return append([]api.Source(nil), r.compileSources...), append([]bool(nil), r.compileDebug...), r.closeCalls
 }
 
 func (p *spyPlan) Params() []string {
@@ -172,14 +171,14 @@ func (p *spyPlan) snapshot() ([]sessionOptions, []sessionOptions, int) {
 	return sessions, debugSessions, p.closeCalls
 }
 
-func (s *spySession) Run(ctx context.Context) (result.Output, error) {
+func (s *spySession) Run(ctx context.Context) (api.Output, error) {
 	s.mu.Lock()
 	s.runCalls++
 	run := s.run
 	s.mu.Unlock()
 
 	if run == nil {
-		return result.Output{}, nil
+		return api.Output{}, nil
 	}
 
 	return run(ctx)

@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/MontFerret/api"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -22,7 +23,7 @@ func TestHandleCloseContinuesAfterFirstCallerCancellation(t *testing.T) {
 	}
 	connection := startHandleServer(t, implementation)
 	client := openHandleClient(t, connection)
-	plan, err := client.Compile(testClientContext(t), Source{Content: "RETURN 1"}, CompileOptions{})
+	plan, err := client.Compile(testClientContext(t), api.Source{Content: "RETURN 1"}, CompileOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +81,7 @@ func TestConcurrentHandleCloseReleasesOnce(t *testing.T) {
 	}
 	connection := startHandleServer(t, implementation)
 	client := openHandleClient(t, connection)
-	plan, err := client.Compile(testClientContext(t), Source{Content: "RETURN 1"}, CompileOptions{})
+	plan, err := client.Compile(testClientContext(t), api.Source{Content: "RETURN 1"}, CompileOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +136,7 @@ func TestDescendantCloseDuringAncestorCloseObservesRetainedResult(t *testing.T) 
 	}
 	connection := startHandleServer(t, implementation)
 	client := openHandleClient(t, connection)
-	plan, err := client.Compile(testClientContext(t), Source{Content: "RETURN 1"}, CompileOptions{Debuggable: true})
+	plan, err := client.Compile(testClientContext(t), api.Source{Content: "RETURN 1"}, CompileOptions{Debuggable: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -204,7 +205,7 @@ func TestDescendantCloseAfterAncestorCloseObservesRetainedResult(t *testing.T) {
 	implementation := &handleServer{}
 	connection := startHandleServer(t, implementation)
 	client := openHandleClient(t, connection)
-	plan, err := client.Compile(testClientContext(t), Source{Content: "RETURN 1"}, CompileOptions{Debuggable: true})
+	plan, err := client.Compile(testClientContext(t), api.Source{Content: "RETURN 1"}, CompileOptions{Debuggable: true})
 	if err != nil {
 		t.Fatal(err)
 	}

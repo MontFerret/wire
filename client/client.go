@@ -6,6 +6,7 @@ import (
 	"io"
 	"sync"
 
+	"github.com/MontFerret/api"
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
 	"google.golang.org/grpc"
 )
@@ -128,11 +129,11 @@ func (c *Client) RuntimeInfo() RuntimeInfo {
 	return result
 }
 
-// Run compiles and executes source once, returning Ferret's encoded output.
+// Run compiles and executes source once, returning the runtime's encoded output.
 // It releases the Plan and Execution resources it creates before returning and
 // joins operation and release errors.
-func (c *Client) Run(ctx context.Context, source Source, parameters Parameters, options RunOptions) (Output, error) {
-	plan, err := c.Compile(ctx, source, options.Compile)
+func (c *Client) Run(ctx context.Context, src api.Source, parameters Parameters, options RunOptions) (Output, error) {
+	plan, err := c.Compile(ctx, src, options.Compile)
 	if err != nil {
 		return Output{}, err
 	}

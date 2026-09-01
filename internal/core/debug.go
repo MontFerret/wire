@@ -174,14 +174,14 @@ func (d *DebugSession) finishCommand(event *debugger.Event, commandErr error) {
 			d.state = DebugTerminated
 			d.publishLocked(DebugEventTerminated, true)
 			d.mu.Unlock()
-			_ = closeAPIDebugSession(d.debugger)
+			d.beginClose()
 			return
 		}
 		d.state = DebugFailed
 		d.failure = failureFromError(ErrorInternal)
 		d.publishLocked(DebugEventFailed, true)
 		d.mu.Unlock()
-		_ = closeAPIDebugSession(d.debugger)
+		d.beginClose()
 		return
 	}
 
@@ -234,7 +234,7 @@ func (d *DebugSession) finishCommand(event *debugger.Event, commandErr error) {
 	}
 	d.mu.Unlock()
 	if terminal {
-		_ = closeAPIDebugSession(d.debugger)
+		d.beginClose()
 	}
 }
 
@@ -393,11 +393,17 @@ func (d *DebugSession) closeWatcherLocked(id uint64, watcher *debugWatcher, err 
 }
 
 func (d *DebugSession) Close(ctx context.Context) error {
+	d.beginClose()
+
+	return d.close.Wait(ctx)
+}
+
+// Terminal command paths commit cleanup without waiting from the command
+// goroutine, allowing runtime Close implementations to wait for that command.
+func (d *DebugSession) beginClose() {
 	if d.close.Begin() {
 		go d.settleClose()
 	}
-
-	return d.close.Wait(ctx)
 }
 
 func (d *DebugSession) settleClose() {

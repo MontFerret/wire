@@ -11,8 +11,6 @@ import (
 
 	"github.com/MontFerret/api"
 	"github.com/MontFerret/api/debugger"
-	"github.com/MontFerret/api/result"
-	"github.com/MontFerret/api/source"
 )
 
 func TestHostRejectsNilRuntimeAndDoesNotCloseBorrowedRuntime(t *testing.T) {
@@ -53,8 +51,8 @@ func TestCompileExecuteRetainsReusableAPIPlanAndSessionOptions(t *testing.T) {
 	plan := &spyPlan{
 		params: []string{"input"},
 		newSession: func(context.Context, sessionOptions) (api.Session, error) {
-			session := &spySession{run: func(context.Context) (result.Output, error) {
-				return result.Output{ContentType: "application/json", Content: outputBytes}, nil
+			session := &spySession{run: func(context.Context) (api.Output, error) {
+				return api.Output{ContentType: "application/json", Content: outputBytes}, nil
 			}}
 			sessionsMu.Lock()
 			sessions = append(sessions, session)
@@ -63,7 +61,7 @@ func TestCompileExecuteRetainsReusableAPIPlanAndSessionOptions(t *testing.T) {
 			return session, nil
 		},
 	}
-	runtime := &spyRuntime{compile: func(context.Context, source.File, bool) (api.Plan, error) {
+	runtime := &spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 		return plan, nil
 	}}
 	host, err := NewHost(runtime, RuntimeInfo{}, testLimits())
@@ -76,8 +74,10 @@ func TestCompileExecuteRetainsReusableAPIPlanAndSessionOptions(t *testing.T) {
 	}
 
 	compiled, err := connection.Compile(context.Background(), CompileInput{
-		Content:  "RETURN @input",
-		Identity: "reusable.fql",
+		Source: api.Source{
+			Name:    "reusable.fql",
+			Content: "RETURN @input",
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -159,7 +159,7 @@ func TestCompileExecuteRetainsReusableAPIPlanAndSessionOptions(t *testing.T) {
 
 func TestCompileDelegatesDebugSelectionAndClosesAbandonedPlan(t *testing.T) {
 	compiled := &spyPlan{}
-	runtime := &spyRuntime{compile: func(context.Context, source.File, bool) (api.Plan, error) {
+	runtime := &spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 		return compiled, nil
 	}}
 	host, err := NewHost(runtime, RuntimeInfo{}, testLimits())
@@ -173,26 +173,40 @@ func TestCompileDelegatesDebugSelectionAndClosesAbandonedPlan(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := connection.Compile(ctx, CompileInput{Content: "RETURN 1", Identity: "debug.fql", Debuggable: true}); !errors.Is(err, context.Canceled) {
+	if _, err := connection.Compile(ctx, CompileInput{Source: api.Source{Name: "debug.fql", Content: "RETURN 1"}, Debuggable: true}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("unexpected cancelled compile result: %v", err)
 	}
 
-	plan, err := connection.Compile(context.Background(), CompileInput{Content: "RETURN 1", Identity: "debug.fql", Debuggable: true})
+	plan, err := connection.Compile(context.Background(), CompileInput{Source: api.Source{Name: "debug.fql", Content: "RETURN 1"}, Debuggable: true})
 	if err != nil {
 		t.Fatal(err)
 	}
 	sources, debug, _ := runtime.snapshot()
-	if len(sources) != 1 || sources[0] != (source.File{Name: "debug.fql", Content: "RETURN 1"}) || !debug[0] {
+	if len(sources) != 1 || sources[0] != (api.Source{Name: "debug.fql", Content: "RETURN 1"}) || !debug[0] {
 		t.Fatalf("unexpected compile delegation: %#v %#v", sources, debug)
 	}
 	if err := connection.ReleasePlan(testContext(t), plan.ID); err != nil {
+		t.Fatal(err)
+	}
+	runtime.compile = func(context.Context, api.Source, bool) (api.Plan, error) {
+		return &spyPlan{}, nil
+	}
+	anonymous, err := connection.Compile(context.Background(), CompileInput{Source: api.Source{Content: "RETURN 2"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sources, debug, _ = runtime.snapshot()
+	if len(sources) != 2 || sources[1] != (api.Source{Name: "anonymous", Content: "RETURN 2"}) || debug[1] {
+		t.Fatalf("unexpected anonymous source delegation: %#v %#v", sources, debug)
+	}
+	if err := connection.ReleasePlan(testContext(t), anonymous.ID); err != nil {
 		t.Fatal(err)
 	}
 
 	started := make(chan struct{})
 	release := make(chan struct{})
 	abandoned := &spyPlan{}
-	runtime.compile = func(ctx context.Context, _ source.File, _ bool) (api.Plan, error) {
+	runtime.compile = func(ctx context.Context, _ api.Source, _ bool) (api.Plan, error) {
 		close(started)
 		<-release
 
@@ -201,7 +215,7 @@ func TestCompileDelegatesDebugSelectionAndClosesAbandonedPlan(t *testing.T) {
 	compileCtx, cancelCompile := context.WithCancel(context.Background())
 	compileResult := make(chan error, 1)
 	go func() {
-		_, compileErr := connection.Compile(compileCtx, CompileInput{Content: "RETURN 2"})
+		_, compileErr := connection.Compile(compileCtx, CompileInput{Source: api.Source{Content: "RETURN 2"}})
 		compileResult <- compileErr
 	}()
 	<-started
@@ -218,22 +232,22 @@ func TestCompileDelegatesDebugSelectionAndClosesAbandonedPlan(t *testing.T) {
 
 func TestCompilePanicsAreSanitizedAndCloseReturnedPlansOnce(t *testing.T) {
 	t.Run("compile", func(t *testing.T) {
-		connection := newTestConnection(t, &spyRuntime{compile: func(context.Context, source.File, bool) (api.Plan, error) {
+		connection := newTestConnection(t, &spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 			panic("compile secret")
 		}})
 
-		if _, err := connection.Compile(context.Background(), CompileInput{Content: "RETURN 1"}); !hasCategory(err, ErrorInternal) || strings.Contains(err.Error(), "secret") {
+		if _, err := connection.Compile(context.Background(), CompileInput{Source: api.Source{Content: "RETURN 1"}}); !hasCategory(err, ErrorInternal) || strings.Contains(err.Error(), "secret") {
 			t.Fatalf("compile panic was not sanitized: %v", err)
 		}
 	})
 
 	t.Run("metadata", func(t *testing.T) {
 		plan := &spyPlan{paramsCall: func() []string { panic("metadata secret") }}
-		connection := newTestConnection(t, &spyRuntime{compile: func(context.Context, source.File, bool) (api.Plan, error) {
+		connection := newTestConnection(t, &spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 			return plan, nil
 		}})
 
-		if _, err := connection.Compile(context.Background(), CompileInput{Content: "RETURN 1"}); !hasCategory(err, ErrorInternal) || strings.Contains(err.Error(), "secret") {
+		if _, err := connection.Compile(context.Background(), CompileInput{Source: api.Source{Content: "RETURN 1"}}); !hasCategory(err, ErrorInternal) || strings.Contains(err.Error(), "secret") {
 			t.Fatalf("metadata panic was not sanitized: %v", err)
 		}
 
@@ -246,13 +260,13 @@ func TestCompilePanicsAreSanitizedAndCloseReturnedPlansOnce(t *testing.T) {
 	t.Run("abandoned cleanup", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		plan := &spyPlan{close: func() error { panic("close secret") }}
-		connection := newTestConnection(t, &spyRuntime{compile: func(context.Context, source.File, bool) (api.Plan, error) {
+		connection := newTestConnection(t, &spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 			cancel()
 
 			return plan, nil
 		}})
 
-		if _, err := connection.Compile(ctx, CompileInput{Content: "RETURN 1"}); !errors.Is(err, context.Canceled) || strings.Contains(err.Error(), "secret") {
+		if _, err := connection.Compile(ctx, CompileInput{Source: api.Source{Content: "RETURN 1"}}); !errors.Is(err, context.Canceled) || strings.Contains(err.Error(), "secret") {
 			t.Fatalf("abandoned cleanup panic was not contained: %v", err)
 		}
 
@@ -265,10 +279,10 @@ func TestCompilePanicsAreSanitizedAndCloseReturnedPlansOnce(t *testing.T) {
 
 func TestSuccessfulNilAPIResourcesAreRejectedSafely(t *testing.T) {
 	var nilPlan *spyPlan
-	connection := newTestConnection(t, &spyRuntime{compile: func(context.Context, source.File, bool) (api.Plan, error) {
+	connection := newTestConnection(t, &spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 		return nilPlan, nil
 	}})
-	if _, err := connection.Compile(context.Background(), CompileInput{Content: "RETURN 1"}); !hasCategory(err, ErrorInternal) {
+	if _, err := connection.Compile(context.Background(), CompileInput{Source: api.Source{Content: "RETURN 1"}}); !hasCategory(err, ErrorInternal) {
 		t.Fatalf("typed-nil plan was not rejected: %v", err)
 	}
 
@@ -276,10 +290,10 @@ func TestSuccessfulNilAPIResourcesAreRejectedSafely(t *testing.T) {
 	plan := &spyPlan{newSession: func(context.Context, sessionOptions) (api.Session, error) {
 		return nilSession, nil
 	}}
-	connection = newTestConnection(t, &spyRuntime{compile: func(context.Context, source.File, bool) (api.Plan, error) {
+	connection = newTestConnection(t, &spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 		return plan, nil
 	}})
-	compiled, err := connection.Compile(context.Background(), CompileInput{Content: "RETURN 1"})
+	compiled, err := connection.Compile(context.Background(), CompileInput{Source: api.Source{Content: "RETURN 1"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -298,11 +312,11 @@ func TestAPIResourcesReturnedWithErrorsAreClosedOnce(t *testing.T) {
 
 	t.Run("plan", func(t *testing.T) {
 		plan := &spyPlan{}
-		connection := newTestConnection(t, &spyRuntime{compile: func(context.Context, source.File, bool) (api.Plan, error) {
+		connection := newTestConnection(t, &spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 			return plan, runtimeErr
 		}})
 
-		if _, err := connection.Compile(context.Background(), CompileInput{Content: "RETURN 1"}); !hasCategory(err, ErrorCompilation) || strings.Contains(err.Error(), "secret") {
+		if _, err := connection.Compile(context.Background(), CompileInput{Source: api.Source{Content: "RETURN 1"}}); !hasCategory(err, ErrorCompilation) || strings.Contains(err.Error(), "secret") {
 			t.Fatalf("unexpected plan-plus-error result: %v", err)
 		}
 
@@ -317,10 +331,10 @@ func TestAPIResourcesReturnedWithErrorsAreClosedOnce(t *testing.T) {
 		plan := &spyPlan{newSession: func(context.Context, sessionOptions) (api.Session, error) {
 			return session, runtimeErr
 		}}
-		connection := newTestConnection(t, &spyRuntime{compile: func(context.Context, source.File, bool) (api.Plan, error) {
+		connection := newTestConnection(t, &spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 			return plan, nil
 		}})
-		compiled, err := connection.Compile(context.Background(), CompileInput{Content: "RETURN 1"})
+		compiled, err := connection.Compile(context.Background(), CompileInput{Source: api.Source{Content: "RETURN 1"}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -346,10 +360,10 @@ func TestAPIResourcesReturnedWithErrorsAreClosedOnce(t *testing.T) {
 		plan := &spyPlan{newDebugSession: func(context.Context, sessionOptions) (debugger.Session, error) {
 			return debugSession, runtimeErr
 		}}
-		connection := newTestConnection(t, &spyRuntime{compile: func(context.Context, source.File, bool) (api.Plan, error) {
+		connection := newTestConnection(t, &spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 			return plan, nil
 		}})
-		compiled, err := connection.Compile(context.Background(), CompileInput{Content: "RETURN 1", Debuggable: true})
+		compiled, err := connection.Compile(context.Background(), CompileInput{Source: api.Source{Content: "RETURN 1"}, Debuggable: true})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -372,10 +386,10 @@ func TestAbandonedDebugSessionCleanupPanicIsSanitized(t *testing.T) {
 
 		return debugSession, nil
 	}}
-	connection := newTestConnection(t, &spyRuntime{compile: func(context.Context, source.File, bool) (api.Plan, error) {
+	connection := newTestConnection(t, &spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 		return plan, nil
 	}})
-	compiled, err := connection.Compile(context.Background(), CompileInput{Content: "RETURN 1", Debuggable: true})
+	compiled, err := connection.Compile(context.Background(), CompileInput{Source: api.Source{Content: "RETURN 1"}, Debuggable: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -406,18 +420,18 @@ func TestExecutionUsesPortableFailureFallbacks(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			session := &spySession{
-				run: func(context.Context) (result.Output, error) {
-					return result.Output{ContentType: "application/json", Content: []byte("1")}, test.runErr
+				run: func(context.Context) (api.Output, error) {
+					return api.Output{ContentType: "application/json", Content: []byte("1")}, test.runErr
 				},
 				close: func() error { return test.closeErr },
 			}
 			plan := &spyPlan{newSession: func(context.Context, sessionOptions) (api.Session, error) {
 				return session, nil
 			}}
-			connection := newTestConnection(t, &spyRuntime{compile: func(context.Context, source.File, bool) (api.Plan, error) {
+			connection := newTestConnection(t, &spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 				return plan, nil
 			}})
-			compiled, err := connection.Compile(context.Background(), CompileInput{Content: "RETURN 1"})
+			compiled, err := connection.Compile(context.Background(), CompileInput{Source: api.Source{Content: "RETURN 1"}})
 			if err != nil {
 				t.Fatal(err)
 			}

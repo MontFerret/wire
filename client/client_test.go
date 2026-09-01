@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/MontFerret/api"
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -43,6 +44,8 @@ type (
 		watchScripts          []executionWatchScript
 		watchCalls            int
 		lastCompileDebuggable bool
+		lastCompileSourceName string
+		lastCompileContent    string
 		lastOutputContentType string
 		releaseExecutionCalls int
 		releasePlanCalls      int
@@ -72,6 +75,8 @@ func (s *clientTestServer) Compile(_ context.Context, request *wirev1.CompileReq
 	s.mu.Lock()
 	s.calls = append(s.calls, call("compile", request.GetConnectionId().GetValue(), ""))
 	s.lastCompileDebuggable = request.GetOptions().GetDebuggable()
+	s.lastCompileSourceName = request.GetSource().GetIdentity()
+	s.lastCompileContent = request.GetSource().GetContent()
 	err := s.compileErr
 	if err == nil {
 		s.plans++
@@ -182,7 +187,7 @@ func TestClientRunOwnsCreatedResources(t *testing.T) {
 		}}}}
 		client := openTestClient(t, startClientTestServer(t, server))
 
-		output, err := client.Run(testClientContext(t), Source{Content: "RETURN 1"}, nil, RunOptions{
+		output, err := client.Run(testClientContext(t), api.Source{Content: "RETURN 1"}, nil, RunOptions{
 			Compile: CompileOptions{Debuggable: true},
 			Execute: ExecuteOptions{OutputContentType: "application/json"},
 		})
@@ -211,7 +216,7 @@ func TestClientRunOwnsCreatedResources(t *testing.T) {
 		server := &clientTestServer{compileErr: status.Error(codes.InvalidArgument, "compile failed")}
 		client := openTestClient(t, startClientTestServer(t, server))
 
-		_, err := client.Run(testClientContext(t), Source{Content: "invalid"}, nil, RunOptions{})
+		_, err := client.Run(testClientContext(t), api.Source{Content: "invalid"}, nil, RunOptions{})
 		var wireErr *Error
 		if !errors.As(err, &wireErr) || wireErr.Message != "compile failed" {
 			t.Fatalf("unexpected compile failure: %v", err)
@@ -226,7 +231,7 @@ func TestClientRunOwnsCreatedResources(t *testing.T) {
 		server := &clientTestServer{executeErr: status.Error(codes.InvalidArgument, "execute failed")}
 		client := openTestClient(t, startClientTestServer(t, server))
 
-		_, err := client.Run(testClientContext(t), Source{Content: "RETURN 1"}, nil, RunOptions{})
+		_, err := client.Run(testClientContext(t), api.Source{Content: "RETURN 1"}, nil, RunOptions{})
 		var wireErr *Error
 		if !errors.As(err, &wireErr) || wireErr.Message != "execute failed" {
 			t.Fatalf("unexpected execute failure: %v", err)
@@ -253,7 +258,7 @@ func TestClientRunOwnsCreatedResources(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		result := make(chan error, 1)
 		go func() {
-			_, err := client.Run(ctx, Source{Content: "RETURN 1"}, nil, RunOptions{})
+			_, err := client.Run(ctx, api.Source{Content: "RETURN 1"}, nil, RunOptions{})
 			result <- err
 		}()
 		select {
@@ -284,7 +289,7 @@ func TestClientRunOwnsCreatedResources(t *testing.T) {
 		}}}
 		client := openTestClient(t, startClientTestServer(t, server))
 
-		_, err := client.Run(testClientContext(t), Source{Content: "RETURN 1"}, nil, RunOptions{})
+		_, err := client.Run(testClientContext(t), api.Source{Content: "RETURN 1"}, nil, RunOptions{})
 		var wireErr *Error
 		if !errors.As(err, &wireErr) || status.Code(err) != codes.Unavailable || wireErr.Message != "watch transport failed" {
 			t.Fatalf("Client.Run lost the stream failure: %v", err)
@@ -308,7 +313,7 @@ func TestClientRunOwnsCreatedResources(t *testing.T) {
 		}
 		client := openTestClient(t, startClientTestServer(t, server))
 
-		output, err := client.Run(testClientContext(t), Source{Content: "RETURN 1"}, nil, RunOptions{})
+		output, err := client.Run(testClientContext(t), api.Source{Content: "RETURN 1"}, nil, RunOptions{})
 		var failure *Failure
 		if string(output.Content) != "partial" || !errors.As(err, &failure) || failure.Message != "execution failed" ||
 			!strings.Contains(err.Error(), "execution cleanup failed") || !strings.Contains(err.Error(), "plan cleanup failed") {
