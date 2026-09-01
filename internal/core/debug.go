@@ -5,60 +5,23 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/MontFerret/ferret/v2"
-	ferretruntime "github.com/MontFerret/ferret/v2/pkg/runtime"
+	"github.com/MontFerret/api/debugger"
+	"github.com/MontFerret/api/source"
 	"github.com/MontFerret/wire/internal/lifecycle"
 )
 
 type (
 	DebugState uint8
 
-	DebugStopReason uint8
-
 	DebugEventKind uint8
-
-	Location struct {
-		File   string
-		Line   int
-		Column int
-	}
-
-	DebugValue struct {
-		Type      string
-		Display   string
-		Reference uint64
-	}
-
-	Variable struct {
-		Name      string
-		Value     DebugValue
-		Mutable   bool
-		Parameter bool
-	}
-
-	Frame struct {
-		Index    int
-		Name     string
-		Location Location
-	}
-
-	Breakpoint struct {
-		ID              uint64
-		File            string
-		RequestedLine   int
-		RequestedColumn int
-		Line            int
-		Column          int
-		Verified        bool
-	}
 
 	DebugSnapshot struct {
 		ID               DebugSessionID
 		PlanID           PlanID
 		State            DebugState
-		StopReason       DebugStopReason
-		Location         Location
-		HitBreakpointIDs []uint64
+		StopReason       debugger.Reason
+		Location         source.Range
+		HitBreakpointIDs []debugger.BreakpointID
 		Output           *Output
 		Failure          *Failure
 	}
@@ -79,7 +42,7 @@ type (
 
 	OpenDebugInput struct {
 		PlanID            PlanID
-		Parameters        ferretruntime.Params
+		Parameters        map[string]any
 		OutputContentType string
 	}
 
@@ -87,16 +50,16 @@ type (
 		mu             sync.Mutex
 		id             DebugSessionID
 		plan           *Plan
-		debugger       *ferret.DebugSession
+		debugger       debugger.Session
 		ctx            context.Context
 		cancel         context.CancelCauseFunc
 		state          DebugState
-		reason         DebugStopReason
-		location       Location
-		hitIDs         []uint64
+		reason         debugger.Reason
+		location       source.Range
+		hitIDs         []debugger.BreakpointID
 		output         *Output
 		failure        *Failure
-		breakpoints    map[uint64]ferret.DebugBreakpoint
+		breakpoints    map[debugger.BreakpointID]debugger.Breakpoint
 		maxWatchers    int
 		maxBreakpoints int
 		sequence       uint64
@@ -124,15 +87,6 @@ const (
 )
 
 const (
-	DebugStopNone DebugStopReason = iota
-	DebugStopEntry
-	DebugStopBreakpoint
-	DebugStopStep
-	DebugStopPause
-	DebugStopRuntimeError
-)
-
-const (
 	DebugEventStarted DebugEventKind = iota + 1
 	DebugEventContinued
 	DebugEventStopped
@@ -144,7 +98,7 @@ const (
 func (d *DebugSession) start(
 	ctx context.Context,
 	initial bool,
-	command func(context.Context) (*ferret.DebugEvent, error),
+	command func(context.Context) (*debugger.Event, error),
 ) (DebugSnapshot, error) {
 	if err := ctx.Err(); err != nil {
 		return DebugSnapshot{}, err
@@ -162,17 +116,13 @@ func (d *DebugSession) start(
 	}
 
 	if d.state != expected {
-		state := d.state
 		d.mu.Unlock()
-		return DebugSnapshot{}, invalidState("debug command is not valid in the current state", &ferret.DebugStateError{
-			Operation: "resume",
-			State:     debugStateName(state),
-		})
+		return DebugSnapshot{}, invalidState("debug command is not valid in the current state", nil)
 	}
 
 	d.state = DebugRunning
-	d.reason = DebugStopNone
-	d.location = Location{}
+	d.reason = ""
+	d.location = source.Range{}
 	d.hitIDs = nil
 	d.failure = nil
 	kind := DebugEventContinued
@@ -190,10 +140,10 @@ func (d *DebugSession) start(
 	return snapshot, nil
 }
 
-func (d *DebugSession) runCommand(command func(context.Context) (*ferret.DebugEvent, error)) {
+func (d *DebugSession) runCommand(command func(context.Context) (*debugger.Event, error)) {
 	defer func() {
 		if recover() != nil {
-			d.finishCommand(nil, errors.New("Ferret debug execution panicked"))
+			d.finishCommand(nil, errors.New("runtime debug execution panicked"))
 		}
 	}()
 	event, err := command(d.ctx)
@@ -211,7 +161,7 @@ func (d *DebugSession) runCommand(command func(context.Context) (*ferret.DebugEv
 	d.finishCommand(event, nil)
 }
 
-func (d *DebugSession) finishCommand(event *ferret.DebugEvent, commandErr error) {
+func (d *DebugSession) finishCommand(event *debugger.Event, commandErr error) {
 	terminal := false
 	d.mu.Lock()
 	if d.state != DebugRunning {
@@ -224,53 +174,52 @@ func (d *DebugSession) finishCommand(event *ferret.DebugEvent, commandErr error)
 			d.state = DebugTerminated
 			d.publishLocked(DebugEventTerminated, true)
 			d.mu.Unlock()
-			_ = d.debugger.Close()
+			d.beginClose()
 			return
 		}
 		d.state = DebugFailed
-		d.failure = d.failureFrom(commandErr)
+		d.failure = failureFromError(ErrorInternal)
 		d.publishLocked(DebugEventFailed, true)
 		d.mu.Unlock()
-		_ = d.debugger.Close()
+		d.beginClose()
 		return
 	}
 
-	d.location = convertDebugLocation(event.Location)
+	d.location = event.Location
 	switch event.Reason {
-	case ferret.DebugReasonEntry:
+	case debugger.ReasonEntry:
 		d.state = DebugStopped
-		d.reason = DebugStopEntry
+		d.reason = debugger.ReasonEntry
 		d.publishLocked(DebugEventStopped, false)
-	case ferret.DebugReasonBreakpoint:
+	case debugger.ReasonBreakpoint:
 		d.state = DebugStopped
-		d.reason = DebugStopBreakpoint
-		d.hitIDs = make([]uint64, len(event.HitBreakpointIDs))
-		for i, id := range event.HitBreakpointIDs {
-			d.hitIDs[i] = uint64(id)
-		}
+		d.reason = debugger.ReasonBreakpoint
+		d.hitIDs = append([]debugger.BreakpointID(nil), event.HitBreakpointIDs...)
 		d.publishLocked(DebugEventStopped, false)
-	case ferret.DebugReasonStep:
+	case debugger.ReasonStep:
 		d.state = DebugStopped
-		d.reason = DebugStopStep
+		d.reason = debugger.ReasonStep
 		d.publishLocked(DebugEventStopped, false)
-	case ferret.DebugReasonPause:
+	case debugger.ReasonPause:
 		d.state = DebugStopped
-		d.reason = DebugStopPause
+		d.reason = debugger.ReasonPause
 		d.publishLocked(DebugEventStopped, false)
-	case ferret.DebugReasonRuntimeError:
+	case debugger.ReasonRuntimeError:
 		d.state = DebugStopped
-		d.reason = DebugStopRuntimeError
-		d.failure = d.failureFrom(event.Error)
+		d.reason = debugger.ReasonRuntimeError
+		d.failure = failureFromError(ErrorExecution)
 		d.publishLocked(DebugEventStopped, false)
-	case ferret.DebugReasonCompleted:
+	case debugger.ReasonCompleted:
 		d.state = DebugCompleted
-		d.output = convertOutput(event.Output)
+		if event.Output != nil {
+			d.output = &Output{ContentType: event.Output.ContentType, Content: append([]byte(nil), event.Output.Content...)}
+		}
 		d.publishLocked(DebugEventCompleted, true)
 		terminal = true
-	case ferret.DebugReasonTerminated:
+	case debugger.ReasonTerminated:
 		if event.Error != nil && !errors.Is(context.Cause(d.ctx), context.Canceled) {
 			d.state = DebugFailed
-			d.failure = d.failureFrom(event.Error)
+			d.failure = failureFromError(ErrorExecution)
 			d.publishLocked(DebugEventFailed, true)
 		} else {
 			d.state = DebugTerminated
@@ -279,18 +228,24 @@ func (d *DebugSession) finishCommand(event *ferret.DebugEvent, commandErr error)
 		terminal = true
 	default:
 		d.state = DebugFailed
-		d.failure = d.failureFrom(errors.New("debug execution returned an unknown event"))
+		d.failure = failureFromError(ErrorInternal)
 		d.publishLocked(DebugEventFailed, true)
 		terminal = true
 	}
 	d.mu.Unlock()
 	if terminal {
-		_ = d.debugger.Close()
+		d.beginClose()
 	}
 }
 
-func (d *DebugSession) failureFrom(err error) *Failure {
-	return failureFromError(err, d.plan.identity)
+func closeAPIDebugSession(session debugger.Session) (err error) {
+	defer func() {
+		if recover() != nil {
+			err = internalError(errors.New("runtime debug cleanup panicked"))
+		}
+	}()
+
+	return session.Close()
 }
 
 func (d *DebugSession) requireStoppedLocked(ctx context.Context) error {
@@ -330,7 +285,7 @@ func (d *DebugSession) snapshotLocked() DebugSnapshot {
 		State:            d.state,
 		StopReason:       d.reason,
 		Location:         d.location,
-		HitBreakpointIDs: append([]uint64(nil), d.hitIDs...),
+		HitBreakpointIDs: append([]debugger.BreakpointID(nil), d.hitIDs...),
 	}
 
 	if d.output != nil {
@@ -346,7 +301,7 @@ func (d *DebugSession) snapshotLocked() DebugSnapshot {
 
 func (s DebugSnapshot) clone() DebugSnapshot {
 	result := s
-	result.HitBreakpointIDs = append([]uint64(nil), s.HitBreakpointIDs...)
+	result.HitBreakpointIDs = append([]debugger.BreakpointID(nil), s.HitBreakpointIDs...)
 	if s.Output != nil {
 		result.Output = &Output{ContentType: s.Output.ContentType, Content: append([]byte(nil), s.Output.Content...)}
 	}
@@ -438,11 +393,17 @@ func (d *DebugSession) closeWatcherLocked(id uint64, watcher *debugWatcher, err 
 }
 
 func (d *DebugSession) Close(ctx context.Context) error {
+	d.beginClose()
+
+	return d.close.Wait(ctx)
+}
+
+// Terminal command paths commit cleanup without waiting from the command
+// goroutine, allowing runtime Close implementations to wait for that command.
+func (d *DebugSession) beginClose() {
 	if d.close.Begin() {
 		go d.settleClose()
 	}
-
-	return d.close.Wait(ctx)
 }
 
 func (d *DebugSession) settleClose() {
@@ -456,21 +417,13 @@ func (d *DebugSession) settleClose() {
 	}()
 
 	d.cancel(context.Canceled)
-	func() {
-		defer func() {
-			if recover() != nil {
-				err = errors.Join(err, internalError(errors.New("Ferret debug cleanup panicked")))
-			}
-		}()
-
-		err = d.debugger.Close()
-	}()
+	err = closeAPIDebugSession(d.debugger)
 
 	d.mu.Lock()
 	if !d.state.terminal() {
 		d.state = DebugTerminated
-		d.reason = DebugStopNone
-		d.location = Location{}
+		d.reason = ""
+		d.location = source.Range{}
 		d.failure = nil
 		d.publishLocked(DebugEventTerminated, true)
 	}

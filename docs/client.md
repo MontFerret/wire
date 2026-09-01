@@ -24,8 +24,30 @@ Breakpoint IDs and debug value references remain visible because callers pass
 them back to debugger operations; they do not expose connection or handle
 ownership.
 
+Debugger inspection uses the canonical Unified API types directly:
+
 ```go
-plan, err := wireClient.Compile(ctx, source, client.CompileOptions{})
+SetBreakpoint(context.Context, source.Location) (debugger.Breakpoint, error)
+DeleteBreakpoint(context.Context, debugger.BreakpointID) error
+Frames(context.Context) ([]debugger.Frame, error)
+FrameLocals(context.Context, int) ([]debugger.Variable, error)
+Variables(context.Context, debugger.ValueReference) ([]debugger.Variable, error)
+EvaluateFrame(context.Context, int, string) (debugger.Value, error)
+```
+
+The slice index returned by `Frames` is the index accepted by `FrameLocals`
+and `EvaluateFrame`; Wire does not expose a second frame-identity type. The v1
+protobuf transport cannot carry every Unified API debugger field. Returned
+`source.Range.Span`, breakpoint point and function IDs, and frame function IDs
+therefore remain at their zero values. Breakpoint binding mode also remains its
+Unified API zero value. Wire does not infer or fabricate the missing metadata.
+
+Compilation and one-shot execution accept `api.Source` directly. Its `Name`
+maps to the protocol's legacy source identity field.
+
+```go
+src := api.NewSource("query.fql", "RETURN @input")
+plan, err := wireClient.Compile(ctx, src, client.CompileOptions{})
 if err != nil {
 	return err
 }
@@ -54,12 +76,12 @@ Plan metadata is immutable. `Parameters` returns a defensive copy, and
 ## Convenience execution
 
 For a one-shot program, `Client.Run` composes compile, execute, wait, and
-ordered cleanup while preserving Ferret's encoded output boundary:
+ordered cleanup while preserving the Unified API encoded output boundary:
 
 ```go
 output, err := wireClient.Run(
 	ctx,
-	client.Source{Identity: "query.fql", Content: "RETURN @input"},
+	api.NewSource("query.fql", "RETURN @input"),
 	client.Parameters{"input": "hello"},
 	client.RunOptions{Execute: client.ExecuteOptions{OutputContentType: "application/json"}},
 )
@@ -69,7 +91,8 @@ A caller that owns a reusable plan can run it repeatedly without surrendering
 plan ownership:
 
 ```go
-plan, err := wireClient.Compile(ctx, source, client.CompileOptions{})
+src := api.NewSource("query.fql", "RETURN @input")
+plan, err := wireClient.Compile(ctx, src, client.CompileOptions{})
 if err != nil {
 	return err
 }
@@ -106,8 +129,9 @@ another.
 Handles represent identity, ownership, and operations; they are not mutable
 state snapshots. Execution and debug state crosses the facade through
 `ExecutionSnapshot` and `DebugSessionSnapshot` values on ordered watch events.
-These snapshots preserve Ferret's encoded output and structured debugger data
-without exposing generated protobuf messages.
+These snapshots preserve Unified API encoded output and use
+`debugger.Reason`, `source.Range`, and `debugger.BreakpointID` for structured
+debugger data without exposing generated protobuf messages.
 
 Execution and debugger command methods return errors only. Their state changes
 are observed through `Execution.Watch` or `DebugSession.Watch`. A watch sends
@@ -154,10 +178,11 @@ termination and resource release.
 ## Errors
 
 Immediate Wire failures are exposed as `*client.Error` with a stable
-`ErrorCategory`, sanitized message, and structured diagnostics. The error
-unwraps its transport cause, so callers that need the gRPC status can use
-`status.Code(err)` without making transport codes part of the client-domain
-type. Protocol resource identifiers remain private.
+`ErrorCategory`, sanitized message, and optional structured diagnostics. With
+the current Unified API, diagnostics are empty because it has no portable
+diagnostic contract. The error unwraps its transport cause, so callers that
+need the gRPC status can use `status.Code(err)` without making transport codes
+part of the client-domain type. Protocol resource identifiers remain private.
 
 Terminal execution and debug failures use `*client.Failure`, while local
 lifecycle and waiting conditions remain distinguishable through
@@ -177,6 +202,6 @@ The client package is limited to:
 - hiding protobuf and gRPC ceremony without hiding protocol concepts.
 
 Closing the Client never closes the caller-owned gRPC connection. The facade
-does not construct engines or transports. Its convenience execution methods
-compose the same handles and watches; they do not duplicate Ferret runtime
+does not construct runtimes or transports. Its convenience execution methods
+compose the same handles and watches; they do not duplicate runtime
 semantics.

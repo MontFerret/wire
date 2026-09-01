@@ -5,15 +5,14 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/MontFerret/api/debugger"
+	"github.com/MontFerret/api/source"
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
 )
 
 type (
 	// DebugState describes the lifecycle state in a DebugSessionSnapshot.
 	DebugState uint8
-
-	// DebugStopReason identifies why a running session became stopped.
-	DebugStopReason uint8
 
 	// DebugEventKind identifies an ordered debug state transition. Started and
 	// continued events are distinct even though both carry a running snapshot.
@@ -22,9 +21,9 @@ type (
 	// DebugSessionSnapshot is the state published for one remote debug event.
 	DebugSessionSnapshot struct {
 		State            DebugState
-		StopReason       DebugStopReason
-		Location         *Location
-		HitBreakpointIDs []uint64
+		StopReason       debugger.Reason
+		Location         *source.Range
+		HitBreakpointIDs []debugger.BreakpointID
 		Output           *Output
 		Failure          *Failure
 	}
@@ -52,16 +51,6 @@ const (
 	DebugCompleted
 	DebugFailed
 	DebugTerminated
-)
-
-// Debug stop reasons reported by Ferret.
-const (
-	DebugStopNone DebugStopReason = iota
-	DebugStopEntry
-	DebugStopBreakpoint
-	DebugStopStep
-	DebugStopPause
-	DebugStopRuntimeError
 )
 
 // Debug event kinds. Every session has one ordered terminal event.
@@ -114,7 +103,12 @@ func (events *DebugEvents) Recv() (DebugEvent, error) {
 		return DebugEvent{}, fmt.Errorf("Wire server returned an empty debug event")
 	}
 
-	event := convertDebugEvent(value)
+	event, err := convertDebugEvent(value)
+	if err != nil {
+		events.cancel()
+
+		return DebugEvent{}, err
+	}
 	if event.Snapshot.State.Terminal() {
 		events.cancel()
 	}

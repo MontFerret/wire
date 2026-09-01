@@ -7,8 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/MontFerret/ferret/v2"
-	"github.com/MontFerret/ferret/v2/pkg/compiler"
+	"github.com/MontFerret/api"
 	"github.com/MontFerret/wire/internal/core"
 	"github.com/MontFerret/wire/internal/grpcserver"
 	"github.com/MontFerret/wire/internal/lifecycle"
@@ -16,19 +15,19 @@ import (
 )
 
 // Server hosts Ferret Wire over a caller-supplied listener. It borrows the
-// Engine passed to NewServer and never closes it.
+// runtime passed to NewServer and never closes it.
 type Server struct {
 	grpcServer *grpc.Server
-	runtime    *core.Runtime
+	host       *core.Host
 
 	serveMu  sync.Mutex
 	serving  bool
 	shutdown lifecycle.Close
 }
 
-// NewServer adapts a caller-configured Ferret engine without taking ownership
+// NewServer adapts a caller-configured runtime without taking ownership
 // or creating a listener. Limits default to DefaultServerLimits.
-func NewServer(engine *ferret.Engine, options ...ServerOption) (*Server, error) {
+func NewServer(runtime api.Runtime, options ...ServerOption) (*Server, error) {
 	configured := serverOptions{limits: DefaultServerLimits()}
 	for _, option := range options {
 		if option == nil {
@@ -41,16 +40,15 @@ func NewServer(engine *ferret.Engine, options ...ServerOption) (*Server, error) 
 	}
 
 	info := core.RuntimeInfo{
-		APIIdentity:   apiIdentity,
-		WireVersion:   moduleVersion(wireModulePath, "devel"),
-		FerretVersion: moduleVersion(ferretModulePath, compiler.Version),
+		APIIdentity: apiIdentity,
+		WireVersion: moduleVersion(wireModulePath, "devel"),
 		RuntimeIdentity: core.RuntimeIdentity{
 			Name:       configured.runtimeIdentity.Name,
 			Version:    configured.runtimeIdentity.Version,
 			InstanceID: configured.runtimeIdentity.InstanceID,
 		},
 	}
-	runtime, err := core.NewRuntime(engine, info, core.Limits{
+	host, err := core.NewHost(runtime, info, core.Limits{
 		MaxConnections:                configured.limits.MaxConnections,
 		MaxPlansPerConnection:         configured.limits.MaxPlansPerConnection,
 		MaxExecutionsPerConnection:    configured.limits.MaxExecutionsPerConnection,
@@ -68,9 +66,9 @@ func NewServer(engine *ferret.Engine, options ...ServerOption) (*Server, error) 
 		grpc.UnaryInterceptor(grpcserver.UnaryRecoveryInterceptor),
 		grpc.StreamInterceptor(grpcserver.StreamRecoveryInterceptor),
 	)
-	grpcserver.New(runtime).Register(grpcServer)
+	grpcserver.New(host).Register(grpcServer)
 
-	return &Server{grpcServer: grpcServer, runtime: runtime}, nil
+	return &Server{grpcServer: grpcServer, host: host}, nil
 }
 
 // Serve serves the caller-owned listener until it fails, ctx is cancelled, or
@@ -157,7 +155,7 @@ func (s *Server) settleShutdown(deadline time.Time) {
 		}()
 	}
 
-	err = s.runtime.Close(context.Background())
+	err = s.host.Close(context.Background())
 	s.grpcServer.GracefulStop()
 }
 

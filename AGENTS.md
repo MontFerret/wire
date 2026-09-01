@@ -2,14 +2,14 @@
 
 This file is the canonical operating guide for coding agents working in the
 Wire repository. Wire is a security-sensitive RPC boundary that exposes a host
-application's configured Ferret engine to external tooling. Preserve that
+application's configured Unified API runtime to external tooling. Preserve that
 narrow responsibility.
 
 ## Sources of truth
 
 Use the most direct repository authority for facts that can change:
 
-* `go.mod` owns the module path, minimum Go version, and Ferret dependency.
+* `go.mod` owns the module path, minimum Go version, and Unified API dependency.
 * `Makefile` owns canonical development commands and pinned tool invocations.
 * Protobuf sources under `proto/ferret/wire/v1` own Wire protocol semantics.
 * `buf.yaml` owns protobuf lint and breaking-change policy.
@@ -24,7 +24,7 @@ Use the most direct repository authority for facts that can change:
   entry points.
 
 The current module is `github.com/MontFerret/wire`, uses Go 1.25, and adapts the
-Ferret v2 dependency declared in `go.mod`. Verify these values rather than
+Unified API dependency declared in `go.mod`. Verify these values rather than
 copying them into implementation logic.
 
 When generated bindings disagree with protobuf source, protobuf source is
@@ -41,7 +41,8 @@ handwritten client resource model.
 
 Keep detailed rationale in docs rather than this operating guide. Start in the
 layer that owns the requested behavior, preserve the dependency direction from
-Ferret through Wire to consumers, and do not move DAP, LSP, transport, or
+runtime implementations through the Unified API and Wire to consumers, and do
+not move DAP, LSP, transport, or
 host-configuration semantics into Wire for convenience.
 
 ## Generated code
@@ -68,7 +69,7 @@ facade ownership and lifecycle contract.
 
 Export only externally required symbols, keep logical connection and resource
 IDs private in the handwritten client, add contract-focused comments, and
-preserve encoded-output, host-engine, listener, and caller-owned transport
+preserve encoded-output, host-runtime, listener, and caller-owned transport
 boundaries. Call out intentional protocol or public API changes and cover their
 edge behavior with tests.
 
@@ -204,7 +205,7 @@ contract crosses layers:
 | Protobuf/API compatibility | Buf lint and breaking checks |
 | Server request semantics | `internal/grpcserver` tests |
 | Logical ownership and limits | `internal/core` lifecycle tests |
-| Ferret execution adaptation | Top-level integration tests using public Ferret APIs |
+| Unified runtime adaptation | Top-level integration tests using Unified API fakes |
 | Cancellation and cleanup | Lifecycle and integration tests |
 | Debugger commands and inspection | Core and integration debugger tests |
 | Client facade and conversions | `client` contract tests |
@@ -268,8 +269,8 @@ release, and shutdown ordering.
 
 ### Architecture and API
 
-Check for Ferret semantics duplicated in Wire, transport details leaking into
-domain APIs, DAP/LSP concerns entering Wire, host engine construction leaking
+Check for runtime semantics duplicated in Wire, transport details leaking into
+domain APIs, DAP/LSP concerns entering Wire, host runtime construction leaking
 into Wire, unnecessary protobuf contamination of the client facade, and
 unnecessary exported APIs.
 
@@ -277,7 +278,7 @@ unnecessary exported APIs.
 
 Check unintended listener exposure, missing limits, unbounded client-controlled
 allocation, information leakage, trust of client-controlled ownership, panic
-sanitization, and Ferret policy bypasses.
+sanitization, and host runtime policy bypasses.
 
 ### Protocol compatibility
 

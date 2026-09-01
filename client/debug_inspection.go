@@ -5,67 +5,24 @@ import (
 	"errors"
 	"math"
 
+	"github.com/MontFerret/api/debugger"
+	"github.com/MontFerret/api/source"
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
 )
 
-type (
-	// Location is a Ferret source position. Breakpoint column zero is unspecified.
-	Location struct {
-		File   string
-		Line   int
-		Column int
-	}
-
-	// Breakpoint describes the requested and bound Ferret breakpoint locations.
-	// Its ID is passed to DeleteBreakpoint and matched against stopped events.
-	Breakpoint struct {
-		ID              uint64
-		File            string
-		RequestedLine   int
-		RequestedColumn int
-		Line            int
-		Column          int
-		Verified        bool
-	}
-
-	// DebugValue is Ferret's formatted debugger value. A non-zero Reference can
-	// be passed to DebugSession.Variables until the session resumes.
-	DebugValue struct {
-		Type      string
-		Display   string
-		Reference uint64
-	}
-
-	// Variable is a Ferret debugger variable. Parameter distinguishes declared
-	// query parameters from other frame locals.
-	Variable struct {
-		Name      string
-		Value     DebugValue
-		Mutable   bool
-		Parameter bool
-	}
-
-	// Frame describes one paused frame and its zero-based inspection index.
-	Frame struct {
-		Index    int
-		Name     string
-		Location *Location
-	}
-)
-
-// SetBreakpoint adds one Ferret breakpoint. Line must be positive; column zero
-// means Ferret's unspecified column.
-func (d *DebugSession) SetBreakpoint(ctx context.Context, location Location) (Breakpoint, error) {
+// SetBreakpoint adds one runtime breakpoint. Line must be positive; column zero
+// means unspecified.
+func (d *DebugSession) SetBreakpoint(ctx context.Context, location source.Location) (debugger.Breakpoint, error) {
 	if err := d.checkOpen(); err != nil {
-		return Breakpoint{}, err
+		return debugger.Breakpoint{}, err
 	}
 
 	if location.File == "" {
-		return Breakpoint{}, errors.New("breakpoint file is required")
+		return debugger.Breakpoint{}, errors.New("breakpoint file is required")
 	}
 
 	if location.Line <= 0 || location.Line > math.MaxInt32 || location.Column < 0 || location.Column > math.MaxInt32 {
-		return Breakpoint{}, errors.New("breakpoint has an invalid line or column")
+		return debugger.Breakpoint{}, errors.New("breakpoint has an invalid line or column")
 	}
 
 	response, err := d.client.debugClient.SetBreakpoint(ctx, &wirev1.SetBreakpointRequest{
@@ -76,38 +33,39 @@ func (d *DebugSession) SetBreakpoint(ctx context.Context, location Location) (Br
 		},
 	})
 	if err != nil {
-		return Breakpoint{}, decodeError(err)
+		return debugger.Breakpoint{}, decodeError(err)
 	}
 
 	if response.GetBreakpoint() == nil {
-		return Breakpoint{}, errors.New("Wire server returned no breakpoint")
+		return debugger.Breakpoint{}, invalidDebuggerResponse("breakpoint is missing")
 	}
 
-	return convertBreakpoint(response.GetBreakpoint()), nil
+	return convertBreakpoint(response.GetBreakpoint())
 }
 
 // DeleteBreakpoint removes one server-issued breakpoint from a created or
 // stopped session.
-func (d *DebugSession) DeleteBreakpoint(ctx context.Context, breakpointID uint64) error {
+func (d *DebugSession) DeleteBreakpoint(ctx context.Context, breakpointID debugger.BreakpointID) error {
 	if err := d.checkOpen(); err != nil {
 		return err
 	}
 
-	if breakpointID == 0 {
+	if breakpointID <= 0 {
 		return errors.New("breakpoint ID must be positive")
 	}
 
 	_, err := d.client.debugClient.DeleteBreakpoint(ctx, &wirev1.DeleteBreakpointRequest{
 		ConnectionId:   d.client.connectionProto(),
 		DebugSessionId: &wirev1.DebugSessionId{Value: d.id},
-		BreakpointId:   breakpointID,
+		BreakpointId:   uint64(breakpointID),
 	})
 
 	return decodeError(err)
 }
 
-// Frames returns the current paused frame followed by its callers.
-func (d *DebugSession) Frames(ctx context.Context) ([]Frame, error) {
+// Frames returns the current paused frame followed by its callers. The slice
+// index is the frame index accepted by FrameLocals and EvaluateFrame.
+func (d *DebugSession) Frames(ctx context.Context) ([]debugger.Frame, error) {
 	if err := d.checkOpen(); err != nil {
 		return nil, err
 	}
@@ -119,17 +77,21 @@ func (d *DebugSession) Frames(ctx context.Context) ([]Frame, error) {
 		return nil, decodeError(err)
 	}
 
-	result := make([]Frame, len(response.GetFrames()))
+	result := make([]debugger.Frame, len(response.GetFrames()))
 	for i, value := range response.GetFrames() {
-		result[i] = Frame{Index: int(value.GetIndex()), Name: value.GetName(), Location: convertLocation(value.GetLocation())}
+		converted, err := convertFrame(value, i)
+		if err != nil {
+			return nil, err
+		}
+		result[i] = converted
 	}
 
 	return result, nil
 }
 
-// FrameLocals returns Ferret variables for a paused frame. Parameters are
-// identified by Variable.Parameter.
-func (d *DebugSession) FrameLocals(ctx context.Context, frameIndex int) ([]Variable, error) {
+// FrameLocals returns runtime variables for a paused frame. Parameters are
+// identified by debugger.Variable.Param.
+func (d *DebugSession) FrameLocals(ctx context.Context, frameIndex int) ([]debugger.Variable, error) {
 	if err := d.checkOpen(); err != nil {
 		return nil, err
 	}
@@ -145,9 +107,13 @@ func (d *DebugSession) FrameLocals(ctx context.Context, frameIndex int) ([]Varia
 		return nil, decodeError(err)
 	}
 
-	result := make([]Variable, len(response.GetVariables()))
+	result := make([]debugger.Variable, len(response.GetVariables()))
 	for i, value := range response.GetVariables() {
-		result[i] = convertVariable(value)
+		converted, err := convertVariable(value)
+		if err != nil {
+			return nil, err
+		}
+		result[i] = converted
 	}
 
 	return result, nil
@@ -155,34 +121,42 @@ func (d *DebugSession) FrameLocals(ctx context.Context, frameIndex int) ([]Varia
 
 // Variables expands a non-zero debug value reference. References become stale
 // after every resume.
-func (d *DebugSession) Variables(ctx context.Context, reference uint64) ([]Variable, error) {
+func (d *DebugSession) Variables(ctx context.Context, reference debugger.ValueReference) ([]debugger.Variable, error) {
 	if err := d.checkOpen(); err != nil {
 		return nil, err
 	}
 
+	if reference <= 0 {
+		return nil, errors.New("value reference must be positive")
+	}
+
 	response, err := d.client.debugClient.Variables(ctx, &wirev1.VariablesRequest{
-		ConnectionId: d.client.connectionProto(), DebugSessionId: &wirev1.DebugSessionId{Value: d.id}, Reference: reference,
+		ConnectionId: d.client.connectionProto(), DebugSessionId: &wirev1.DebugSessionId{Value: d.id}, Reference: uint64(reference),
 	})
 	if err != nil {
 		return nil, decodeError(err)
 	}
 
-	result := make([]Variable, len(response.GetVariables()))
+	result := make([]debugger.Variable, len(response.GetVariables()))
 	for i, value := range response.GetVariables() {
-		result[i] = convertVariable(value)
+		converted, err := convertVariable(value)
+		if err != nil {
+			return nil, err
+		}
+		result[i] = converted
 	}
 
 	return result, nil
 }
 
 // EvaluateFrame evaluates an FQL expression in one paused frame.
-func (d *DebugSession) EvaluateFrame(ctx context.Context, frameIndex int, expression string) (DebugValue, error) {
+func (d *DebugSession) EvaluateFrame(ctx context.Context, frameIndex int, expression string) (debugger.Value, error) {
 	if err := d.checkOpen(); err != nil {
-		return DebugValue{}, err
+		return debugger.Value{}, err
 	}
 
 	if frameIndex < 0 || frameIndex > math.MaxInt32 {
-		return DebugValue{}, errors.New("frame index is out of range")
+		return debugger.Value{}, errors.New("frame index is out of range")
 	}
 
 	response, err := d.client.debugClient.EvaluateFrame(ctx, &wirev1.EvaluateFrameRequest{
@@ -190,45 +164,99 @@ func (d *DebugSession) EvaluateFrame(ctx context.Context, frameIndex int, expres
 		FrameIndex: int32(frameIndex), Expression: expression,
 	})
 	if err != nil {
-		return DebugValue{}, decodeError(err)
+		return debugger.Value{}, decodeError(err)
 	}
 
 	if response.GetValue() == nil {
-		return DebugValue{}, errors.New("Wire server returned no debug value")
+		return debugger.Value{}, invalidDebuggerResponse("debug value is missing")
 	}
 
-	return convertDebugValue(response.GetValue()), nil
+	return convertDebugValue(response.GetValue())
 }
 
-func convertLocation(value *wirev1.SourceLocation) *Location {
+func convertBreakpoint(value *wirev1.Breakpoint) (debugger.Breakpoint, error) {
+	id, err := debuggerIDFromProto[debugger.BreakpointID](value.GetId(), "breakpoint ID", false)
+	if err != nil {
+		return debugger.Breakpoint{}, err
+	}
+
+	requested := source.Location{
+		Position: source.Position{Line: int(value.GetRequestedLine()), Column: int(value.GetRequestedColumn())},
+		File:     value.GetFile(),
+	}
+	if requested.File == "" || requested.Line <= 0 || requested.Column < 0 {
+		return debugger.Breakpoint{}, invalidDebuggerResponse("requested breakpoint location is invalid")
+	}
+
+	resolved := source.Range{}
+	if value.GetLine() != 0 || value.GetColumn() != 0 {
+		if value.GetLine() <= 0 || value.GetColumn() < 0 {
+			return debugger.Breakpoint{}, invalidDebuggerResponse("resolved breakpoint location is invalid")
+		}
+		resolved.Location = source.Location{
+			Position: source.Position{Line: int(value.GetLine()), Column: int(value.GetColumn())},
+			File:     value.GetFile(),
+		}
+	} else if value.GetVerified() {
+		return debugger.Breakpoint{}, invalidDebuggerResponse("verified breakpoint has no resolved location")
+	}
+
+	return debugger.Breakpoint{
+		Location:          resolved,
+		RequestedLocation: requested,
+		ID:                id,
+		Bound:             value.GetVerified(),
+	}, nil
+}
+
+func convertFrame(value *wirev1.Frame, index int) (debugger.Frame, error) {
 	if value == nil {
-		return nil
+		return debugger.Frame{}, invalidDebuggerResponse("frame %d is missing", index)
 	}
 
-	return &Location{File: value.GetFile(), Line: int(value.GetLine()), Column: int(value.GetColumn())}
-}
-
-func convertBreakpoint(value *wirev1.Breakpoint) Breakpoint {
-	return Breakpoint{
-		ID:              value.GetId(),
-		File:            value.GetFile(),
-		RequestedLine:   int(value.GetRequestedLine()),
-		RequestedColumn: int(value.GetRequestedColumn()),
-		Line:            int(value.GetLine()),
-		Column:          int(value.GetColumn()),
-		Verified:        value.GetVerified(),
+	if value.GetIndex() != int32(index) {
+		return debugger.Frame{}, invalidDebuggerResponse("frame index %d is out of order", value.GetIndex())
 	}
-}
 
-func convertDebugValue(value *wirev1.DebugValue) DebugValue {
-	return DebugValue{Type: value.GetType(), Display: value.GetDisplay(), Reference: value.GetReference()}
-}
-
-func convertVariable(value *wirev1.Variable) Variable {
-	return Variable{
-		Name:      value.GetName(),
-		Value:     convertDebugValue(value.GetValue()),
-		Mutable:   value.GetMutable(),
-		Parameter: value.GetParameter(),
+	location, err := convertSourceLocation(value.GetLocation())
+	if err != nil {
+		return debugger.Frame{}, err
 	}
+	result := debugger.Frame{Name: value.GetName()}
+	if location != nil {
+		result.Location = *location
+	}
+
+	return result, nil
+}
+
+func convertDebugValue(value *wirev1.DebugValue) (debugger.Value, error) {
+	if value == nil {
+		return debugger.Value{}, invalidDebuggerResponse("debug value is missing")
+	}
+
+	reference, err := debuggerIDFromProto[debugger.ValueReference](value.GetReference(), "debug value reference", true)
+	if err != nil {
+		return debugger.Value{}, err
+	}
+
+	return debugger.Value{Type: value.GetType(), Display: value.GetDisplay(), Reference: reference}, nil
+}
+
+func convertVariable(value *wirev1.Variable) (debugger.Variable, error) {
+	if value == nil {
+		return debugger.Variable{}, invalidDebuggerResponse("variable is missing")
+	}
+
+	converted, err := convertDebugValue(value.GetValue())
+	if err != nil {
+		return debugger.Variable{}, err
+	}
+
+	return debugger.Variable{
+		Name:    value.GetName(),
+		Value:   converted,
+		Mutable: value.GetMutable(),
+		Param:   value.GetParameter(),
+	}, nil
 }

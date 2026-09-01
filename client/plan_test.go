@@ -4,10 +4,35 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/MontFerret/api"
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
+
+func TestCompileMapsCanonicalSource(t *testing.T) {
+	server := &clientTestServer{}
+	client := openTestClient(t, startClientTestServer(t, server))
+	src := api.Source{Name: "query.fql", Content: "RETURN 1"}
+
+	plan, err := client.Compile(testClientContext(t), src, CompileOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := plan.Close(testClientContext(t)); err != nil {
+			t.Errorf("close plan: %v", err)
+		}
+	}()
+
+	server.mu.Lock()
+	name := server.lastCompileSourceName
+	content := server.lastCompileContent
+	server.mu.Unlock()
+	if name != src.Name || content != src.Content {
+		t.Fatalf("unexpected transported source: name=%q content=%q", name, content)
+	}
+}
 
 func TestPlanRunOwnsOnlyItsExecution(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
@@ -16,7 +41,7 @@ func TestPlanRunOwnsOnlyItsExecution(t *testing.T) {
 			executionCompletedEvent("execution-1", "text/plain", []byte("done")),
 		}}}}
 		client := openTestClient(t, startClientTestServer(t, server))
-		plan, err := client.Compile(testClientContext(t), Source{Content: "RETURN 1"}, CompileOptions{})
+		plan, err := client.Compile(testClientContext(t), api.Source{Content: "RETURN 1"}, CompileOptions{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -53,7 +78,7 @@ func TestPlanRunOwnsOnlyItsExecution(t *testing.T) {
 			releaseExecutionErr: status.Error(codes.Internal, "execution cleanup failed"),
 		}
 		client := openTestClient(t, startClientTestServer(t, server))
-		plan, err := client.Compile(testClientContext(t), Source{Content: "RETURN 1"}, CompileOptions{})
+		plan, err := client.Compile(testClientContext(t), api.Source{Content: "RETURN 1"}, CompileOptions{})
 		if err != nil {
 			t.Fatal(err)
 		}
