@@ -15,7 +15,7 @@ type (
 		OutputContentType string
 	}
 
-	// Output preserves Ferret's encoded content-type and byte abstraction.
+	// Output preserves the Unified API encoded content-type and byte abstraction.
 	Output struct {
 		ContentType string
 		Content     []byte
@@ -61,7 +61,7 @@ const (
 	ExecutionCancelled
 )
 
-// Execute publishes a remote execution of this plan. Output remains Ferret's
+// Execute publishes a remote execution of this plan. Output remains the Unified API
 // encoded content-type and byte contract.
 func (p *Plan) Execute(ctx context.Context, parameters Parameters, options ExecuteOptions) (*Execution, error) {
 	if err := p.checkOpen(); err != nil {
@@ -203,7 +203,7 @@ func (events *ExecutionEvents) Recv() (ExecutionEvent, error) {
 		return ExecutionEvent{}, decodeError(err)
 	}
 
-	if value.GetPayload() == nil {
+	if value.GetExecution() == nil {
 		events.cancel()
 
 		return ExecutionEvent{}, fmt.Errorf("Wire server returned an empty execution event")

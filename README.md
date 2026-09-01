@@ -30,19 +30,20 @@ Unary execution and debug resume calls publish work before returning. Once publi
 
 ## Protocol contracts
 
-- Compilation returns opaque UUIDs, declared parameters, and debug capability. The current Unified API has no portable diagnostic contract, so generic runtime compilation failures carry the stable Wire category without runtime-specific diagnostic payloads.
-- Parameter values use an explicit protobuf oneof: none, boolean, signed 64-bit integer, double, string, binary, duration nanoseconds, RFC3339Nano datetime, regexp, array, or string-keyed object. Missing variants, malformed values, and nesting beyond 64 levels are rejected.
-- Execution and debug completion carry the Unified API output contract unchanged: `content_type` plus encoded `content` bytes. Wire does not intercept or reinterpret runtime values and emits output only in the ordered terminal snapshot.
-- Debug RPCs follow Unified API concepts: singular `SetBreakpoint` and `DeleteBreakpoint`, `Frames`, `FrameLocals`, `Step`, `Out`, `Variables`, and `EvaluateFrame`. Source lines are 1-based, breakpoint column `0` means unspecified, frame indices are zero-based, variables carry a parameter marker, and expandable value references become stale after every resume.
-- The handwritten Go client returns canonical `api/debugger` and `api/source` inspection values. Protobuf v1 cannot carry source spans or breakpoint/frame point and function IDs, so those fields remain zero instead of being inferred.
-- Unary failures use normal gRPC codes and an attached `ferret.wire.v1.ErrorDetail`. Execution and debug failures are terminal events so watchers observe one ordered outcome.
-- `ResourceExhausted` reports finite-cap violations, while missing breakpoints and other stale resources report structured not-found categories and resource metadata.
+- `Compile` and `CompileDebug` create the same reusable Plan resource, containing only its opaque ID and declared parameters. Optional optimization levels map to Unified API plan options; an unspecified level preserves the runtime default.
+- Parameter values use an explicit protobuf oneof for null, boolean, signed 64-bit integer, double, string, bytes, array, or string-keyed object. Missing variants, custom values, and nesting beyond 64 levels are rejected.
+- Execution and debug completion carry one shared Unified API output contract unchanged: `content_type` plus encoded `content` bytes. Wire never decodes or reinterprets them.
+- Execution and debug watches carry ordered snapshots. State is the execution lifecycle discriminator; debug events also carry a kind because start and continue both publish a running state. Terminal snapshots are replayable, watcher cancellation is independent of resource cancellation, and slow watchers are detached without blocking runtime work.
+- Debug transport preserves source ranges and spans, event depth, requested and resolved breakpoints, binding mode, point and function IDs, frame function IDs, variables, value references, stop reason, and hit breakpoint IDs. Frame order is the zero-based index accepted by `FrameLocals` and `EvaluateFrame`.
+- Invalid requests, cancellation, and resource exhaustion use normal gRPC status codes. `ErrorDetail` is reserved for meaningful Wire lifecycle/runtime categories, while asynchronous terminal failures use a minimal category and sanitized message.
 
 `DefaultServerLimits` bounds client-controlled state to 64 logical connections; 128 plans and 128 executions per connection; 32 debug sessions per connection; 8 watchers per execution or debug session; 256 breakpoints per debug session; and 4 MiB for both inbound and outbound gRPC messages. Pending, active, and closing resources all count. Hosts may replace the complete positive limit set with `WithServerLimits`.
 
-The legacy v1 `ferret_version` metadata field remains present for wire compatibility but is empty because `api.Runtime` exposes no portable runtime-version contract. `WithRuntimeIdentity` continues to publish explicit host application identity.
+The one-shot Connect handshake publishes the connection ID, Wire protocol name and version, and optional host identity supplied through `WithRuntimeIdentity`. It does not publish fabricated capabilities, a Ferret version, or module-build metadata.
 
-The Go client converts parameters without reflection. `client.Parameters` accepts `nil`, booleans, signed integer types, unsigned integers that fit in `int64`, `float32`/`float64`, strings, `[]byte`, `time.Duration`, `time.Time`, `regexp.Regexp` or `*regexp.Regexp`, `[]any`, and `map[string]any`. Other Go types are rejected locally.
+The Go client converts parameters without reflection. `client.Parameters` accepts `nil`, booleans, signed integer types, unsigned integers that fit in `int64`, `float32`/`float64`, strings, `[]byte`, `[]any`, and `map[string]any`. Duration, datetime, regexp, and other Go types are rejected locally.
+
+See [Wire Protocol](docs/protocol.md) for every RPC/message/enum, lifecycle and watch semantics, compatibility classifications, Unified API gaps, and deferred work.
 
 ## Runtime host example
 
@@ -153,22 +154,22 @@ for {
 ```
 
 Wire failures expose stable client error categories through `*client.Error`.
-Its diagnostics remain empty until the Unified API provides a portable
-diagnostic contract. The underlying gRPC status remains available through error
-unwrapping and `status.Code(err)`; remote connection and resource IDs are not
-part of the high-level client error model.
+Its legacy diagnostics field remains empty until the Unified API provides a
+portable diagnostic contract. The underlying gRPC status remains available
+through error unwrapping and `status.Code(err)`; remote connection and resource
+IDs are not part of the high-level client error model.
 
 ## Security and trust model
 
 Wire supplies no default endpoint, authentication, authorization, TLS policy, TCP listener, named-pipe implementation, listener discovery, or externally reachable binding. Callers must choose and secure the listener, authenticate peers where required, enforce filesystem permissions for local sockets, and decide which runtime capabilities and host functions are safe for those peers. FQL source and parameters are trusted according to the host's policy; parameters may contain secrets and therefore require a confidential transport.
 
-Compilation failures, execution failures, generic internal errors, and cleanup panics are sanitized and do not expose runtime error text, raw causes, panic values, filesystem paths, environment data, or host internals. Source identity remains part of the caller-supplied protocol input. Server limits reduce accidental and hostile resource exhaustion, but hosts must still decide which runtime capabilities are safe to expose.
+Compilation failures, execution failures, generic internal errors, and cleanup panics are sanitized and do not expose runtime error text, raw causes, panic values, filesystem paths, environment data, or host internals. Source name remains part of the caller-supplied protocol input. Server limits reduce accidental and hostile resource exhaustion, but hosts must still decide which runtime capabilities are safe to expose.
 
 Windows named pipes and remote TCP/TLS can be added later by supplying ordinary `net.Listener` and gRPC dialer implementations. Transport choice does not change the logical connection or protocol semantics.
 
 ## Non-goals and current limitations
 
-Wire does not provide runtime introspection, Ferret module discovery, language intelligence, LSP, DAP translation, listener policy, downstream ferretd/CLI/Lab integration, TTLs, or heartbeats. It makes no changes to Ferret core or other MontFerret repositories.
+Wire does not provide runtime introspection, Ferret module discovery, language intelligence, LSP, DAP translation, listener policy, downstream ferretd/CLI/Lab integration, TTLs, heartbeats, negotiated advanced capabilities, or node/distributed bytecode transport. The full handwritten client redesign is also deferred. Wire makes no changes to Ferret core or other MontFerret repositories.
 
 Wire forwards cancellation to Unified API compile and session operations. Whether
 an implementation can promptly interrupt its internal work remains a runtime

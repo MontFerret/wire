@@ -16,10 +16,12 @@ func (s *Server) Connect(_ *wirev1.ConnectRequest, stream wirev1.RuntimeService_
 		_ = s.host.CloseConnection(context.Background(), connection.ID())
 	}()
 
-	response := &wirev1.ConnectResponse{Opened: &wirev1.ConnectionOpened{
-		ConnectionId: &wirev1.ConnectionId{Value: string(connection.ID())},
-		RuntimeInfo:  runtimeInfo(s.host.Info()),
-	}}
+	info := s.host.Info()
+	response := &wirev1.ConnectResponse{
+		ConnectionId:    &wirev1.ConnectionId{Value: string(connection.ID())},
+		Protocol:        protocolInfo(info),
+		RuntimeIdentity: runtimeIdentity(info.RuntimeIdentity),
+	}
 	if err := stream.Send(response); err != nil {
 		return err
 	}

@@ -29,10 +29,10 @@ type lifecycleServer struct {
 }
 
 func (s *lifecycleServer) Connect(_ *wirev1.ConnectRequest, stream wirev1.RuntimeService_ConnectServer) error {
-	err := stream.Send(&wirev1.ConnectResponse{Opened: &wirev1.ConnectionOpened{
+	err := stream.Send(&wirev1.ConnectResponse{
 		ConnectionId: &wirev1.ConnectionId{Value: "connection"},
-		RuntimeInfo:  &wirev1.RuntimeInfo{ApiIdentity: "ferret.wire.v1"},
-	}})
+		Protocol:     &wirev1.ProtocolInfo{Name: "ferret.wire", Version: "v1"},
+	})
 	if err != nil || s.disconnect {
 		return err
 	}
@@ -45,12 +45,9 @@ func (s *lifecycleServer) Connect(_ *wirev1.ConnectRequest, stream wirev1.Runtim
 func (s *lifecycleServer) CloseConnection(context.Context, *wirev1.CloseConnectionRequest) (*wirev1.CloseConnectionResponse, error) {
 	if s.disconnect {
 		detail := &wirev1.ErrorDetail{
-			Category:   wirev1.ErrorCategory_ERROR_CATEGORY_CONNECTION_NOT_FOUND,
-			Message:    "resource not found",
-			Resource:   wirev1.ResourceKind_RESOURCE_KIND_CONNECTION,
-			ResourceId: "connection",
+			Category: wirev1.ErrorCategory_ERROR_CATEGORY_CONNECTION_NOT_FOUND,
 		}
-		withDetails, err := status.New(codes.NotFound, detail.Message).WithDetails(detail)
+		withDetails, err := status.New(codes.NotFound, "resource not found").WithDetails(detail)
 		if err != nil {
 			return nil, err
 		}
@@ -66,13 +63,11 @@ func (s *lifecycleServer) CloseConnection(context.Context, *wirev1.CloseConnecti
 
 func (s *lifecycleServer) WatchExecution(_ *wirev1.WatchExecutionRequest, stream wirev1.ExecutionService_WatchExecutionServer) error {
 	err := stream.Send(&wirev1.WatchExecutionResponse{
-		ExecutionId: &wirev1.ExecutionId{Value: "execution"},
-		Sequence:    1,
-		Payload: &wirev1.WatchExecutionResponse_Started{Started: &wirev1.ExecutionStarted{Execution: &wirev1.Execution{
-			Id:     &wirev1.ExecutionId{Value: "execution"},
-			PlanId: &wirev1.PlanId{Value: "plan"},
-			State:  wirev1.ExecutionState_EXECUTION_STATE_RUNNING,
-		}}},
+		Sequence: 1,
+		Execution: &wirev1.Execution{
+			Id:    &wirev1.ExecutionId{Value: "execution"},
+			State: wirev1.ExecutionState_EXECUTION_STATE_RUNNING,
+		},
 	})
 	if err != nil {
 		return err

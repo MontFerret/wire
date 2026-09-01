@@ -1,0 +1,39 @@
+syntax = "proto3";
+
+package ferret.wire.v1;
+
+option go_package = "github.com/MontFerret/wire/gen/ferret/wire/v1;wirev1";
+
+// Source contains the semantic source name and content accepted by the Unified API.
+// Source is Unified API source input. Name may be empty and content is required.
+message Source {
+  reserved 2;
+  reserved "identity";
+
+  string content = 1;
+  string name = 3;
+}
+
+// Position uses positive lines and non-negative columns.
+message Position {
+  int64 line = 1;
+  int64 column = 2;
+}
+
+// Span preserves non-negative runtime offsets without assigning their units.
+message Span {
+  int64 start = 1;
+  int64 end = 2;
+}
+
+// Location identifies one source position in a named file.
+message Location {
+  string file = 1;
+  Position position = 2;
+}
+
+// Range combines a location with its runtime-defined span.
+message Range {
+  Location location = 1;
+  Span span = 2;
+}

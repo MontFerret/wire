@@ -31,16 +31,29 @@ func (c *Client) Compile(ctx context.Context, src api.Source, options CompileOpt
 		return nil, err
 	}
 
-	response, err := c.planClient.Compile(ctx, &wirev1.CompileRequest{
-		ConnectionId: c.connectionProto(),
-		Source:       &wirev1.Source{Content: src.Content, Identity: src.Name},
-		Options:      &wirev1.CompileOptions{Debuggable: options.Debuggable},
-	})
-	if err != nil {
-		return nil, decodeError(err)
+	var value *wirev1.Plan
+	if options.Debuggable {
+		response, err := c.planClient.CompileDebug(ctx, &wirev1.CompileDebugRequest{
+			ConnectionId: c.connectionProto(),
+			Source:       &wirev1.Source{Content: src.Content, Name: src.Name},
+		})
+		if err != nil {
+			return nil, decodeError(err)
+		}
+
+		value = response.GetPlan()
+	} else {
+		response, err := c.planClient.Compile(ctx, &wirev1.CompileRequest{
+			ConnectionId: c.connectionProto(),
+			Source:       &wirev1.Source{Content: src.Content, Name: src.Name},
+		})
+		if err != nil {
+			return nil, decodeError(err)
+		}
+
+		value = response.GetPlan()
 	}
 
-	value := response.GetPlan()
 	if value == nil || value.GetId().GetValue() == "" {
 		return nil, errors.New("Wire server returned an invalid compiled plan")
 	}
@@ -49,7 +62,7 @@ func (c *Client) Compile(ctx context.Context, src api.Source, options CompileOpt
 		client:     c,
 		id:         value.GetId().GetValue(),
 		parameters: append([]string(nil), value.GetParameters()...),
-		debuggable: value.GetDebuggable(),
+		debuggable: options.Debuggable,
 		close:      &lifecycle.Close{},
 	}, nil
 }

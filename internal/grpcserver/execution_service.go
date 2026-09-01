@@ -36,12 +36,12 @@ func (s *Server) CancelExecution(_ context.Context, request *wirev1.CancelExecut
 		return nil, err
 	}
 
-	snapshot, err := connection.CancelExecution(core.ExecutionID(request.GetExecutionId().GetValue()))
+	_, err = connection.CancelExecution(core.ExecutionID(request.GetExecutionId().GetValue()))
 	if err != nil {
 		return nil, rpcError(err)
 	}
 
-	return &wirev1.CancelExecutionResponse{Execution: execution(snapshot)}, nil
+	return &wirev1.CancelExecutionResponse{}, nil
 }
 
 func (s *Server) ReleaseExecution(ctx context.Context, request *wirev1.ReleaseExecutionRequest) (*wirev1.ReleaseExecutionResponse, error) {

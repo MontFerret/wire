@@ -24,6 +24,7 @@ type (
 		StopReason       debugger.Reason
 		Location         *source.Range
 		HitBreakpointIDs []debugger.BreakpointID
+		Depth            int
 		Output           *Output
 		Failure          *Failure
 	}
@@ -97,7 +98,7 @@ func (events *DebugEvents) Recv() (DebugEvent, error) {
 		return DebugEvent{}, decodeError(err)
 	}
 
-	if value.GetPayload() == nil {
+	if value.GetSession() == nil || value.GetKind() == wirev1.DebugEventKind_DEBUG_EVENT_KIND_UNSPECIFIED {
 		events.cancel()
 
 		return DebugEvent{}, fmt.Errorf("Wire server returned an empty debug event")

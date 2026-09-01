@@ -21,7 +21,7 @@ func (s *Server) Frames(ctx context.Context, request *wirev1.FramesRequest) (*wi
 
 	result := make([]*wirev1.Frame, len(values))
 	for i, value := range values {
-		converted, err := frame(value, i)
+		converted, err := frame(value)
 		if err != nil {
 			return nil, rpcError(err)
 		}

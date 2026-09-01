@@ -53,10 +53,10 @@ type (
 )
 
 func (s *clientTestServer) Connect(_ *wirev1.ConnectRequest, stream wirev1.RuntimeService_ConnectServer) error {
-	if err := stream.Send(&wirev1.ConnectResponse{Opened: &wirev1.ConnectionOpened{
+	if err := stream.Send(&wirev1.ConnectResponse{
 		ConnectionId: &wirev1.ConnectionId{Value: "connection"},
-		RuntimeInfo:  &wirev1.RuntimeInfo{ApiIdentity: "ferret.wire.v1"},
-	}}); err != nil {
+		Protocol:     &wirev1.ProtocolInfo{Name: "ferret.wire", Version: "v1"},
+	}); err != nil {
 		return err
 	}
 
@@ -72,11 +72,29 @@ func (s *clientTestServer) CloseConnection(_ context.Context, request *wirev1.Cl
 }
 
 func (s *clientTestServer) Compile(_ context.Context, request *wirev1.CompileRequest) (*wirev1.CompileResponse, error) {
+	plan, err := s.compile(request.GetConnectionId(), request.GetSource(), false)
+	if err != nil {
+		return nil, err
+	}
+
+	return &wirev1.CompileResponse{Plan: plan}, nil
+}
+
+func (s *clientTestServer) CompileDebug(_ context.Context, request *wirev1.CompileDebugRequest) (*wirev1.CompileDebugResponse, error) {
+	plan, err := s.compile(request.GetConnectionId(), request.GetSource(), true)
+	if err != nil {
+		return nil, err
+	}
+
+	return &wirev1.CompileDebugResponse{Plan: plan}, nil
+}
+
+func (s *clientTestServer) compile(connectionID *wirev1.ConnectionId, source *wirev1.Source, debug bool) (*wirev1.Plan, error) {
 	s.mu.Lock()
-	s.calls = append(s.calls, call("compile", request.GetConnectionId().GetValue(), ""))
-	s.lastCompileDebuggable = request.GetOptions().GetDebuggable()
-	s.lastCompileSourceName = request.GetSource().GetIdentity()
-	s.lastCompileContent = request.GetSource().GetContent()
+	s.calls = append(s.calls, call("compile", connectionID.GetValue(), ""))
+	s.lastCompileDebuggable = debug
+	s.lastCompileSourceName = source.GetName()
+	s.lastCompileContent = source.GetContent()
 	err := s.compileErr
 	if err == nil {
 		s.plans++
@@ -88,7 +106,7 @@ func (s *clientTestServer) Compile(_ context.Context, request *wirev1.CompileReq
 		return nil, err
 	}
 
-	return &wirev1.CompileResponse{Plan: &wirev1.Plan{Id: &wirev1.PlanId{Value: planID}}}, nil
+	return &wirev1.Plan{Id: &wirev1.PlanId{Value: planID}}, nil
 }
 
 func (s *clientTestServer) ReleasePlan(_ context.Context, request *wirev1.ReleasePlanRequest) (*wirev1.ReleasePlanResponse, error) {

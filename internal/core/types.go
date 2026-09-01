@@ -1,7 +1,6 @@
 package core
 
 import (
-	"errors"
 	"fmt"
 	"reflect"
 
@@ -21,9 +20,8 @@ type (
 	}
 
 	RuntimeInfo struct {
-		APIIdentity     string
-		WireVersion     string
-		FerretVersion   string
+		ProtocolName    string
+		ProtocolVersion string
 		RuntimeIdentity RuntimeIdentity
 	}
 
@@ -36,30 +34,13 @@ type (
 		MaxBreakpointsPerDebugSession int
 	}
 
-	DiagnosticSpan struct {
-		Start   uint64
-		End     uint64
-		Label   string
-		Primary bool
-	}
-
-	Diagnostic struct {
-		Kind           string
-		Message        string
-		Hint           string
-		Note           string
-		SourceIdentity string
-		Spans          []DiagnosticSpan
-	}
-
 	ErrorCategory uint8
 
 	DomainError struct {
-		Category    ErrorCategory
-		ResourceID  string
-		Message     string
-		Diagnostics []Diagnostic
-		Cause       error
+		Category   ErrorCategory
+		ResourceID string
+		Message    string
+		Cause      error
 	}
 )
 
@@ -98,53 +79,6 @@ const (
 	ErrorResourceExhausted
 	ErrorBreakpointNotFound
 )
-
-var ErrWatcherLagged = errors.New("wire watcher lagged")
-
-func (e *DomainError) Error() string {
-	if e == nil {
-		return ""
-	}
-
-	if e.Message != "" {
-		return e.Message
-	}
-
-	return "Ferret Wire operation failed"
-}
-
-func (e *DomainError) Unwrap() error {
-	return e.Cause
-}
-
-func invalidRequest(message string) error {
-	return &DomainError{Category: ErrorInvalidRequest, Message: message}
-}
-
-func notFound(category ErrorCategory, id string) error {
-	return &DomainError{Category: category, ResourceID: id, Message: "resource not found"}
-}
-
-func invalidState(message string, cause error) error {
-	return &DomainError{Category: ErrorInvalidState, Message: message, Cause: cause}
-}
-
-func internalError(cause error) error {
-	return &DomainError{Category: ErrorInternal, Message: "internal runtime failure", Cause: cause}
-}
-
-func resourceExhausted(message string) error {
-	return &DomainError{Category: ErrorResourceExhausted, Message: message}
-}
-
-func ignoreMissingResource(err error, category ErrorCategory) error {
-	var domain *DomainError
-	if errors.As(err, &domain) && domain.Category == category {
-		return nil
-	}
-
-	return err
-}
 
 func validateID[T ~string](value T, name string) error {
 	if value == "" {

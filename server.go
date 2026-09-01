@@ -40,8 +40,8 @@ func NewServer(runtime api.Runtime, options ...ServerOption) (*Server, error) {
 	}
 
 	info := core.RuntimeInfo{
-		APIIdentity: apiIdentity,
-		WireVersion: moduleVersion(wireModulePath, "devel"),
+		ProtocolName:    protocolName,
+		ProtocolVersion: protocolVersion,
 		RuntimeIdentity: core.RuntimeIdentity{
 			Name:       configured.runtimeIdentity.Name,
 			Version:    configured.runtimeIdentity.Version,

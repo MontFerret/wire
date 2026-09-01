@@ -230,6 +230,63 @@ func TestCompileDelegatesDebugSelectionAndClosesAbandonedPlan(t *testing.T) {
 	}
 }
 
+func TestCompileForwardsOptionalOptimizationLevel(t *testing.T) {
+	runtime := &spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
+		return &spyPlan{}, nil
+	}}
+	host, err := NewHost(runtime, RuntimeInfo{}, testLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
+	connection, err := host.OpenConnection()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	levels := []*api.OptimizationLevel{
+		nil,
+		optimizationLevel(api.OptimizationNone),
+		optimizationLevel(api.OptimizationBasic),
+		optimizationLevel(api.OptimizationFull),
+		optimizationLevel(api.OptimizationAggressive),
+	}
+	for index, level := range levels {
+		compiled, compileErr := connection.Compile(context.Background(), CompileInput{
+			Source:            api.Source{Content: "RETURN 1"},
+			OptimizationLevel: level,
+		})
+		if compileErr != nil {
+			t.Fatalf("compile %d failed: %v", index, compileErr)
+		}
+
+		if releaseErr := connection.ReleasePlan(testContext(t), compiled.ID); releaseErr != nil {
+			t.Fatalf("release %d failed: %v", index, releaseErr)
+		}
+	}
+
+	got := runtime.optimizationSnapshot()
+	if len(got) != len(levels) {
+		t.Fatalf("recorded %d optimization values, want %d", len(got), len(levels))
+	}
+	for index, want := range levels {
+		if want == nil {
+			if got[index] != nil {
+				t.Fatalf("unspecified optimization forwarded as %v", *got[index])
+			}
+
+			continue
+		}
+
+		if got[index] == nil || *got[index] != *want {
+			t.Fatalf("optimization %d = %v, want %v", index, got[index], *want)
+		}
+	}
+}
+
+func optimizationLevel(value api.OptimizationLevel) *api.OptimizationLevel {
+	return &value
+}
+
 func TestCompilePanicsAreSanitizedAndCloseReturnedPlansOnce(t *testing.T) {
 	t.Run("compile", func(t *testing.T) {
 		connection := newTestConnection(t, &spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
@@ -446,7 +503,7 @@ func TestExecutionUsesPortableFailureFallbacks(t *testing.T) {
 			if (finished.Output != nil) != test.wantOutput {
 				t.Fatalf("unexpected output presence: %#v", finished.Output)
 			}
-			if strings.Contains(finished.Failure.Message, "secret") || len(finished.Failure.Diagnostics) != 0 {
+			if strings.Contains(finished.Failure.Message, "secret") {
 				t.Fatalf("runtime detail leaked: %#v", finished.Failure)
 			}
 			runCalls, closeCalls := session.counts()

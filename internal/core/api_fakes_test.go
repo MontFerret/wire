@@ -11,11 +11,12 @@ import (
 
 type (
 	spyRuntime struct {
-		mu             sync.Mutex
-		compile        func(context.Context, api.Source, bool) (api.Plan, error)
-		compileSources []api.Source
-		compileDebug   []bool
-		closeCalls     int
+		mu                  sync.Mutex
+		compile             func(context.Context, api.Source, bool) (api.Plan, error)
+		compileSources      []api.Source
+		compileDebug        []bool
+		compileOptimization []*api.OptimizationLevel
+		closeCalls          int
 	}
 
 	spyPlan struct {
@@ -53,24 +54,40 @@ type (
 		params      map[string]any
 		contentType string
 	}
+
+	planOptions struct {
+		optimizationLevel *api.OptimizationLevel
+	}
 )
 
 func (r *spyRuntime) Run(context.Context, api.Source, ...api.SessionOption) (api.Output, error) {
 	return api.Output{}, nil
 }
 
-func (r *spyRuntime) Compile(ctx context.Context, src api.Source, _ ...api.PlanOption) (api.Plan, error) {
-	return r.compilePlan(ctx, src, false)
+func (r *spyRuntime) Compile(ctx context.Context, src api.Source, options ...api.PlanOption) (api.Plan, error) {
+	return r.compilePlan(ctx, src, false, options)
 }
 
-func (r *spyRuntime) CompileDebug(ctx context.Context, src api.Source, _ ...api.PlanOption) (api.Plan, error) {
-	return r.compilePlan(ctx, src, true)
+func (r *spyRuntime) CompileDebug(ctx context.Context, src api.Source, options ...api.PlanOption) (api.Plan, error) {
+	return r.compilePlan(ctx, src, true, options)
 }
 
-func (r *spyRuntime) compilePlan(ctx context.Context, src api.Source, debug bool) (api.Plan, error) {
+func (r *spyRuntime) compilePlan(ctx context.Context, src api.Source, debug bool, options []api.PlanOption) (api.Plan, error) {
+	configured := &planOptions{}
+	for _, option := range options {
+		if option == nil {
+			continue
+		}
+
+		if err := option(configured); err != nil {
+			return nil, err
+		}
+	}
+
 	r.mu.Lock()
 	r.compileSources = append(r.compileSources, src)
 	r.compileDebug = append(r.compileDebug, debug)
+	r.compileOptimization = append(r.compileOptimization, configured.optimizationLevel)
 	compile := r.compile
 	r.mu.Unlock()
 
@@ -94,6 +111,29 @@ func (r *spyRuntime) snapshot() ([]api.Source, []bool, int) {
 	defer r.mu.Unlock()
 
 	return append([]api.Source(nil), r.compileSources...), append([]bool(nil), r.compileDebug...), r.closeCalls
+}
+
+func (r *spyRuntime) optimizationSnapshot() []*api.OptimizationLevel {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	result := make([]*api.OptimizationLevel, len(r.compileOptimization))
+	for index, level := range r.compileOptimization {
+		if level == nil {
+			continue
+		}
+
+		copied := *level
+		result[index] = &copied
+	}
+
+	return result
+}
+
+func (options *planOptions) SetOptimizationLevel(level api.OptimizationLevel) error {
+	options.optimizationLevel = &level
+
+	return nil
 }
 
 func (p *spyPlan) Params() []string {

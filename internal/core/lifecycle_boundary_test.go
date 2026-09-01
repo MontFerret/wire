@@ -562,6 +562,7 @@ func TestDebugUsesUnifiedSessionAndPreservesWireState(t *testing.T) {
 			return &debugger.Event{
 				Reason:           debugger.ReasonBreakpoint,
 				HitBreakpointIDs: hitIDs,
+				Depth:            4,
 				Location: source.Range{Location: source.Location{
 					Position: source.Position{Line: 1, Column: 2},
 					File:     "debug.fql",
@@ -626,7 +627,8 @@ func TestDebugUsesUnifiedSessionAndPreservesWireState(t *testing.T) {
 	}
 	stopped := waitDebugState(t, connection, opened.ID, DebugStopped)
 	wantRange := source.Range{Location: requested, Span: source.Span{Start: 3, End: 8}}
-	if stopped.StopReason != debugger.ReasonBreakpoint || stopped.Location != wantRange || !reflect.DeepEqual(stopped.HitBreakpointIDs, []debugger.BreakpointID{1}) {
+	if stopped.StopReason != debugger.ReasonBreakpoint || stopped.Location != wantRange || stopped.Depth != 4 ||
+		!reflect.DeepEqual(stopped.HitBreakpointIDs, []debugger.BreakpointID{1}) {
 		t.Fatalf("unexpected stopped state: %#v", stopped)
 	}
 	hitIDs[0] = 90

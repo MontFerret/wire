@@ -9,12 +9,12 @@ import "ferret/wire/v1/value.proto";
 option go_package = "github.com/MontFerret/wire/gen/ferret/wire/v1;wirev1";
 
 service ExecutionService {
-  // Execute publishes a connection-owned execution of an existing plan.
+  // Execute publishes an asynchronous execution of an existing reusable plan.
   rpc Execute(ExecuteRequest) returns (ExecuteResponse);
   rpc CancelExecution(CancelExecutionRequest) returns (CancelExecutionResponse);
   // ReleaseExecution commits cancellation and cleanup. The execution ID then becomes stale.
   rpc ReleaseExecution(ReleaseExecutionRequest) returns (ReleaseExecutionResponse);
-  // WatchExecution is finite, ordered, and ends after one terminal snapshot.
+  // WatchExecution sends the latest snapshot, then ordered changes through one terminal snapshot.
   rpc WatchExecution(WatchExecutionRequest) returns (stream WatchExecutionResponse);
 }
 
@@ -30,57 +30,22 @@ enum ExecutionState {
   EXECUTION_STATE_CANCELLED = 4;
 }
 
-// Output is the Unified API encoded output contract. Wire does not expose runtime values.
-message Output {
-  reserved "data";
-
-  string content_type = 1;
-  // content is already encoded by the runtime using content_type.
-  bytes content = 2;
-}
-
-message Failure {
-  ErrorCategory category = 1;
-  string message = 2;
-  repeated Diagnostic diagnostics = 3;
-}
-
 message Execution {
+  reserved 2;
+  reserved "plan_id";
+
   ExecutionId id = 1;
-  PlanId plan_id = 2;
   ExecutionState state = 3;
   Output output = 4;
   Failure failure = 5;
 }
 
-message ExecutionStarted {
-  Execution execution = 1;
-}
-
-message ExecutionCompleted {
-  Execution execution = 1;
-}
-
-message ExecutionFailed {
-  Execution execution = 1;
-}
-
-message ExecutionCancelled {
-  Execution execution = 1;
-}
-
 message WatchExecutionResponse {
-  reserved 4;
-  reserved "output";
+  reserved 1, 3, 4, 5, 6, 7;
+  reserved "execution_id", "output", "started", "completed", "failed", "cancelled";
 
-  ExecutionId execution_id = 1;
   uint64 sequence = 2;
-  oneof payload {
-    ExecutionStarted started = 3;
-    ExecutionCompleted completed = 5;
-    ExecutionFailed failed = 6;
-    ExecutionCancelled cancelled = 7;
-  }
+  Execution execution = 8;
 }
 
 message ExecuteRequest {
@@ -100,7 +65,8 @@ message CancelExecutionRequest {
 }
 
 message CancelExecutionResponse {
-  Execution execution = 1;
+  reserved 1;
+  reserved "execution";
 }
 
 message ReleaseExecutionRequest {

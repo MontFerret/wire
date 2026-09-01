@@ -53,6 +53,7 @@ func (h *Host) Info() RuntimeInfo {
 func (h *Host) OpenConnection() (*Connection, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+
 	if h.closed {
 		return nil, invalidState("server is shutting down", nil)
 	}
@@ -63,7 +64,6 @@ func (h *Host) OpenConnection() (*Connection, error) {
 
 	id := ConnectionID(uuid.NewString())
 	connection := newConnection(id, h.runtime, h.limits)
-
 	h.connections[id] = connection
 
 	return connection, nil
@@ -77,6 +77,7 @@ func (h *Host) Connection(id ConnectionID) (*Connection, error) {
 	h.mu.RLock()
 	connection := h.connections[id]
 	h.mu.RUnlock()
+
 	if connection == nil {
 		return nil, notFound(ErrorConnectionNotFound, string(id))
 	}
@@ -98,6 +99,7 @@ func (h *Host) CloseConnection(ctx context.Context, id ConnectionID) error {
 		h.closing[id] = closing
 	}
 	h.mu.Unlock()
+
 	if closing == nil {
 		return notFound(ErrorConnectionNotFound, string(id))
 	}
@@ -109,30 +111,14 @@ func (h *Host) CloseConnection(ctx context.Context, id ConnectionID) error {
 	return closing.close.Wait(ctx)
 }
 
-func (h *Host) settleConnectionClose(id ConnectionID, closing *closingConnection) {
-	var err error
-	defer func() {
-		if recover() != nil {
-			err = errors.Join(err, internalError(errors.New("logical connection cleanup panicked")))
-		}
-
-		h.mu.Lock()
-		if h.closing[id] == closing {
-			delete(h.closing, id)
-		}
-		h.mu.Unlock()
-		closing.close.Finish(err)
-	}()
-
-	err = closing.connection.Close(context.Background())
-}
-
 func (h *Host) Close(ctx context.Context) error {
 	h.mu.Lock()
 	h.closed = true
+
 	for id, connection := range h.connections {
 		h.closing[id] = &closingConnection{connection: connection}
 	}
+
 	clear(h.connections)
 	connections := make(map[ConnectionID]*closingConnection, len(h.closing))
 	for id, closing := range h.closing {
@@ -152,4 +138,23 @@ func (h *Host) Close(ctx context.Context) error {
 	}
 
 	return result
+}
+
+func (h *Host) settleConnectionClose(id ConnectionID, closing *closingConnection) {
+	var err error
+	defer func() {
+		if recover() != nil {
+			err = errors.Join(err, internalError(errors.New("logical connection cleanup panicked")))
+		}
+
+		h.mu.Lock()
+		if h.closing[id] == closing {
+			delete(h.closing, id)
+		}
+		h.mu.Unlock()
+
+		closing.close.Finish(err)
+	}()
+
+	err = closing.connection.Close(context.Background())
 }

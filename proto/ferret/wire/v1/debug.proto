@@ -2,17 +2,16 @@ syntax = "proto3";
 
 package ferret.wire.v1;
 
-import "ferret/wire/v1/execution.proto";
 import "ferret/wire/v1/plan.proto";
 import "ferret/wire/v1/runtime.proto";
+import "ferret/wire/v1/source.proto";
 import "ferret/wire/v1/value.proto";
 
 option go_package = "github.com/MontFerret/wire/gen/ferret/wire/v1;wirev1";
 
 service DebugService {
-  rpc OpenDebugSession(OpenDebugSessionRequest) returns (OpenDebugSessionResponse);
-  rpc StartDebug(StartDebugRequest) returns (StartDebugResponse);
-  // Breakpoints are singular Ferret-owned resources, not DAP source replacements.
+  rpc CreateDebugSession(CreateDebugSessionRequest) returns (CreateDebugSessionResponse);
+  rpc Start(StartRequest) returns (StartResponse);
   rpc SetBreakpoint(SetBreakpointRequest) returns (SetBreakpointResponse);
   rpc DeleteBreakpoint(DeleteBreakpointRequest) returns (DeleteBreakpointResponse);
   rpc Continue(ContinueRequest) returns (ContinueResponse);
@@ -24,10 +23,11 @@ service DebugService {
   rpc FrameLocals(FrameLocalsRequest) returns (FrameLocalsResponse);
   rpc Variables(VariablesRequest) returns (VariablesResponse);
   rpc EvaluateFrame(EvaluateFrameRequest) returns (EvaluateFrameResponse);
-  rpc StopDebug(StopDebugRequest) returns (StopDebugResponse);
+  // Terminate stops debugger execution without releasing its remote resource.
+  rpc Terminate(TerminateRequest) returns (TerminateResponse);
   // ReleaseDebugSession commits termination and cleanup. The session ID then becomes stale.
   rpc ReleaseDebugSession(ReleaseDebugSessionRequest) returns (ReleaseDebugSessionResponse);
-  // WatchDebug is finite, ordered, and ends after one terminal snapshot.
+  // WatchDebug sends the latest published state, then ordered changes through one terminal state.
   rpc WatchDebug(WatchDebugRequest) returns (stream WatchDebugResponse);
 }
 
@@ -54,32 +54,48 @@ enum DebugStopReason {
   DEBUG_STOP_REASON_RUNTIME_ERROR = 5;
 }
 
-message SourceLocation {
-  string file = 1;
-  int32 line = 2;
-  // A breakpoint column of zero means Ferret's unspecified column.
-  int32 column = 3;
+enum DebugEventKind {
+  DEBUG_EVENT_KIND_UNSPECIFIED = 0;
+  DEBUG_EVENT_KIND_STARTED = 1;
+  DEBUG_EVENT_KIND_CONTINUED = 2;
+  DEBUG_EVENT_KIND_STOPPED = 3;
+  DEBUG_EVENT_KIND_COMPLETED = 4;
+  DEBUG_EVENT_KIND_FAILED = 5;
+  DEBUG_EVENT_KIND_TERMINATED = 6;
+}
+
+enum BreakpointBindingMode {
+  BREAKPOINT_BINDING_MODE_UNSPECIFIED = 0;
+  BREAKPOINT_BINDING_MODE_NEXT_EXECUTABLE_IN_FILE = 1;
+  BREAKPOINT_BINDING_MODE_EXACT = 2;
+  BREAKPOINT_BINDING_MODE_NEXT_EXECUTABLE_IN_FUNCTION = 3;
 }
 
 message DebugSession {
+  reserved 2, 5;
+  reserved "plan_id";
+
   DebugSessionId id = 1;
-  PlanId plan_id = 2;
   DebugState state = 3;
   DebugStopReason stop_reason = 4;
-  SourceLocation location = 5;
   repeated uint64 hit_breakpoint_ids = 6;
   Output output = 7;
   Failure failure = 8;
+  Range location = 9;
+  int64 depth = 10;
 }
 
 message Breakpoint {
+  reserved 2, 3, 4, 5, 6, 7;
+  reserved "file", "requested_line", "requested_column", "line", "column", "verified";
+
   uint64 id = 1;
-  string file = 2;
-  int32 requested_line = 3;
-  int32 requested_column = 4;
-  int32 line = 5;
-  int32 column = 6;
-  bool verified = 7;
+  Location requested_location = 8;
+  Range location = 9;
+  uint64 point_id = 10;
+  uint64 function_id = 11;
+  BreakpointBindingMode binding_mode = 12;
+  bool bound = 13;
 }
 
 message DebugValue {
@@ -92,94 +108,121 @@ message Variable {
   string name = 1;
   DebugValue value = 2;
   bool mutable = 3;
-  // parameter distinguishes declared FQL parameters from other frame locals.
   bool parameter = 4;
 }
 
-// Frame describes the current paused frame or one of its callers. Its index is
-// the value accepted by FrameLocals and EvaluateFrame.
+// Frame order is the zero-based index accepted by FrameLocals and EvaluateFrame.
 message Frame {
-  int32 index = 1;
+  reserved 1, 3;
+  reserved "index";
+
   string name = 2;
-  SourceLocation location = 3;
+  uint64 function_id = 4;
+  Location location = 5;
 }
 
-message OpenDebugSessionRequest {
+message CreateDebugSessionRequest {
   ConnectionId connection_id = 1;
   PlanId plan_id = 2;
   Parameters parameters = 3;
   string output_content_type = 4;
 }
 
-message OpenDebugSessionResponse {
+message CreateDebugSessionResponse {
   DebugSession session = 1;
 }
 
-message DebugCommand {
+message StartRequest {
   ConnectionId connection_id = 1;
   DebugSessionId debug_session_id = 2;
 }
 
-message StartDebugRequest {
-  DebugCommand command = 1;
-}
-
-message StartDebugResponse {
-  DebugSession session = 1;
-}
+message StartResponse {}
 
 message ContinueRequest {
-  DebugCommand command = 1;
+  reserved 1;
+  reserved "command";
+
+  ConnectionId connection_id = 2;
+  DebugSessionId debug_session_id = 3;
 }
 
 message ContinueResponse {
-  DebugSession session = 1;
+  reserved 1;
+  reserved "session";
 }
 
 message PauseRequest {
-  DebugCommand command = 1;
+  reserved 1;
+  reserved "command";
+
+  ConnectionId connection_id = 2;
+  DebugSessionId debug_session_id = 3;
 }
 
 message PauseResponse {
-  DebugSession session = 1;
+  reserved 1;
+  reserved "session";
 }
 
 message NextRequest {
-  DebugCommand command = 1;
+  reserved 1;
+  reserved "command";
+
+  ConnectionId connection_id = 2;
+  DebugSessionId debug_session_id = 3;
 }
 
 message NextResponse {
-  DebugSession session = 1;
+  reserved 1;
+  reserved "session";
 }
 
 message StepRequest {
-  DebugCommand command = 1;
+  reserved 1;
+  reserved "command";
+
+  ConnectionId connection_id = 2;
+  DebugSessionId debug_session_id = 3;
 }
 
 message StepResponse {
-  DebugSession session = 1;
+  reserved 1;
+  reserved "session";
 }
 
 message OutRequest {
-  DebugCommand command = 1;
+  reserved 1;
+  reserved "command";
+
+  ConnectionId connection_id = 2;
+  DebugSessionId debug_session_id = 3;
 }
 
 message OutResponse {
-  DebugSession session = 1;
+  reserved 1;
+  reserved "session";
 }
 
-message StopDebugRequest {
-  DebugCommand command = 1;
+message TerminateRequest {
+  ConnectionId connection_id = 1;
+  DebugSessionId debug_session_id = 2;
 }
 
-message StopDebugResponse {
-  DebugSession session = 1;
+message TerminateResponse {}
+
+message BreakpointOptions {
+  // Unspecified requests the Unified API default binding behavior.
+  BreakpointBindingMode binding_mode = 1;
 }
 
 message SetBreakpointRequest {
+  reserved 3;
+
   ConnectionId connection_id = 1;
   DebugSessionId debug_session_id = 2;
-  SourceLocation location = 3;
+  Location location = 4;
+  BreakpointOptions options = 5;
 }
 
 message SetBreakpointResponse {
@@ -241,44 +284,13 @@ message ReleaseDebugSessionRequest {
 
 message ReleaseDebugSessionResponse {}
 
-message DebugStarted {
-  DebugSession session = 1;
-}
-
-message DebugContinued {
-  DebugSession session = 1;
-}
-
-message DebugStopped {
-  DebugSession session = 1;
-}
-
-message DebugCompleted {
-  DebugSession session = 1;
-}
-
-message DebugFailed {
-  DebugSession session = 1;
-}
-
-message DebugTerminated {
-  DebugSession session = 1;
-}
-
 message WatchDebugResponse {
-  reserved 6;
-  reserved "output";
+  reserved 1, 3, 4, 5, 6, 7, 8, 9;
+  reserved "debug_session_id", "output", "started", "continued", "stopped", "completed", "failed", "terminated";
 
-  DebugSessionId debug_session_id = 1;
   uint64 sequence = 2;
-  oneof payload {
-    DebugStarted started = 3;
-    DebugContinued continued = 4;
-    DebugStopped stopped = 5;
-    DebugCompleted completed = 7;
-    DebugFailed failed = 8;
-    DebugTerminated terminated = 9;
-  }
+  DebugEventKind kind = 10;
+  DebugSession session = 11;
 }
 
 message WatchDebugRequest {

@@ -34,18 +34,8 @@ func convertExecutionState(value wirev1.ExecutionState) ExecutionState {
 }
 
 func convertExecutionEvent(value *wirev1.WatchExecutionResponse) ExecutionEvent {
-	result := ExecutionEvent{Sequence: value.GetSequence()}
-
-	switch payload := value.GetPayload().(type) {
-	case *wirev1.WatchExecutionResponse_Started:
-		result.Snapshot = convertExecutionSnapshot(payload.Started.GetExecution())
-	case *wirev1.WatchExecutionResponse_Completed:
-		result.Snapshot = convertExecutionSnapshot(payload.Completed.GetExecution())
-	case *wirev1.WatchExecutionResponse_Failed:
-		result.Snapshot = convertExecutionSnapshot(payload.Failed.GetExecution())
-	case *wirev1.WatchExecutionResponse_Cancelled:
-		result.Snapshot = convertExecutionSnapshot(payload.Cancelled.GetExecution())
+	return ExecutionEvent{
+		Sequence: value.GetSequence(),
+		Snapshot: convertExecutionSnapshot(value.GetExecution()),
 	}
-
-	return result
 }

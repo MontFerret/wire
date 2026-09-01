@@ -64,6 +64,7 @@ func (c *Connection) ReleaseDebugSession(ctx context.Context, id DebugSessionID)
 	if err := validateID(id, "debug session ID"); err != nil {
 		return err
 	}
+
 	c.mu.Lock()
 	session := c.debug[id]
 	if session != nil {
@@ -79,6 +80,7 @@ func (c *Connection) ReleaseDebugSession(ctx context.Context, id DebugSessionID)
 		session.plan.mu.Unlock()
 	}
 	c.mu.Unlock()
+
 	if session == nil {
 		return notFound(ErrorDebugSessionNotFound, string(id))
 	}
@@ -94,15 +96,18 @@ func (c *Connection) StopDebug(ctx context.Context, id DebugSessionID) (DebugSna
 	if err := ctx.Err(); err != nil {
 		return DebugSnapshot{}, err
 	}
+
 	session, err := c.debugSession(id)
 	if err != nil {
 		return DebugSnapshot{}, err
 	}
+
 	snapshot := session.snapshot()
 	if !snapshot.State.terminal() {
 		if err := session.Close(ctx); err != nil {
 			return DebugSnapshot{}, err
 		}
+
 		snapshot = session.snapshot()
 	}
 
@@ -122,6 +127,7 @@ func (c *Connection) PauseDebug(ctx context.Context, id DebugSessionID) (DebugSn
 	if err := ctx.Err(); err != nil {
 		return DebugSnapshot{}, err
 	}
+
 	session, err := c.debugSession(id)
 	if err != nil {
 		return DebugSnapshot{}, err
@@ -141,6 +147,17 @@ func (c *Connection) PauseDebug(ctx context.Context, id DebugSessionID) (DebugSn
 }
 
 func (c *Connection) SetBreakpoint(ctx context.Context, id DebugSessionID, location source.Location) (debugger.Breakpoint, error) {
+	return c.SetBreakpointAt(ctx, id, location, debugger.BreakpointOptions{
+		BindingMode: debugger.BreakpointBindNextExecutableInFile,
+	})
+}
+
+func (c *Connection) SetBreakpointAt(
+	ctx context.Context,
+	id DebugSessionID,
+	location source.Location,
+	options debugger.BreakpointOptions,
+) (debugger.Breakpoint, error) {
 	if err := ctx.Err(); err != nil {
 		return debugger.Breakpoint{}, err
 	}
@@ -164,6 +181,7 @@ func (c *Connection) SetBreakpoint(ctx context.Context, id DebugSessionID, locat
 
 	session.mu.Lock()
 	defer session.mu.Unlock()
+
 	if session.state != DebugCreated && session.state != DebugStopped {
 		return debugger.Breakpoint{}, invalidState("breakpoints require a created or stopped debug session", nil)
 	}
@@ -176,10 +194,7 @@ func (c *Connection) SetBreakpoint(ctx context.Context, id DebugSessionID, locat
 		return debugger.Breakpoint{}, err
 	}
 
-	value, err := session.debugger.SetBreakpointAt(
-		location,
-		debugger.BreakpointOptions{BindingMode: debugger.BreakpointBindNextExecutableInFile},
-	)
+	value, err := session.debugger.SetBreakpointAt(location, options)
 	if err != nil {
 		return debugger.Breakpoint{}, invalidState("set breakpoint failed", err)
 	}
@@ -205,6 +220,7 @@ func (c *Connection) DeleteBreakpoint(ctx context.Context, id DebugSessionID, br
 
 	session.mu.Lock()
 	defer session.mu.Unlock()
+
 	if session.state != DebugCreated && session.state != DebugStopped {
 		return invalidState("breakpoints require a created or stopped debug session", nil)
 	}
@@ -235,6 +251,7 @@ func (c *Connection) Frames(ctx context.Context, id DebugSessionID) ([]debugger.
 
 	session.mu.Lock()
 	defer session.mu.Unlock()
+
 	if err := session.requireStoppedLocked(ctx); err != nil {
 		return nil, err
 	}
@@ -259,6 +276,7 @@ func (c *Connection) FrameLocals(ctx context.Context, id DebugSessionID, frame i
 
 	session.mu.Lock()
 	defer session.mu.Unlock()
+
 	if err := session.requireStoppedLocked(ctx); err != nil {
 		return nil, err
 	}
@@ -283,6 +301,7 @@ func (c *Connection) Variables(ctx context.Context, id DebugSessionID, reference
 
 	session.mu.Lock()
 	defer session.mu.Unlock()
+
 	if err := session.requireStoppedLocked(ctx); err != nil {
 		return nil, err
 	}
@@ -311,6 +330,7 @@ func (c *Connection) EvaluateFrame(ctx context.Context, id DebugSessionID, frame
 
 	session.mu.Lock()
 	defer session.mu.Unlock()
+
 	if err := session.requireStoppedLocked(ctx); err != nil {
 		return debugger.Value{}, err
 	}
@@ -343,12 +363,14 @@ func (c *Connection) OpenDebugSession(ctx context.Context, input OpenDebugInput)
 	c.mu.Lock()
 	if err := c.ensureOpenLocked(); err != nil {
 		c.mu.Unlock()
+
 		return DebugSnapshot{}, err
 	}
 
 	plan := c.plans[input.PlanID]
 	if plan == nil {
 		c.mu.Unlock()
+
 		return DebugSnapshot{}, notFound(ErrorPlanNotFound, string(input.PlanID))
 	}
 
@@ -356,14 +378,17 @@ func (c *Connection) OpenDebugSession(ctx context.Context, input OpenDebugInput)
 	if plan.closing {
 		plan.mu.Unlock()
 		c.mu.Unlock()
+
 		return DebugSnapshot{}, notFound(ErrorPlanNotFound, string(input.PlanID))
 	}
 
 	if !plan.debuggable {
 		plan.mu.Unlock()
 		c.mu.Unlock()
+
 		return DebugSnapshot{}, invalidState("plan was not compiled for debugging", nil)
 	}
+
 	plan.mu.Unlock()
 	c.mu.Unlock()
 
@@ -409,12 +434,14 @@ func (c *Connection) OpenDebugSession(ctx context.Context, input OpenDebugInput)
 	c.mu.Lock()
 	if err := c.ensureOpenLocked(); err != nil {
 		c.mu.Unlock()
+
 		return DebugSnapshot{}, errors.Join(err, closeAPIDebugSession(runtimeDebugger))
 	}
 
 	current := c.plans[input.PlanID]
 	if current != plan {
 		c.mu.Unlock()
+
 		return DebugSnapshot{}, errors.Join(notFound(ErrorPlanNotFound, string(input.PlanID)), closeAPIDebugSession(runtimeDebugger))
 	}
 
@@ -422,12 +449,14 @@ func (c *Connection) OpenDebugSession(ctx context.Context, input OpenDebugInput)
 	if plan.closing {
 		plan.mu.Unlock()
 		c.mu.Unlock()
+
 		return DebugSnapshot{}, errors.Join(notFound(ErrorPlanNotFound, string(input.PlanID)), closeAPIDebugSession(runtimeDebugger))
 	}
 
 	if err := ctx.Err(); err != nil {
 		plan.mu.Unlock()
 		c.mu.Unlock()
+
 		return DebugSnapshot{}, errors.Join(err, closeAPIDebugSession(runtimeDebugger))
 	}
 
@@ -437,22 +466,6 @@ func (c *Connection) OpenDebugSession(ctx context.Context, input OpenDebugInput)
 	c.mu.Unlock()
 
 	return created.snapshot(), nil
-}
-
-func (c *Connection) debugSession(id DebugSessionID) (*DebugSession, error) {
-	if err := validateID(id, "debug session ID"); err != nil {
-		return nil, err
-	}
-
-	c.mu.RLock()
-	session := c.debug[id]
-	c.mu.RUnlock()
-
-	if session == nil {
-		return nil, notFound(ErrorDebugSessionNotFound, string(id))
-	}
-
-	return session, nil
 }
 
 func (c *Connection) StartDebug(ctx context.Context, id DebugSessionID) (DebugSnapshot, error) {
@@ -500,18 +513,149 @@ func (c *Connection) OutDebug(ctx context.Context, id DebugSessionID) (DebugSnap
 	return session.start(ctx, false, session.debugger.Out)
 }
 
-func (c *Connection) execution(id ExecutionID) (*Execution, error) {
-	if err := validateID(id, "execution ID"); err != nil {
-		return nil, err
-	}
-	c.mu.RLock()
-	execution := c.executions[id]
-	c.mu.RUnlock()
-	if execution == nil {
-		return nil, notFound(ErrorExecutionNotFound, string(id))
+func (c *Connection) Compile(ctx context.Context, input CompileInput) (PlanSnapshot, error) {
+	if err := ctx.Err(); err != nil {
+		return PlanSnapshot{}, err
 	}
 
-	return execution, nil
+	if input.Source.Content == "" {
+		return PlanSnapshot{}, invalidRequest("source content is required")
+	}
+
+	if input.Source.Name == "" {
+		input.Source.Name = "anonymous"
+	}
+
+	if err := c.beginPlanCreation(); err != nil {
+		return PlanSnapshot{}, err
+	}
+	defer c.finishPlanCreation()
+
+	compileCtx, cancel := c.operationContext(ctx)
+	defer cancel()
+
+	compiled, err, panicked := c.compileAPIPlan(compileCtx, input)
+	if panicked {
+		return PlanSnapshot{}, internalError(err)
+	}
+	if err != nil {
+		compileErr := &DomainError{
+			Category: ErrorCompilation,
+			Message:  "compilation failed",
+			Cause:    err,
+		}
+		if !isNil(compiled) {
+			return PlanSnapshot{}, errors.Join(compileErr, closeAPIPlan(compiled))
+		}
+
+		return PlanSnapshot{}, compileErr
+	}
+
+	if isNil(compiled) {
+		return PlanSnapshot{}, internalError(errors.New("runtime returned no plan"))
+	}
+
+	if err := compileCtx.Err(); err != nil {
+		return PlanSnapshot{}, errors.Join(err, closeAPIPlan(compiled))
+	}
+
+	parameters, err := apiPlanParameters(compiled)
+	if err != nil {
+		return PlanSnapshot{}, errors.Join(err, closeAPIPlan(compiled))
+	}
+
+	created := &Plan{
+		id:         PlanID(uuid.NewString()),
+		plan:       compiled,
+		parameters: parameters,
+		debuggable: input.Debuggable,
+		executions: make(map[ExecutionID]struct{}),
+		debug:      make(map[DebugSessionID]struct{}),
+	}
+
+	c.mu.Lock()
+	if err := c.ensureOpenLocked(); err != nil {
+		c.mu.Unlock()
+		return PlanSnapshot{}, errors.Join(err, closeAPIPlan(compiled))
+	}
+
+	if err := ctx.Err(); err != nil {
+		c.mu.Unlock()
+		return PlanSnapshot{}, errors.Join(err, closeAPIPlan(compiled))
+	}
+	c.plans[created.id] = created
+	c.mu.Unlock()
+
+	return created.snapshot(), nil
+}
+
+func (c *Connection) Execute(ctx context.Context, input ExecuteInput) (ExecutionSnapshot, error) {
+	if err := ctx.Err(); err != nil {
+		return ExecutionSnapshot{}, err
+	}
+
+	if err := validateID(input.PlanID, "plan ID"); err != nil {
+		return ExecutionSnapshot{}, err
+	}
+
+	c.mu.Lock()
+	if err := c.ensureOpenLocked(); err != nil {
+		c.mu.Unlock()
+
+		return ExecutionSnapshot{}, err
+	}
+
+	if len(c.executions)+len(c.closingExecutions) >= c.limits.MaxExecutionsPerConnection {
+		c.mu.Unlock()
+
+		return ExecutionSnapshot{}, resourceExhausted("execution limit reached")
+	}
+
+	plan := c.plans[input.PlanID]
+	if plan == nil {
+		c.mu.Unlock()
+
+		return ExecutionSnapshot{}, notFound(ErrorPlanNotFound, string(input.PlanID))
+	}
+
+	plan.mu.Lock()
+	if plan.closing {
+		plan.mu.Unlock()
+		c.mu.Unlock()
+
+		return ExecutionSnapshot{}, notFound(ErrorPlanNotFound, string(input.PlanID))
+	}
+
+	if err := ctx.Err(); err != nil {
+		plan.mu.Unlock()
+		c.mu.Unlock()
+
+		return ExecutionSnapshot{}, err
+	}
+
+	executionCtx, cancel := context.WithCancelCause(c.ctx)
+	execution := &Execution{
+		id:          ExecutionID(uuid.NewString()),
+		plan:        plan,
+		ctx:         executionCtx,
+		cancel:      cancel,
+		parameters:  cloneParameters(input.Parameters),
+		contentType: input.OutputContentType,
+		maxWatchers: c.limits.MaxWatchersPerResource,
+		state:       ExecutionRunning,
+		watchers:    make(map[uint64]*executionWatcher),
+		done:        make(chan struct{}),
+	}
+
+	execution.publishLocked(ExecutionEventStarted, false)
+	plan.executions[execution.id] = struct{}{}
+	plan.mu.Unlock()
+	c.executions[execution.id] = execution
+	c.mu.Unlock()
+
+	go execution.run()
+
+	return execution.snapshot(), nil
 }
 
 func (c *Connection) CancelExecution(id ExecutionID) (ExecutionSnapshot, error) {
@@ -519,6 +663,7 @@ func (c *Connection) CancelExecution(id ExecutionID) (ExecutionSnapshot, error) 
 	if err != nil {
 		return ExecutionSnapshot{}, err
 	}
+
 	execution.cancel(context.Canceled)
 
 	return execution.snapshot(), nil
@@ -537,6 +682,7 @@ func (c *Connection) ReleaseExecution(ctx context.Context, id ExecutionID) error
 	if err := validateID(id, "execution ID"); err != nil {
 		return err
 	}
+
 	c.mu.Lock()
 	execution := c.executions[id]
 	if execution != nil {
@@ -552,6 +698,7 @@ func (c *Connection) ReleaseExecution(ctx context.Context, id ExecutionID) error
 		execution.plan.mu.Unlock()
 	}
 	c.mu.Unlock()
+
 	if execution == nil {
 		return notFound(ErrorExecutionNotFound, string(id))
 	}
@@ -561,6 +708,84 @@ func (c *Connection) ReleaseExecution(ctx context.Context, id ExecutionID) error
 	}
 
 	return execution.close.Wait(ctx)
+}
+
+func (c *Connection) ReleasePlan(ctx context.Context, id PlanID) error {
+	if err := validateID(id, "plan ID"); err != nil {
+		return err
+	}
+
+	c.mu.Lock()
+	plan := c.plans[id]
+	if plan == nil {
+		plan = c.closingPlans[id]
+	}
+
+	if plan == nil {
+		c.mu.Unlock()
+		return notFound(ErrorPlanNotFound, string(id))
+	}
+
+	if _, active := c.plans[id]; active {
+		plan.mu.Lock()
+		plan.closing = true
+		plan.mu.Unlock()
+		delete(c.plans, id)
+		c.closingPlans[id] = plan
+	}
+	c.mu.Unlock()
+
+	if plan.release.Begin() {
+		go func() {
+			var err error
+			defer func() {
+				if recover() != nil {
+					err = errors.Join(err, internalError(errors.New("plan cleanup panicked")))
+				}
+
+				c.finishPlanRelease(plan)
+				plan.release.Finish(err)
+			}()
+
+			err = c.settlePlanRelease(plan)
+		}()
+	}
+
+	return plan.release.Wait(ctx)
+}
+
+func (c *Connection) finishPlanRelease(plan *Plan) {
+	c.mu.Lock()
+	if c.closingPlans[plan.id] == plan {
+		delete(c.closingPlans, plan.id)
+	}
+	c.mu.Unlock()
+}
+
+func (c *Connection) settlePlanRelease(plan *Plan) error {
+	plan.mu.Lock()
+	executionIDs := make([]ExecutionID, 0, len(plan.executions))
+	for child := range plan.executions {
+		executionIDs = append(executionIDs, child)
+	}
+	debugIDs := make([]DebugSessionID, 0, len(plan.debug))
+	for child := range plan.debug {
+		debugIDs = append(debugIDs, child)
+	}
+	plan.mu.Unlock()
+
+	var result error
+	for _, child := range debugIDs {
+		err := c.ReleaseDebugSession(context.Background(), child)
+		result = errors.Join(result, ignoreMissingResource(err, ErrorDebugSessionNotFound))
+	}
+
+	for _, child := range executionIDs {
+		err := c.ReleaseExecution(context.Background(), child)
+		result = errors.Join(result, ignoreMissingResource(err, ErrorExecutionNotFound))
+	}
+	result = errors.Join(result, closeAPIPlan(plan.plan))
+	return result
 }
 
 func (c *Connection) Close(ctx context.Context) error {
@@ -582,6 +807,45 @@ func (c *Connection) Close(ctx context.Context) error {
 	return c.close.Wait(ctx)
 }
 
+func (c *Connection) compileAPIPlan(ctx context.Context, input CompileInput) (compiled api.Plan, err error, panicked bool) {
+	defer func() {
+		if recover() != nil {
+			compiled = nil
+			err = errors.New("runtime compilation panicked")
+			panicked = true
+		}
+	}()
+
+	var options []api.PlanOption
+	if input.OptimizationLevel != nil {
+		options = append(options, api.WithOptimizationLevel(*input.OptimizationLevel))
+	}
+
+	if input.Debuggable {
+		compiled, err = c.runtime.CompileDebug(ctx, input.Source, options...)
+	} else {
+		compiled, err = c.runtime.Compile(ctx, input.Source, options...)
+	}
+
+	return
+}
+
+func (c *Connection) execution(id ExecutionID) (*Execution, error) {
+	if err := validateID(id, "execution ID"); err != nil {
+		return nil, err
+	}
+
+	c.mu.RLock()
+	execution := c.executions[id]
+	c.mu.RUnlock()
+
+	if execution == nil {
+		return nil, notFound(ErrorExecutionNotFound, string(id))
+	}
+
+	return execution, nil
+}
+
 func (c *Connection) settleExecutionRelease(execution *Execution) {
 	var err error
 	defer func() {
@@ -594,16 +858,35 @@ func (c *Connection) settleExecutionRelease(execution *Execution) {
 			delete(c.closingExecutions, execution.id)
 		}
 		c.mu.Unlock()
+
 		execution.close.Finish(err)
 	}()
 
 	execution.cancel(context.Canceled)
 	<-execution.done
 	execution.mu.Lock()
+
 	for id, watcher := range execution.watchers {
 		execution.closeWatcherLocked(id, watcher, nil)
 	}
+
 	execution.mu.Unlock()
+}
+
+func (c *Connection) debugSession(id DebugSessionID) (*DebugSession, error) {
+	if err := validateID(id, "debug session ID"); err != nil {
+		return nil, err
+	}
+
+	c.mu.RLock()
+	session := c.debug[id]
+	c.mu.RUnlock()
+
+	if session == nil {
+		return nil, notFound(ErrorDebugSessionNotFound, string(id))
+	}
+
+	return session, nil
 }
 
 func (c *Connection) settleDebugRelease(session *DebugSession) {
@@ -659,6 +942,7 @@ func (c *Connection) settleClose() error {
 			debugIDs = append(debugIDs, id)
 		}
 	}
+
 	executionIDs := make([]ExecutionID, 0, len(c.executions)+len(c.closingExecutions))
 	for id := range c.executions {
 		executionIDs = append(executionIDs, id)
@@ -669,6 +953,7 @@ func (c *Connection) settleClose() error {
 			executionIDs = append(executionIDs, id)
 		}
 	}
+
 	planIDs := make([]PlanID, 0, len(c.plans)+len(c.closingPlans))
 	for id := range c.plans {
 		planIDs = append(planIDs, id)

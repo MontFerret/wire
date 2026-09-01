@@ -35,7 +35,7 @@ func (p *Plan) NewDebugSession(ctx context.Context, parameters Parameters, optio
 		return nil, err
 	}
 
-	response, err := p.client.debugClient.OpenDebugSession(ctx, &wirev1.OpenDebugSessionRequest{
+	response, err := p.client.debugClient.CreateDebugSession(ctx, &wirev1.CreateDebugSessionRequest{
 		ConnectionId:      p.client.connectionProto(),
 		PlanId:            &wirev1.PlanId{Value: p.id},
 		Parameters:        converted,
@@ -60,7 +60,9 @@ func (d *DebugSession) Start(ctx context.Context) error {
 		return err
 	}
 
-	_, err := d.client.debugClient.StartDebug(ctx, &wirev1.StartDebugRequest{Command: d.command()})
+	_, err := d.client.debugClient.Start(ctx, &wirev1.StartRequest{
+		ConnectionId: d.client.connectionProto(), DebugSessionId: &wirev1.DebugSessionId{Value: d.id},
+	})
 
 	return decodeError(err)
 }
@@ -71,7 +73,9 @@ func (d *DebugSession) Continue(ctx context.Context) error {
 		return err
 	}
 
-	_, err := d.client.debugClient.Continue(ctx, &wirev1.ContinueRequest{Command: d.command()})
+	_, err := d.client.debugClient.Continue(ctx, &wirev1.ContinueRequest{
+		ConnectionId: d.client.connectionProto(), DebugSessionId: &wirev1.DebugSessionId{Value: d.id},
+	})
 
 	return decodeError(err)
 }
@@ -82,7 +86,9 @@ func (d *DebugSession) Pause(ctx context.Context) error {
 		return err
 	}
 
-	_, err := d.client.debugClient.Pause(ctx, &wirev1.PauseRequest{Command: d.command()})
+	_, err := d.client.debugClient.Pause(ctx, &wirev1.PauseRequest{
+		ConnectionId: d.client.connectionProto(), DebugSessionId: &wirev1.DebugSessionId{Value: d.id},
+	})
 
 	return decodeError(err)
 }
@@ -93,7 +99,9 @@ func (d *DebugSession) Next(ctx context.Context) error {
 		return err
 	}
 
-	_, err := d.client.debugClient.Next(ctx, &wirev1.NextRequest{Command: d.command()})
+	_, err := d.client.debugClient.Next(ctx, &wirev1.NextRequest{
+		ConnectionId: d.client.connectionProto(), DebugSessionId: &wirev1.DebugSessionId{Value: d.id},
+	})
 
 	return decodeError(err)
 }
@@ -105,7 +113,9 @@ func (d *DebugSession) Step(ctx context.Context) error {
 		return err
 	}
 
-	_, err := d.client.debugClient.Step(ctx, &wirev1.StepRequest{Command: d.command()})
+	_, err := d.client.debugClient.Step(ctx, &wirev1.StepRequest{
+		ConnectionId: d.client.connectionProto(), DebugSessionId: &wirev1.DebugSessionId{Value: d.id},
+	})
 
 	return decodeError(err)
 }
@@ -116,7 +126,9 @@ func (d *DebugSession) Out(ctx context.Context) error {
 		return err
 	}
 
-	_, err := d.client.debugClient.Out(ctx, &wirev1.OutRequest{Command: d.command()})
+	_, err := d.client.debugClient.Out(ctx, &wirev1.OutRequest{
+		ConnectionId: d.client.connectionProto(), DebugSessionId: &wirev1.DebugSessionId{Value: d.id},
+	})
 
 	return decodeError(err)
 }
@@ -128,7 +140,9 @@ func (d *DebugSession) Stop(ctx context.Context) error {
 		return err
 	}
 
-	_, err := d.client.debugClient.StopDebug(ctx, &wirev1.StopDebugRequest{Command: d.command()})
+	_, err := d.client.debugClient.Terminate(ctx, &wirev1.TerminateRequest{
+		ConnectionId: d.client.connectionProto(), DebugSessionId: &wirev1.DebugSessionId{Value: d.id},
+	})
 
 	return decodeError(err)
 }
@@ -153,13 +167,6 @@ func (d *DebugSession) checkOpen() error {
 	}
 
 	return d.plan.checkOpen()
-}
-
-func (d *DebugSession) command() *wirev1.DebugCommand {
-	return &wirev1.DebugCommand{
-		ConnectionId:   d.client.connectionProto(),
-		DebugSessionId: &wirev1.DebugSessionId{Value: d.id},
-	}
 }
 
 func (d *DebugSession) release(ctx context.Context) error {

@@ -100,21 +100,23 @@ func decodeError(err error) error {
 	if !ok {
 		return err
 	}
+
 	code := grpcStatus.Code()
 	result := &Error{Message: grpcStatus.Message(), cause: err}
+
 	for _, raw := range grpcStatus.Details() {
 		detail, ok := raw.(*wirev1.ErrorDetail)
-		if !ok {
+		if !ok || detail.GetCategory() == wirev1.ErrorCategory_ERROR_CATEGORY_UNSPECIFIED {
 			continue
 		}
+
 		result.Category = clientErrorCategory(detail.GetCategory())
-		result.Message = detail.GetMessage()
-		result.Diagnostics = convertDiagnostics(detail.GetDiagnostics())
+
 		break
 	}
 
-	if result.Category == 0 && (code == codes.Canceled || code == codes.DeadlineExceeded) {
-		result.Category = ErrorCancelled
+	if result.Category == 0 {
+		result.Category = clientErrorCategoryFromCode(code)
 	}
 
 	return result
@@ -126,16 +128,13 @@ func convertFailure(value *wirev1.Failure) *Failure {
 	}
 
 	return &Failure{
-		Category:    clientErrorCategory(value.GetCategory()),
-		Message:     value.GetMessage(),
-		Diagnostics: convertDiagnostics(value.GetDiagnostics()),
+		Category: clientErrorCategory(value.GetCategory()),
+		Message:  value.GetMessage(),
 	}
 }
 
 func clientErrorCategory(value wirev1.ErrorCategory) ErrorCategory {
 	switch value {
-	case wirev1.ErrorCategory_ERROR_CATEGORY_INVALID_REQUEST:
-		return ErrorInvalidRequest
 	case wirev1.ErrorCategory_ERROR_CATEGORY_COMPILATION_FAILURE:
 		return ErrorCompilation
 	case wirev1.ErrorCategory_ERROR_CATEGORY_EXECUTION_FAILURE:
@@ -150,18 +149,31 @@ func clientErrorCategory(value wirev1.ErrorCategory) ErrorCategory {
 		return ErrorConnectionNotFound
 	case wirev1.ErrorCategory_ERROR_CATEGORY_INVALID_STATE:
 		return ErrorInvalidState
-	case wirev1.ErrorCategory_ERROR_CATEGORY_UNSUPPORTED_CAPABILITY:
-		return ErrorUnsupported
 	case wirev1.ErrorCategory_ERROR_CATEGORY_WATCHER_LAGGED:
 		return ErrorWatcherLagged
-	case wirev1.ErrorCategory_ERROR_CATEGORY_CANCELLED:
-		return ErrorCancelled
 	case wirev1.ErrorCategory_ERROR_CATEGORY_VALUE_REFERENCE_NOT_FOUND:
 		return ErrorValueReferenceNotFound
-	case wirev1.ErrorCategory_ERROR_CATEGORY_RESOURCE_EXHAUSTED:
-		return ErrorResourceExhausted
 	case wirev1.ErrorCategory_ERROR_CATEGORY_BREAKPOINT_NOT_FOUND:
 		return ErrorBreakpointNotFound
+	default:
+		return ErrorInternal
+	}
+}
+
+func clientErrorCategoryFromCode(code codes.Code) ErrorCategory {
+	switch code {
+	case codes.InvalidArgument:
+		return ErrorInvalidRequest
+	case codes.NotFound:
+		return ErrorInternal
+	case codes.FailedPrecondition:
+		return ErrorInvalidState
+	case codes.Unimplemented:
+		return ErrorUnsupported
+	case codes.ResourceExhausted:
+		return ErrorResourceExhausted
+	case codes.Canceled, codes.DeadlineExceeded:
+		return ErrorCancelled
 	default:
 		return ErrorInternal
 	}

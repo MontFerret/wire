@@ -120,124 +120,9 @@ func (x *ExecutionId) GetValue() string {
 	return ""
 }
 
-// Output is the Unified API encoded output contract. Wire does not expose runtime values.
-type Output struct {
-	state       protoimpl.MessageState `protogen:"open.v1"`
-	ContentType string                 `protobuf:"bytes,1,opt,name=content_type,json=contentType,proto3" json:"content_type,omitempty"`
-	// content is already encoded by the runtime using content_type.
-	Content       []byte `protobuf:"bytes,2,opt,name=content,proto3" json:"content,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *Output) Reset() {
-	*x = Output{}
-	mi := &file_ferret_wire_v1_execution_proto_msgTypes[1]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *Output) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*Output) ProtoMessage() {}
-
-func (x *Output) ProtoReflect() protoreflect.Message {
-	mi := &file_ferret_wire_v1_execution_proto_msgTypes[1]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use Output.ProtoReflect.Descriptor instead.
-func (*Output) Descriptor() ([]byte, []int) {
-	return file_ferret_wire_v1_execution_proto_rawDescGZIP(), []int{1}
-}
-
-func (x *Output) GetContentType() string {
-	if x != nil {
-		return x.ContentType
-	}
-	return ""
-}
-
-func (x *Output) GetContent() []byte {
-	if x != nil {
-		return x.Content
-	}
-	return nil
-}
-
-type Failure struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Category      ErrorCategory          `protobuf:"varint,1,opt,name=category,proto3,enum=ferret.wire.v1.ErrorCategory" json:"category,omitempty"`
-	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
-	Diagnostics   []*Diagnostic          `protobuf:"bytes,3,rep,name=diagnostics,proto3" json:"diagnostics,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *Failure) Reset() {
-	*x = Failure{}
-	mi := &file_ferret_wire_v1_execution_proto_msgTypes[2]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *Failure) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*Failure) ProtoMessage() {}
-
-func (x *Failure) ProtoReflect() protoreflect.Message {
-	mi := &file_ferret_wire_v1_execution_proto_msgTypes[2]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use Failure.ProtoReflect.Descriptor instead.
-func (*Failure) Descriptor() ([]byte, []int) {
-	return file_ferret_wire_v1_execution_proto_rawDescGZIP(), []int{2}
-}
-
-func (x *Failure) GetCategory() ErrorCategory {
-	if x != nil {
-		return x.Category
-	}
-	return ErrorCategory_ERROR_CATEGORY_UNSPECIFIED
-}
-
-func (x *Failure) GetMessage() string {
-	if x != nil {
-		return x.Message
-	}
-	return ""
-}
-
-func (x *Failure) GetDiagnostics() []*Diagnostic {
-	if x != nil {
-		return x.Diagnostics
-	}
-	return nil
-}
-
 type Execution struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            *ExecutionId           `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	PlanId        *PlanId                `protobuf:"bytes,2,opt,name=plan_id,json=planId,proto3" json:"plan_id,omitempty"`
 	State         ExecutionState         `protobuf:"varint,3,opt,name=state,proto3,enum=ferret.wire.v1.ExecutionState" json:"state,omitempty"`
 	Output        *Output                `protobuf:"bytes,4,opt,name=output,proto3" json:"output,omitempty"`
 	Failure       *Failure               `protobuf:"bytes,5,opt,name=failure,proto3" json:"failure,omitempty"`
@@ -247,7 +132,7 @@ type Execution struct {
 
 func (x *Execution) Reset() {
 	*x = Execution{}
-	mi := &file_ferret_wire_v1_execution_proto_msgTypes[3]
+	mi := &file_ferret_wire_v1_execution_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -259,7 +144,7 @@ func (x *Execution) String() string {
 func (*Execution) ProtoMessage() {}
 
 func (x *Execution) ProtoReflect() protoreflect.Message {
-	mi := &file_ferret_wire_v1_execution_proto_msgTypes[3]
+	mi := &file_ferret_wire_v1_execution_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -272,19 +157,12 @@ func (x *Execution) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Execution.ProtoReflect.Descriptor instead.
 func (*Execution) Descriptor() ([]byte, []int) {
-	return file_ferret_wire_v1_execution_proto_rawDescGZIP(), []int{3}
+	return file_ferret_wire_v1_execution_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *Execution) GetId() *ExecutionId {
 	if x != nil {
 		return x.Id
-	}
-	return nil
-}
-
-func (x *Execution) GetPlanId() *PlanId {
-	if x != nil {
-		return x.PlanId
 	}
 	return nil
 }
@@ -310,200 +188,17 @@ func (x *Execution) GetFailure() *Failure {
 	return nil
 }
 
-type ExecutionStarted struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Execution     *Execution             `protobuf:"bytes,1,opt,name=execution,proto3" json:"execution,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *ExecutionStarted) Reset() {
-	*x = ExecutionStarted{}
-	mi := &file_ferret_wire_v1_execution_proto_msgTypes[4]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *ExecutionStarted) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*ExecutionStarted) ProtoMessage() {}
-
-func (x *ExecutionStarted) ProtoReflect() protoreflect.Message {
-	mi := &file_ferret_wire_v1_execution_proto_msgTypes[4]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use ExecutionStarted.ProtoReflect.Descriptor instead.
-func (*ExecutionStarted) Descriptor() ([]byte, []int) {
-	return file_ferret_wire_v1_execution_proto_rawDescGZIP(), []int{4}
-}
-
-func (x *ExecutionStarted) GetExecution() *Execution {
-	if x != nil {
-		return x.Execution
-	}
-	return nil
-}
-
-type ExecutionCompleted struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Execution     *Execution             `protobuf:"bytes,1,opt,name=execution,proto3" json:"execution,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *ExecutionCompleted) Reset() {
-	*x = ExecutionCompleted{}
-	mi := &file_ferret_wire_v1_execution_proto_msgTypes[5]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *ExecutionCompleted) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*ExecutionCompleted) ProtoMessage() {}
-
-func (x *ExecutionCompleted) ProtoReflect() protoreflect.Message {
-	mi := &file_ferret_wire_v1_execution_proto_msgTypes[5]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use ExecutionCompleted.ProtoReflect.Descriptor instead.
-func (*ExecutionCompleted) Descriptor() ([]byte, []int) {
-	return file_ferret_wire_v1_execution_proto_rawDescGZIP(), []int{5}
-}
-
-func (x *ExecutionCompleted) GetExecution() *Execution {
-	if x != nil {
-		return x.Execution
-	}
-	return nil
-}
-
-type ExecutionFailed struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Execution     *Execution             `protobuf:"bytes,1,opt,name=execution,proto3" json:"execution,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *ExecutionFailed) Reset() {
-	*x = ExecutionFailed{}
-	mi := &file_ferret_wire_v1_execution_proto_msgTypes[6]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *ExecutionFailed) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*ExecutionFailed) ProtoMessage() {}
-
-func (x *ExecutionFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_ferret_wire_v1_execution_proto_msgTypes[6]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use ExecutionFailed.ProtoReflect.Descriptor instead.
-func (*ExecutionFailed) Descriptor() ([]byte, []int) {
-	return file_ferret_wire_v1_execution_proto_rawDescGZIP(), []int{6}
-}
-
-func (x *ExecutionFailed) GetExecution() *Execution {
-	if x != nil {
-		return x.Execution
-	}
-	return nil
-}
-
-type ExecutionCancelled struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Execution     *Execution             `protobuf:"bytes,1,opt,name=execution,proto3" json:"execution,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *ExecutionCancelled) Reset() {
-	*x = ExecutionCancelled{}
-	mi := &file_ferret_wire_v1_execution_proto_msgTypes[7]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *ExecutionCancelled) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*ExecutionCancelled) ProtoMessage() {}
-
-func (x *ExecutionCancelled) ProtoReflect() protoreflect.Message {
-	mi := &file_ferret_wire_v1_execution_proto_msgTypes[7]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use ExecutionCancelled.ProtoReflect.Descriptor instead.
-func (*ExecutionCancelled) Descriptor() ([]byte, []int) {
-	return file_ferret_wire_v1_execution_proto_rawDescGZIP(), []int{7}
-}
-
-func (x *ExecutionCancelled) GetExecution() *Execution {
-	if x != nil {
-		return x.Execution
-	}
-	return nil
-}
-
 type WatchExecutionResponse struct {
-	state       protoimpl.MessageState `protogen:"open.v1"`
-	ExecutionId *ExecutionId           `protobuf:"bytes,1,opt,name=execution_id,json=executionId,proto3" json:"execution_id,omitempty"`
-	Sequence    uint64                 `protobuf:"varint,2,opt,name=sequence,proto3" json:"sequence,omitempty"`
-	// Types that are valid to be assigned to Payload:
-	//
-	//	*WatchExecutionResponse_Started
-	//	*WatchExecutionResponse_Completed
-	//	*WatchExecutionResponse_Failed
-	//	*WatchExecutionResponse_Cancelled
-	Payload       isWatchExecutionResponse_Payload `protobuf_oneof:"payload"`
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Sequence      uint64                 `protobuf:"varint,2,opt,name=sequence,proto3" json:"sequence,omitempty"`
+	Execution     *Execution             `protobuf:"bytes,8,opt,name=execution,proto3" json:"execution,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *WatchExecutionResponse) Reset() {
 	*x = WatchExecutionResponse{}
-	mi := &file_ferret_wire_v1_execution_proto_msgTypes[8]
+	mi := &file_ferret_wire_v1_execution_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -515,7 +210,7 @@ func (x *WatchExecutionResponse) String() string {
 func (*WatchExecutionResponse) ProtoMessage() {}
 
 func (x *WatchExecutionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ferret_wire_v1_execution_proto_msgTypes[8]
+	mi := &file_ferret_wire_v1_execution_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -528,14 +223,7 @@ func (x *WatchExecutionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WatchExecutionResponse.ProtoReflect.Descriptor instead.
 func (*WatchExecutionResponse) Descriptor() ([]byte, []int) {
-	return file_ferret_wire_v1_execution_proto_rawDescGZIP(), []int{8}
-}
-
-func (x *WatchExecutionResponse) GetExecutionId() *ExecutionId {
-	if x != nil {
-		return x.ExecutionId
-	}
-	return nil
+	return file_ferret_wire_v1_execution_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *WatchExecutionResponse) GetSequence() uint64 {
@@ -545,76 +233,12 @@ func (x *WatchExecutionResponse) GetSequence() uint64 {
 	return 0
 }
 
-func (x *WatchExecutionResponse) GetPayload() isWatchExecutionResponse_Payload {
+func (x *WatchExecutionResponse) GetExecution() *Execution {
 	if x != nil {
-		return x.Payload
+		return x.Execution
 	}
 	return nil
 }
-
-func (x *WatchExecutionResponse) GetStarted() *ExecutionStarted {
-	if x != nil {
-		if x, ok := x.Payload.(*WatchExecutionResponse_Started); ok {
-			return x.Started
-		}
-	}
-	return nil
-}
-
-func (x *WatchExecutionResponse) GetCompleted() *ExecutionCompleted {
-	if x != nil {
-		if x, ok := x.Payload.(*WatchExecutionResponse_Completed); ok {
-			return x.Completed
-		}
-	}
-	return nil
-}
-
-func (x *WatchExecutionResponse) GetFailed() *ExecutionFailed {
-	if x != nil {
-		if x, ok := x.Payload.(*WatchExecutionResponse_Failed); ok {
-			return x.Failed
-		}
-	}
-	return nil
-}
-
-func (x *WatchExecutionResponse) GetCancelled() *ExecutionCancelled {
-	if x != nil {
-		if x, ok := x.Payload.(*WatchExecutionResponse_Cancelled); ok {
-			return x.Cancelled
-		}
-	}
-	return nil
-}
-
-type isWatchExecutionResponse_Payload interface {
-	isWatchExecutionResponse_Payload()
-}
-
-type WatchExecutionResponse_Started struct {
-	Started *ExecutionStarted `protobuf:"bytes,3,opt,name=started,proto3,oneof"`
-}
-
-type WatchExecutionResponse_Completed struct {
-	Completed *ExecutionCompleted `protobuf:"bytes,5,opt,name=completed,proto3,oneof"`
-}
-
-type WatchExecutionResponse_Failed struct {
-	Failed *ExecutionFailed `protobuf:"bytes,6,opt,name=failed,proto3,oneof"`
-}
-
-type WatchExecutionResponse_Cancelled struct {
-	Cancelled *ExecutionCancelled `protobuf:"bytes,7,opt,name=cancelled,proto3,oneof"`
-}
-
-func (*WatchExecutionResponse_Started) isWatchExecutionResponse_Payload() {}
-
-func (*WatchExecutionResponse_Completed) isWatchExecutionResponse_Payload() {}
-
-func (*WatchExecutionResponse_Failed) isWatchExecutionResponse_Payload() {}
-
-func (*WatchExecutionResponse_Cancelled) isWatchExecutionResponse_Payload() {}
 
 type ExecuteRequest struct {
 	state             protoimpl.MessageState `protogen:"open.v1"`
@@ -628,7 +252,7 @@ type ExecuteRequest struct {
 
 func (x *ExecuteRequest) Reset() {
 	*x = ExecuteRequest{}
-	mi := &file_ferret_wire_v1_execution_proto_msgTypes[9]
+	mi := &file_ferret_wire_v1_execution_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -640,7 +264,7 @@ func (x *ExecuteRequest) String() string {
 func (*ExecuteRequest) ProtoMessage() {}
 
 func (x *ExecuteRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ferret_wire_v1_execution_proto_msgTypes[9]
+	mi := &file_ferret_wire_v1_execution_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -653,7 +277,7 @@ func (x *ExecuteRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExecuteRequest.ProtoReflect.Descriptor instead.
 func (*ExecuteRequest) Descriptor() ([]byte, []int) {
-	return file_ferret_wire_v1_execution_proto_rawDescGZIP(), []int{9}
+	return file_ferret_wire_v1_execution_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *ExecuteRequest) GetConnectionId() *ConnectionId {
@@ -693,7 +317,7 @@ type ExecuteResponse struct {
 
 func (x *ExecuteResponse) Reset() {
 	*x = ExecuteResponse{}
-	mi := &file_ferret_wire_v1_execution_proto_msgTypes[10]
+	mi := &file_ferret_wire_v1_execution_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -705,7 +329,7 @@ func (x *ExecuteResponse) String() string {
 func (*ExecuteResponse) ProtoMessage() {}
 
 func (x *ExecuteResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ferret_wire_v1_execution_proto_msgTypes[10]
+	mi := &file_ferret_wire_v1_execution_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -718,7 +342,7 @@ func (x *ExecuteResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExecuteResponse.ProtoReflect.Descriptor instead.
 func (*ExecuteResponse) Descriptor() ([]byte, []int) {
-	return file_ferret_wire_v1_execution_proto_rawDescGZIP(), []int{10}
+	return file_ferret_wire_v1_execution_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *ExecuteResponse) GetExecution() *Execution {
@@ -738,7 +362,7 @@ type CancelExecutionRequest struct {
 
 func (x *CancelExecutionRequest) Reset() {
 	*x = CancelExecutionRequest{}
-	mi := &file_ferret_wire_v1_execution_proto_msgTypes[11]
+	mi := &file_ferret_wire_v1_execution_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -750,7 +374,7 @@ func (x *CancelExecutionRequest) String() string {
 func (*CancelExecutionRequest) ProtoMessage() {}
 
 func (x *CancelExecutionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ferret_wire_v1_execution_proto_msgTypes[11]
+	mi := &file_ferret_wire_v1_execution_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -763,7 +387,7 @@ func (x *CancelExecutionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CancelExecutionRequest.ProtoReflect.Descriptor instead.
 func (*CancelExecutionRequest) Descriptor() ([]byte, []int) {
-	return file_ferret_wire_v1_execution_proto_rawDescGZIP(), []int{11}
+	return file_ferret_wire_v1_execution_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *CancelExecutionRequest) GetConnectionId() *ConnectionId {
@@ -782,14 +406,13 @@ func (x *CancelExecutionRequest) GetExecutionId() *ExecutionId {
 
 type CancelExecutionResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Execution     *Execution             `protobuf:"bytes,1,opt,name=execution,proto3" json:"execution,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *CancelExecutionResponse) Reset() {
 	*x = CancelExecutionResponse{}
-	mi := &file_ferret_wire_v1_execution_proto_msgTypes[12]
+	mi := &file_ferret_wire_v1_execution_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -801,7 +424,7 @@ func (x *CancelExecutionResponse) String() string {
 func (*CancelExecutionResponse) ProtoMessage() {}
 
 func (x *CancelExecutionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ferret_wire_v1_execution_proto_msgTypes[12]
+	mi := &file_ferret_wire_v1_execution_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -814,14 +437,7 @@ func (x *CancelExecutionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CancelExecutionResponse.ProtoReflect.Descriptor instead.
 func (*CancelExecutionResponse) Descriptor() ([]byte, []int) {
-	return file_ferret_wire_v1_execution_proto_rawDescGZIP(), []int{12}
-}
-
-func (x *CancelExecutionResponse) GetExecution() *Execution {
-	if x != nil {
-		return x.Execution
-	}
-	return nil
+	return file_ferret_wire_v1_execution_proto_rawDescGZIP(), []int{6}
 }
 
 type ReleaseExecutionRequest struct {
@@ -834,7 +450,7 @@ type ReleaseExecutionRequest struct {
 
 func (x *ReleaseExecutionRequest) Reset() {
 	*x = ReleaseExecutionRequest{}
-	mi := &file_ferret_wire_v1_execution_proto_msgTypes[13]
+	mi := &file_ferret_wire_v1_execution_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -846,7 +462,7 @@ func (x *ReleaseExecutionRequest) String() string {
 func (*ReleaseExecutionRequest) ProtoMessage() {}
 
 func (x *ReleaseExecutionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ferret_wire_v1_execution_proto_msgTypes[13]
+	mi := &file_ferret_wire_v1_execution_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -859,7 +475,7 @@ func (x *ReleaseExecutionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReleaseExecutionRequest.ProtoReflect.Descriptor instead.
 func (*ReleaseExecutionRequest) Descriptor() ([]byte, []int) {
-	return file_ferret_wire_v1_execution_proto_rawDescGZIP(), []int{13}
+	return file_ferret_wire_v1_execution_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *ReleaseExecutionRequest) GetConnectionId() *ConnectionId {
@@ -884,7 +500,7 @@ type ReleaseExecutionResponse struct {
 
 func (x *ReleaseExecutionResponse) Reset() {
 	*x = ReleaseExecutionResponse{}
-	mi := &file_ferret_wire_v1_execution_proto_msgTypes[14]
+	mi := &file_ferret_wire_v1_execution_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -896,7 +512,7 @@ func (x *ReleaseExecutionResponse) String() string {
 func (*ReleaseExecutionResponse) ProtoMessage() {}
 
 func (x *ReleaseExecutionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ferret_wire_v1_execution_proto_msgTypes[14]
+	mi := &file_ferret_wire_v1_execution_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -909,7 +525,7 @@ func (x *ReleaseExecutionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReleaseExecutionResponse.ProtoReflect.Descriptor instead.
 func (*ReleaseExecutionResponse) Descriptor() ([]byte, []int) {
-	return file_ferret_wire_v1_execution_proto_rawDescGZIP(), []int{14}
+	return file_ferret_wire_v1_execution_proto_rawDescGZIP(), []int{8}
 }
 
 type WatchExecutionRequest struct {
@@ -922,7 +538,7 @@ type WatchExecutionRequest struct {
 
 func (x *WatchExecutionRequest) Reset() {
 	*x = WatchExecutionRequest{}
-	mi := &file_ferret_wire_v1_execution_proto_msgTypes[15]
+	mi := &file_ferret_wire_v1_execution_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -934,7 +550,7 @@ func (x *WatchExecutionRequest) String() string {
 func (*WatchExecutionRequest) ProtoMessage() {}
 
 func (x *WatchExecutionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ferret_wire_v1_execution_proto_msgTypes[15]
+	mi := &file_ferret_wire_v1_execution_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -947,7 +563,7 @@ func (x *WatchExecutionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WatchExecutionRequest.ProtoReflect.Descriptor instead.
 func (*WatchExecutionRequest) Descriptor() ([]byte, []int) {
-	return file_ferret_wire_v1_execution_proto_rawDescGZIP(), []int{15}
+	return file_ferret_wire_v1_execution_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *WatchExecutionRequest) GetConnectionId() *ConnectionId {
@@ -970,36 +586,15 @@ const file_ferret_wire_v1_execution_proto_rawDesc = "" +
 	"\n" +
 	"\x1eferret/wire/v1/execution.proto\x12\x0eferret.wire.v1\x1a\x19ferret/wire/v1/plan.proto\x1a\x1cferret/wire/v1/runtime.proto\x1a\x1aferret/wire/v1/value.proto\"#\n" +
 	"\vExecutionId\x12\x14\n" +
-	"\x05value\x18\x01 \x01(\tR\x05value\"K\n" +
-	"\x06Output\x12!\n" +
-	"\fcontent_type\x18\x01 \x01(\tR\vcontentType\x12\x18\n" +
-	"\acontent\x18\x02 \x01(\fR\acontentR\x04data\"\x9c\x01\n" +
-	"\aFailure\x129\n" +
-	"\bcategory\x18\x01 \x01(\x0e2\x1d.ferret.wire.v1.ErrorCategoryR\bcategory\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\tR\amessage\x12<\n" +
-	"\vdiagnostics\x18\x03 \x03(\v2\x1a.ferret.wire.v1.DiagnosticR\vdiagnostics\"\x82\x02\n" +
+	"\x05value\x18\x01 \x01(\tR\x05value\"\xe0\x01\n" +
 	"\tExecution\x12+\n" +
-	"\x02id\x18\x01 \x01(\v2\x1b.ferret.wire.v1.ExecutionIdR\x02id\x12/\n" +
-	"\aplan_id\x18\x02 \x01(\v2\x16.ferret.wire.v1.PlanIdR\x06planId\x124\n" +
+	"\x02id\x18\x01 \x01(\v2\x1b.ferret.wire.v1.ExecutionIdR\x02id\x124\n" +
 	"\x05state\x18\x03 \x01(\x0e2\x1e.ferret.wire.v1.ExecutionStateR\x05state\x12.\n" +
 	"\x06output\x18\x04 \x01(\v2\x16.ferret.wire.v1.OutputR\x06output\x121\n" +
-	"\afailure\x18\x05 \x01(\v2\x17.ferret.wire.v1.FailureR\afailure\"K\n" +
-	"\x10ExecutionStarted\x127\n" +
-	"\texecution\x18\x01 \x01(\v2\x19.ferret.wire.v1.ExecutionR\texecution\"M\n" +
-	"\x12ExecutionCompleted\x127\n" +
-	"\texecution\x18\x01 \x01(\v2\x19.ferret.wire.v1.ExecutionR\texecution\"J\n" +
-	"\x0fExecutionFailed\x127\n" +
-	"\texecution\x18\x01 \x01(\v2\x19.ferret.wire.v1.ExecutionR\texecution\"M\n" +
-	"\x12ExecutionCancelled\x127\n" +
-	"\texecution\x18\x01 \x01(\v2\x19.ferret.wire.v1.ExecutionR\texecution\"\x8e\x03\n" +
-	"\x16WatchExecutionResponse\x12>\n" +
-	"\fexecution_id\x18\x01 \x01(\v2\x1b.ferret.wire.v1.ExecutionIdR\vexecutionId\x12\x1a\n" +
-	"\bsequence\x18\x02 \x01(\x04R\bsequence\x12<\n" +
-	"\astarted\x18\x03 \x01(\v2 .ferret.wire.v1.ExecutionStartedH\x00R\astarted\x12B\n" +
-	"\tcompleted\x18\x05 \x01(\v2\".ferret.wire.v1.ExecutionCompletedH\x00R\tcompleted\x129\n" +
-	"\x06failed\x18\x06 \x01(\v2\x1f.ferret.wire.v1.ExecutionFailedH\x00R\x06failed\x12B\n" +
-	"\tcancelled\x18\a \x01(\v2\".ferret.wire.v1.ExecutionCancelledH\x00R\tcancelledB\t\n" +
-	"\apayloadJ\x04\b\x04\x10\x05R\x06output\"\xf0\x01\n" +
+	"\afailure\x18\x05 \x01(\v2\x17.ferret.wire.v1.FailureR\afailureJ\x04\b\x02\x10\x03R\aplan_id\"\xce\x01\n" +
+	"\x16WatchExecutionResponse\x12\x1a\n" +
+	"\bsequence\x18\x02 \x01(\x04R\bsequence\x127\n" +
+	"\texecution\x18\b \x01(\v2\x19.ferret.wire.v1.ExecutionR\texecutionJ\x04\b\x01\x10\x02J\x04\b\x03\x10\x04J\x04\b\x04\x10\x05J\x04\b\x05\x10\x06J\x04\b\x06\x10\aJ\x04\b\a\x10\bR\fexecution_idR\x06outputR\astartedR\tcompletedR\x06failedR\tcancelled\"\xf0\x01\n" +
 	"\x0eExecuteRequest\x12A\n" +
 	"\rconnection_id\x18\x01 \x01(\v2\x1c.ferret.wire.v1.ConnectionIdR\fconnectionId\x12/\n" +
 	"\aplan_id\x18\x02 \x01(\v2\x16.ferret.wire.v1.PlanIdR\x06planId\x12:\n" +
@@ -1011,9 +606,8 @@ const file_ferret_wire_v1_execution_proto_rawDesc = "" +
 	"\texecution\x18\x01 \x01(\v2\x19.ferret.wire.v1.ExecutionR\texecution\"\x9b\x01\n" +
 	"\x16CancelExecutionRequest\x12A\n" +
 	"\rconnection_id\x18\x01 \x01(\v2\x1c.ferret.wire.v1.ConnectionIdR\fconnectionId\x12>\n" +
-	"\fexecution_id\x18\x02 \x01(\v2\x1b.ferret.wire.v1.ExecutionIdR\vexecutionId\"R\n" +
-	"\x17CancelExecutionResponse\x127\n" +
-	"\texecution\x18\x01 \x01(\v2\x19.ferret.wire.v1.ExecutionR\texecution\"\x9c\x01\n" +
+	"\fexecution_id\x18\x02 \x01(\v2\x1b.ferret.wire.v1.ExecutionIdR\vexecutionId\"*\n" +
+	"\x17CancelExecutionResponseJ\x04\b\x01\x10\x02R\texecution\"\x9c\x01\n" +
 	"\x17ReleaseExecutionRequest\x12A\n" +
 	"\rconnection_id\x18\x01 \x01(\v2\x1c.ferret.wire.v1.ConnectionIdR\fconnectionId\x12>\n" +
 	"\fexecution_id\x18\x02 \x01(\v2\x1b.ferret.wire.v1.ExecutionIdR\vexecutionId\"\x1a\n" +
@@ -1046,72 +640,54 @@ func file_ferret_wire_v1_execution_proto_rawDescGZIP() []byte {
 }
 
 var file_ferret_wire_v1_execution_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_ferret_wire_v1_execution_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
+var file_ferret_wire_v1_execution_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
 var file_ferret_wire_v1_execution_proto_goTypes = []any{
 	(ExecutionState)(0),              // 0: ferret.wire.v1.ExecutionState
 	(*ExecutionId)(nil),              // 1: ferret.wire.v1.ExecutionId
-	(*Output)(nil),                   // 2: ferret.wire.v1.Output
-	(*Failure)(nil),                  // 3: ferret.wire.v1.Failure
-	(*Execution)(nil),                // 4: ferret.wire.v1.Execution
-	(*ExecutionStarted)(nil),         // 5: ferret.wire.v1.ExecutionStarted
-	(*ExecutionCompleted)(nil),       // 6: ferret.wire.v1.ExecutionCompleted
-	(*ExecutionFailed)(nil),          // 7: ferret.wire.v1.ExecutionFailed
-	(*ExecutionCancelled)(nil),       // 8: ferret.wire.v1.ExecutionCancelled
-	(*WatchExecutionResponse)(nil),   // 9: ferret.wire.v1.WatchExecutionResponse
-	(*ExecuteRequest)(nil),           // 10: ferret.wire.v1.ExecuteRequest
-	(*ExecuteResponse)(nil),          // 11: ferret.wire.v1.ExecuteResponse
-	(*CancelExecutionRequest)(nil),   // 12: ferret.wire.v1.CancelExecutionRequest
-	(*CancelExecutionResponse)(nil),  // 13: ferret.wire.v1.CancelExecutionResponse
-	(*ReleaseExecutionRequest)(nil),  // 14: ferret.wire.v1.ReleaseExecutionRequest
-	(*ReleaseExecutionResponse)(nil), // 15: ferret.wire.v1.ReleaseExecutionResponse
-	(*WatchExecutionRequest)(nil),    // 16: ferret.wire.v1.WatchExecutionRequest
-	(ErrorCategory)(0),               // 17: ferret.wire.v1.ErrorCategory
-	(*Diagnostic)(nil),               // 18: ferret.wire.v1.Diagnostic
-	(*PlanId)(nil),                   // 19: ferret.wire.v1.PlanId
-	(*ConnectionId)(nil),             // 20: ferret.wire.v1.ConnectionId
-	(*Parameters)(nil),               // 21: ferret.wire.v1.Parameters
+	(*Execution)(nil),                // 2: ferret.wire.v1.Execution
+	(*WatchExecutionResponse)(nil),   // 3: ferret.wire.v1.WatchExecutionResponse
+	(*ExecuteRequest)(nil),           // 4: ferret.wire.v1.ExecuteRequest
+	(*ExecuteResponse)(nil),          // 5: ferret.wire.v1.ExecuteResponse
+	(*CancelExecutionRequest)(nil),   // 6: ferret.wire.v1.CancelExecutionRequest
+	(*CancelExecutionResponse)(nil),  // 7: ferret.wire.v1.CancelExecutionResponse
+	(*ReleaseExecutionRequest)(nil),  // 8: ferret.wire.v1.ReleaseExecutionRequest
+	(*ReleaseExecutionResponse)(nil), // 9: ferret.wire.v1.ReleaseExecutionResponse
+	(*WatchExecutionRequest)(nil),    // 10: ferret.wire.v1.WatchExecutionRequest
+	(*Output)(nil),                   // 11: ferret.wire.v1.Output
+	(*Failure)(nil),                  // 12: ferret.wire.v1.Failure
+	(*ConnectionId)(nil),             // 13: ferret.wire.v1.ConnectionId
+	(*PlanId)(nil),                   // 14: ferret.wire.v1.PlanId
+	(*Parameters)(nil),               // 15: ferret.wire.v1.Parameters
 }
 var file_ferret_wire_v1_execution_proto_depIdxs = []int32{
-	17, // 0: ferret.wire.v1.Failure.category:type_name -> ferret.wire.v1.ErrorCategory
-	18, // 1: ferret.wire.v1.Failure.diagnostics:type_name -> ferret.wire.v1.Diagnostic
-	1,  // 2: ferret.wire.v1.Execution.id:type_name -> ferret.wire.v1.ExecutionId
-	19, // 3: ferret.wire.v1.Execution.plan_id:type_name -> ferret.wire.v1.PlanId
-	0,  // 4: ferret.wire.v1.Execution.state:type_name -> ferret.wire.v1.ExecutionState
-	2,  // 5: ferret.wire.v1.Execution.output:type_name -> ferret.wire.v1.Output
-	3,  // 6: ferret.wire.v1.Execution.failure:type_name -> ferret.wire.v1.Failure
-	4,  // 7: ferret.wire.v1.ExecutionStarted.execution:type_name -> ferret.wire.v1.Execution
-	4,  // 8: ferret.wire.v1.ExecutionCompleted.execution:type_name -> ferret.wire.v1.Execution
-	4,  // 9: ferret.wire.v1.ExecutionFailed.execution:type_name -> ferret.wire.v1.Execution
-	4,  // 10: ferret.wire.v1.ExecutionCancelled.execution:type_name -> ferret.wire.v1.Execution
-	1,  // 11: ferret.wire.v1.WatchExecutionResponse.execution_id:type_name -> ferret.wire.v1.ExecutionId
-	5,  // 12: ferret.wire.v1.WatchExecutionResponse.started:type_name -> ferret.wire.v1.ExecutionStarted
-	6,  // 13: ferret.wire.v1.WatchExecutionResponse.completed:type_name -> ferret.wire.v1.ExecutionCompleted
-	7,  // 14: ferret.wire.v1.WatchExecutionResponse.failed:type_name -> ferret.wire.v1.ExecutionFailed
-	8,  // 15: ferret.wire.v1.WatchExecutionResponse.cancelled:type_name -> ferret.wire.v1.ExecutionCancelled
-	20, // 16: ferret.wire.v1.ExecuteRequest.connection_id:type_name -> ferret.wire.v1.ConnectionId
-	19, // 17: ferret.wire.v1.ExecuteRequest.plan_id:type_name -> ferret.wire.v1.PlanId
-	21, // 18: ferret.wire.v1.ExecuteRequest.parameters:type_name -> ferret.wire.v1.Parameters
-	4,  // 19: ferret.wire.v1.ExecuteResponse.execution:type_name -> ferret.wire.v1.Execution
-	20, // 20: ferret.wire.v1.CancelExecutionRequest.connection_id:type_name -> ferret.wire.v1.ConnectionId
-	1,  // 21: ferret.wire.v1.CancelExecutionRequest.execution_id:type_name -> ferret.wire.v1.ExecutionId
-	4,  // 22: ferret.wire.v1.CancelExecutionResponse.execution:type_name -> ferret.wire.v1.Execution
-	20, // 23: ferret.wire.v1.ReleaseExecutionRequest.connection_id:type_name -> ferret.wire.v1.ConnectionId
-	1,  // 24: ferret.wire.v1.ReleaseExecutionRequest.execution_id:type_name -> ferret.wire.v1.ExecutionId
-	20, // 25: ferret.wire.v1.WatchExecutionRequest.connection_id:type_name -> ferret.wire.v1.ConnectionId
-	1,  // 26: ferret.wire.v1.WatchExecutionRequest.execution_id:type_name -> ferret.wire.v1.ExecutionId
-	10, // 27: ferret.wire.v1.ExecutionService.Execute:input_type -> ferret.wire.v1.ExecuteRequest
-	12, // 28: ferret.wire.v1.ExecutionService.CancelExecution:input_type -> ferret.wire.v1.CancelExecutionRequest
-	14, // 29: ferret.wire.v1.ExecutionService.ReleaseExecution:input_type -> ferret.wire.v1.ReleaseExecutionRequest
-	16, // 30: ferret.wire.v1.ExecutionService.WatchExecution:input_type -> ferret.wire.v1.WatchExecutionRequest
-	11, // 31: ferret.wire.v1.ExecutionService.Execute:output_type -> ferret.wire.v1.ExecuteResponse
-	13, // 32: ferret.wire.v1.ExecutionService.CancelExecution:output_type -> ferret.wire.v1.CancelExecutionResponse
-	15, // 33: ferret.wire.v1.ExecutionService.ReleaseExecution:output_type -> ferret.wire.v1.ReleaseExecutionResponse
-	9,  // 34: ferret.wire.v1.ExecutionService.WatchExecution:output_type -> ferret.wire.v1.WatchExecutionResponse
-	31, // [31:35] is the sub-list for method output_type
-	27, // [27:31] is the sub-list for method input_type
-	27, // [27:27] is the sub-list for extension type_name
-	27, // [27:27] is the sub-list for extension extendee
-	0,  // [0:27] is the sub-list for field type_name
+	1,  // 0: ferret.wire.v1.Execution.id:type_name -> ferret.wire.v1.ExecutionId
+	0,  // 1: ferret.wire.v1.Execution.state:type_name -> ferret.wire.v1.ExecutionState
+	11, // 2: ferret.wire.v1.Execution.output:type_name -> ferret.wire.v1.Output
+	12, // 3: ferret.wire.v1.Execution.failure:type_name -> ferret.wire.v1.Failure
+	2,  // 4: ferret.wire.v1.WatchExecutionResponse.execution:type_name -> ferret.wire.v1.Execution
+	13, // 5: ferret.wire.v1.ExecuteRequest.connection_id:type_name -> ferret.wire.v1.ConnectionId
+	14, // 6: ferret.wire.v1.ExecuteRequest.plan_id:type_name -> ferret.wire.v1.PlanId
+	15, // 7: ferret.wire.v1.ExecuteRequest.parameters:type_name -> ferret.wire.v1.Parameters
+	2,  // 8: ferret.wire.v1.ExecuteResponse.execution:type_name -> ferret.wire.v1.Execution
+	13, // 9: ferret.wire.v1.CancelExecutionRequest.connection_id:type_name -> ferret.wire.v1.ConnectionId
+	1,  // 10: ferret.wire.v1.CancelExecutionRequest.execution_id:type_name -> ferret.wire.v1.ExecutionId
+	13, // 11: ferret.wire.v1.ReleaseExecutionRequest.connection_id:type_name -> ferret.wire.v1.ConnectionId
+	1,  // 12: ferret.wire.v1.ReleaseExecutionRequest.execution_id:type_name -> ferret.wire.v1.ExecutionId
+	13, // 13: ferret.wire.v1.WatchExecutionRequest.connection_id:type_name -> ferret.wire.v1.ConnectionId
+	1,  // 14: ferret.wire.v1.WatchExecutionRequest.execution_id:type_name -> ferret.wire.v1.ExecutionId
+	4,  // 15: ferret.wire.v1.ExecutionService.Execute:input_type -> ferret.wire.v1.ExecuteRequest
+	6,  // 16: ferret.wire.v1.ExecutionService.CancelExecution:input_type -> ferret.wire.v1.CancelExecutionRequest
+	8,  // 17: ferret.wire.v1.ExecutionService.ReleaseExecution:input_type -> ferret.wire.v1.ReleaseExecutionRequest
+	10, // 18: ferret.wire.v1.ExecutionService.WatchExecution:input_type -> ferret.wire.v1.WatchExecutionRequest
+	5,  // 19: ferret.wire.v1.ExecutionService.Execute:output_type -> ferret.wire.v1.ExecuteResponse
+	7,  // 20: ferret.wire.v1.ExecutionService.CancelExecution:output_type -> ferret.wire.v1.CancelExecutionResponse
+	9,  // 21: ferret.wire.v1.ExecutionService.ReleaseExecution:output_type -> ferret.wire.v1.ReleaseExecutionResponse
+	3,  // 22: ferret.wire.v1.ExecutionService.WatchExecution:output_type -> ferret.wire.v1.WatchExecutionResponse
+	19, // [19:23] is the sub-list for method output_type
+	15, // [15:19] is the sub-list for method input_type
+	15, // [15:15] is the sub-list for extension type_name
+	15, // [15:15] is the sub-list for extension extendee
+	0,  // [0:15] is the sub-list for field type_name
 }
 
 func init() { file_ferret_wire_v1_execution_proto_init() }
@@ -1122,19 +698,13 @@ func file_ferret_wire_v1_execution_proto_init() {
 	file_ferret_wire_v1_plan_proto_init()
 	file_ferret_wire_v1_runtime_proto_init()
 	file_ferret_wire_v1_value_proto_init()
-	file_ferret_wire_v1_execution_proto_msgTypes[8].OneofWrappers = []any{
-		(*WatchExecutionResponse_Started)(nil),
-		(*WatchExecutionResponse_Completed)(nil),
-		(*WatchExecutionResponse_Failed)(nil),
-		(*WatchExecutionResponse_Cancelled)(nil),
-	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_ferret_wire_v1_execution_proto_rawDesc), len(file_ferret_wire_v1_execution_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   16,
+			NumMessages:   10,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

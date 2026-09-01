@@ -3,12 +3,15 @@ syntax = "proto3";
 package ferret.wire.v1;
 
 import "ferret/wire/v1/runtime.proto";
+import "ferret/wire/v1/source.proto";
 
 option go_package = "github.com/MontFerret/wire/gen/ferret/wire/v1;wirev1";
 
 service PlanService {
-  // Compile creates a connection-owned runtime plan from FQL source.
+  // Compile creates a reusable connection-owned runtime plan from source.
   rpc Compile(CompileRequest) returns (CompileResponse);
+  // CompileDebug creates the same Plan resource with debugger metadata.
+  rpc CompileDebug(CompileDebugRequest) returns (CompileDebugResponse);
   // ReleasePlan cancels and releases the plan and all of its child resources.
   // The plan ID becomes stale after cleanup completes.
   rpc ReleasePlan(ReleasePlanRequest) returns (ReleasePlanResponse);
@@ -18,19 +21,28 @@ message PlanId {
   string value = 1;
 }
 
-message Source {
-  string content = 1;
-  string identity = 2;
+enum OptimizationLevel {
+  // Unspecified passes no plan option and preserves the runtime default.
+  OPTIMIZATION_LEVEL_UNSPECIFIED = 0;
+  OPTIMIZATION_LEVEL_NONE = 1;
+  OPTIMIZATION_LEVEL_BASIC = 2;
+  OPTIMIZATION_LEVEL_FULL = 3;
+  OPTIMIZATION_LEVEL_AGGRESSIVE = 4;
 }
 
 message CompileOptions {
-  bool debuggable = 1;
+  reserved 1;
+  reserved "debuggable";
+
+  OptimizationLevel optimization_level = 2;
 }
 
 message Plan {
+  reserved 3;
+  reserved "debuggable";
+
   PlanId id = 1;
   repeated string parameters = 2;
-  bool debuggable = 3;
 }
 
 message CompileRequest {
@@ -43,6 +55,16 @@ message CompileResponse {
   reserved 2;
   reserved "diagnostics";
 
+  Plan plan = 1;
+}
+
+message CompileDebugRequest {
+  ConnectionId connection_id = 1;
+  Source source = 2;
+  CompileOptions options = 3;
+}
+
+message CompileDebugResponse {
   Plan plan = 1;
 }
 

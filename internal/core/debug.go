@@ -22,6 +22,7 @@ type (
 		StopReason       debugger.Reason
 		Location         source.Range
 		HitBreakpointIDs []debugger.BreakpointID
+		Depth            int
 		Output           *Output
 		Failure          *Failure
 	}
@@ -57,6 +58,7 @@ type (
 		reason         debugger.Reason
 		location       source.Range
 		hitIDs         []debugger.BreakpointID
+		depth          int
 		output         *Output
 		failure        *Failure
 		breakpoints    map[debugger.BreakpointID]debugger.Breakpoint
@@ -124,6 +126,7 @@ func (d *DebugSession) start(
 	d.reason = ""
 	d.location = source.Range{}
 	d.hitIDs = nil
+	d.depth = 0
 	d.failure = nil
 	kind := DebugEventContinued
 
@@ -146,8 +149,8 @@ func (d *DebugSession) runCommand(command func(context.Context) (*debugger.Event
 			d.finishCommand(nil, errors.New("runtime debug execution panicked"))
 		}
 	}()
-	event, err := command(d.ctx)
 
+	event, err := command(d.ctx)
 	if err != nil {
 		d.finishCommand(nil, err)
 		return
@@ -182,10 +185,13 @@ func (d *DebugSession) finishCommand(event *debugger.Event, commandErr error) {
 		d.publishLocked(DebugEventFailed, true)
 		d.mu.Unlock()
 		d.beginClose()
+
 		return
 	}
 
 	d.location = event.Location
+	d.depth = event.Depth
+
 	switch event.Reason {
 	case debugger.ReasonEntry:
 		d.state = DebugStopped
@@ -211,9 +217,11 @@ func (d *DebugSession) finishCommand(event *debugger.Event, commandErr error) {
 		d.publishLocked(DebugEventStopped, false)
 	case debugger.ReasonCompleted:
 		d.state = DebugCompleted
+
 		if event.Output != nil {
 			d.output = &Output{ContentType: event.Output.ContentType, Content: append([]byte(nil), event.Output.Content...)}
 		}
+
 		d.publishLocked(DebugEventCompleted, true)
 		terminal = true
 	case debugger.ReasonTerminated:
@@ -225,6 +233,7 @@ func (d *DebugSession) finishCommand(event *debugger.Event, commandErr error) {
 			d.state = DebugTerminated
 			d.publishLocked(DebugEventTerminated, true)
 		}
+
 		terminal = true
 	default:
 		d.state = DebugFailed
@@ -233,6 +242,7 @@ func (d *DebugSession) finishCommand(event *debugger.Event, commandErr error) {
 		terminal = true
 	}
 	d.mu.Unlock()
+
 	if terminal {
 		d.beginClose()
 	}
@@ -286,6 +296,7 @@ func (d *DebugSession) snapshotLocked() DebugSnapshot {
 		StopReason:       d.reason,
 		Location:         d.location,
 		HitBreakpointIDs: append([]debugger.BreakpointID(nil), d.hitIDs...),
+		Depth:            d.depth,
 	}
 
 	if d.output != nil {
@@ -293,7 +304,7 @@ func (d *DebugSession) snapshotLocked() DebugSnapshot {
 	}
 
 	if d.failure != nil {
-		result.Failure = &Failure{Category: d.failure.Category, Message: d.failure.Message, Diagnostics: cloneDiagnostics(d.failure.Diagnostics)}
+		result.Failure = &Failure{Category: d.failure.Category, Message: d.failure.Message}
 	}
 
 	return result
@@ -302,12 +313,13 @@ func (d *DebugSession) snapshotLocked() DebugSnapshot {
 func (s DebugSnapshot) clone() DebugSnapshot {
 	result := s
 	result.HitBreakpointIDs = append([]debugger.BreakpointID(nil), s.HitBreakpointIDs...)
+
 	if s.Output != nil {
 		result.Output = &Output{ContentType: s.Output.ContentType, Content: append([]byte(nil), s.Output.Content...)}
 	}
 
 	if s.Failure != nil {
-		result.Failure = &Failure{Category: s.Failure.Category, Message: s.Failure.Message, Diagnostics: cloneDiagnostics(s.Failure.Diagnostics)}
+		result.Failure = &Failure{Category: s.Failure.Category, Message: s.Failure.Message}
 	}
 
 	return result
@@ -328,6 +340,7 @@ func (d *DebugSession) subscribe() (DebugSubscription, error) {
 	d.nextWatcher++
 	id := d.nextWatcher
 	current := d.lastEvent.clone()
+
 	if d.state.terminal() {
 		events := make(chan DebugEvent)
 		errorsChannel := make(chan error)
@@ -354,6 +367,7 @@ func (d *DebugSession) subscribe() (DebugSubscription, error) {
 func (d *DebugSession) publishLocked(kind DebugEventKind, terminal bool) {
 	d.sequence++
 	d.lastEvent = DebugEvent{Session: d.id, Sequence: d.sequence, Kind: kind, Snapshot: d.snapshotLocked()}
+
 	for id, watcher := range d.watchers {
 		select {
 		case watcher.events <- d.lastEvent.clone():
@@ -368,12 +382,14 @@ func (d *DebugSession) publishLocked(kind DebugEventKind, terminal bool) {
 
 func (e DebugEvent) clone() DebugEvent {
 	e.Snapshot = e.Snapshot.clone()
+
 	return e
 }
 
 func (d *DebugSession) unsubscribe(id uint64) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+
 	if watcher := d.watchers[id]; watcher != nil {
 		d.closeWatcherLocked(id, watcher, nil)
 	}
@@ -387,6 +403,7 @@ func (d *DebugSession) closeWatcherLocked(id uint64, watcher *debugWatcher, err 
 	if err != nil {
 		watcher.errors <- err
 	}
+
 	close(watcher.events)
 	close(watcher.errors)
 	delete(d.watchers, id)
@@ -424,6 +441,7 @@ func (d *DebugSession) settleClose() {
 		d.state = DebugTerminated
 		d.reason = ""
 		d.location = source.Range{}
+		d.depth = 0
 		d.failure = nil
 		d.publishLocked(DebugEventTerminated, true)
 	}
@@ -431,5 +449,6 @@ func (d *DebugSession) settleClose() {
 	for id, watcher := range d.watchers {
 		d.closeWatcherLocked(id, watcher, nil)
 	}
+
 	d.mu.Unlock()
 }

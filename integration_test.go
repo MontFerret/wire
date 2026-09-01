@@ -5,7 +5,6 @@ import (
 	"errors"
 	"net"
 	"reflect"
-	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -80,11 +79,11 @@ func TestUnifiedRuntimeCompileExecuteAndBorrowedOwnership(t *testing.T) {
 	}))
 
 	info := env.client.RuntimeInfo()
-	if info.APIIdentity != "ferret.wire.v1" || info.WireVersion == "" || info.FerretVersion != "" {
+	if info.APIIdentity != "ferret.wire" || info.WireVersion != "v1" || info.FerretVersion != "" {
 		t.Fatalf("unexpected generic runtime info: %#v", info)
 	}
-	if info.RuntimeIdentity == nil || info.RuntimeIdentity.Name != "test-host" || !info.Capabilities.Execution || !info.Capabilities.Debugging || !info.Capabilities.Cancellation {
-		t.Fatalf("unexpected identity or capabilities: %#v", info)
+	if info.RuntimeIdentity == nil || info.RuntimeIdentity.Name != "test-host" || info.Capabilities != (client.Capabilities{}) {
+		t.Fatalf("unexpected identity or legacy capabilities: %#v", info)
 	}
 
 	compiled, err := env.client.Compile(context.Background(), api.Source{
@@ -98,18 +97,15 @@ func TestUnifiedRuntimeCompileExecuteAndBorrowedOwnership(t *testing.T) {
 		t.Fatalf("unexpected plan parameters: %#v", compiled.Parameters())
 	}
 
-	when := time.Date(2026, 8, 28, 12, 0, 0, 0, time.UTC)
 	parameters := client.Parameters{
 		"input": map[string]any{
-			"none":     nil,
-			"boolean":  true,
-			"integer":  int64(7),
-			"float":    3.5,
-			"binary":   []byte{1, 2},
-			"duration": 5 * time.Second,
-			"datetime": when,
-			"regexp":   regexp.MustCompile("^wire$"),
-			"array":    []any{"one", int64(2)},
+			"none":    nil,
+			"boolean": true,
+			"integer": int64(7),
+			"float":   3.5,
+			"string":  "wire",
+			"binary":  []byte{1, 2},
+			"array":   []any{"one", int64(2)},
 		},
 	}
 	for range 2 {
@@ -277,7 +273,7 @@ func TestMessageLimitsRemainAtTheGRPCBoundary(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = wirev1.NewPlanServiceClient(env.conn).Compile(context.Background(), &wirev1.CompileRequest{
-		ConnectionId: handshake.GetOpened().GetConnectionId(),
+		ConnectionId: handshake.GetConnectionId(),
 		Source:       &wirev1.Source{Content: "RETURN 1 //" + string(make([]byte, 4<<20))},
 	})
 	if status.Code(err) != codes.ResourceExhausted {
@@ -480,18 +476,12 @@ func assertTransportNeutralParams(t *testing.T, values map[string]any) {
 	}
 	checks := map[string]any{
 		"none": nil, "boolean": true, "integer": int64(7), "float": 3.5,
-		"binary": []byte{1, 2}, "duration": 5 * time.Second,
+		"string": "wire", "binary": []byte{1, 2}, "array": []any{"one", int64(2)},
 	}
 	for name, want := range checks {
 		if !reflect.DeepEqual(input[name], want) {
 			t.Fatalf("unexpected %s parameter: %#v", name, input[name])
 		}
-	}
-	if value, ok := input["datetime"].(time.Time); !ok || !value.Equal(time.Date(2026, 8, 28, 12, 0, 0, 0, time.UTC)) {
-		t.Fatalf("unexpected datetime parameter: %#v", input["datetime"])
-	}
-	if value, ok := input["regexp"].(*regexp.Regexp); !ok || value.String() != "^wire$" {
-		t.Fatalf("unexpected regexp parameter: %#v", input["regexp"])
 	}
 }
 
