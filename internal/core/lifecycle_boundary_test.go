@@ -869,7 +869,7 @@ func TestSlowExecutionWatcherIsDetachedWithoutBlockingCompletion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	execution, err := connection.execution(started.ID)
+	execution, err := connection.executions.lookup(started.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -928,7 +928,7 @@ func TestSlowDebugWatcherIsDetachedAndRetainsSlotUntilCancelled(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	session, err := connection.debugSession(opened.ID)
+	session, err := connection.debugSessions.lookup(opened.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -965,7 +965,7 @@ func waitDebugState(t *testing.T, connection *Connection, id DebugSessionID, sta
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		session, err := connection.debugSession(id)
+		session, err := connection.debugSessions.lookup(id)
 		if err != nil {
 			t.Fatal(err)
 		}

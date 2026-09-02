@@ -48,3 +48,7 @@ func ignoreMissingResource(err error, category ErrorCategory) error {
 
 	return err
 }
+
+func failureFromError(category ErrorCategory) *Failure {
+	return &Failure{Category: category, Message: "runtime operation failed"}
+}

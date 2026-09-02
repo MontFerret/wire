@@ -95,6 +95,16 @@ const (
 
 const watcherBufferSize = 8
 
+func closeAPISession(session api.Session) (err error) {
+	defer func() {
+		if recover() != nil {
+			err = internalError(errors.New("runtime session cleanup panicked"))
+		}
+	}()
+
+	return session.Close()
+}
+
 func (e *Execution) run() {
 	var session api.Session
 	closeAttempted := false

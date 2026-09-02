@@ -116,6 +116,27 @@ Wire connection
     └── debug sessions
 ```
 
+Internally, `Connection` owns only the logical lifetime and three concrete
+resource stores. The plan store owns compilation, plan capacity, and plan
+release. Execution and debug-session stores own their connection-wide indexes,
+capacity, and release coordination. These child indexes exist because RPCs
+address executions and debug sessions by ID alone; the owning `Plan` membership
+is the ownership authority. Indexing does not flatten or transfer ownership,
+and a child remains a plan member until its teardown settles.
+
+Creation uses reserve, create, and commit phases. Pending capacity is reserved
+before calling the Unified API, registry locks are released for runtime calls,
+and publication is committed only while the connection and parent plan still
+accept children. Plan release gates new children, waits for an in-flight debug
+constructor, releases debug sessions and executions, and only then closes the
+Unified API plan.
+
+The nested lock order is connection lifetime, plan store, plan, then execution
+or debug-session store. Release paths do not hold registry locks while waiting
+for children or calling the Unified API. Debug-session state locking remains
+resource-local so commands and inspection stay serialized without coupling
+unrelated registries.
+
 When the Connect stream terminates, cleanup rejects new operations and cancels
 in-flight creation, waits for creation to settle, closes debug sessions,
 cancels and releases executions, releases plans, and terminates owned state and

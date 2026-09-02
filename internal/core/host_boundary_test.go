@@ -86,10 +86,8 @@ func TestCompileExecuteRetainsReusableAPIPlanAndSessionOptions(t *testing.T) {
 		t.Fatalf("unexpected parameters: %#v", compiled.Parameters)
 	}
 
-	connection.mu.RLock()
-	retained := connection.plans[compiled.ID]
-	connection.mu.RUnlock()
-	if retained == nil || retained.plan != plan {
+	retained, err := connection.plans.lookup(compiled.ID)
+	if err != nil || retained.plan != plan {
 		t.Fatal("Wire plan did not retain the API plan")
 	}
 	plan.mu.Lock()
@@ -115,17 +113,21 @@ func TestCompileExecuteRetainsReusableAPIPlanAndSessionOptions(t *testing.T) {
 	}
 
 	outputBytes[0] = '!'
-	connection.mu.RLock()
+	retained.mu.Lock()
+	executionIDs := make([]ExecutionID, 0, len(retained.executions))
 	for id := range retained.executions {
-		execution := connection.executions[id]
-		if execution == nil {
+		executionIDs = append(executionIDs, id)
+	}
+	retained.mu.Unlock()
+	for _, id := range executionIDs {
+		execution, lookupErr := connection.executions.lookup(id)
+		if lookupErr != nil {
 			continue
 		}
 		if got := execution.snapshot().Output.Content[0]; got != '{' {
 			t.Fatalf("execution retained runtime output storage: %q", got)
 		}
 	}
-	connection.mu.RUnlock()
 
 	options, _, _ := plan.snapshot()
 	if len(options) != 2 {
@@ -530,7 +532,7 @@ func newTestConnection(t *testing.T, runtime api.Runtime) *Connection {
 
 func waitExecution(t *testing.T, connection *Connection, id ExecutionID) ExecutionSnapshot {
 	t.Helper()
-	execution, err := connection.execution(id)
+	execution, err := connection.executions.lookup(id)
 	if err != nil {
 		t.Fatal(err)
 	}
