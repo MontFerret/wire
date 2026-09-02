@@ -18,7 +18,7 @@ import (
 // runtime passed to NewServer and never closes it.
 type Server struct {
 	grpcServer *grpc.Server
-	host       *core.Host
+	lifecycle  *core.Lifecycle
 
 	serveMu  sync.Mutex
 	serving  bool
@@ -48,27 +48,35 @@ func NewServer(runtime api.Runtime, options ...ServerOption) (*Server, error) {
 			InstanceID: configured.runtimeIdentity.InstanceID,
 		},
 	}
-	host, err := core.NewHost(runtime, info, core.Limits{
-		MaxConnections:                configured.limits.MaxConnections,
-		MaxPlansPerConnection:         configured.limits.MaxPlansPerConnection,
-		MaxExecutionsPerConnection:    configured.limits.MaxExecutionsPerConnection,
-		MaxDebugSessionsPerConnection: configured.limits.MaxDebugSessionsPerConnection,
-		MaxWatchersPerResource:        configured.limits.MaxWatchersPerResource,
-		MaxBreakpointsPerDebugSession: configured.limits.MaxBreakpointsPerDebugSession,
-	})
+	connections := core.NewConnectionRegistry(configured.limits.MaxConnections)
+	plans := core.NewPlanRegistry(configured.limits.MaxPlansPerConnection)
+	executions := core.NewExecutionRegistry(
+		configured.limits.MaxExecutionsPerConnection,
+		configured.limits.MaxWatchersPerResource,
+	)
+	debugSessions := core.NewDebugSessionRegistry(
+		configured.limits.MaxDebugSessionsPerConnection,
+		configured.limits.MaxWatchersPerResource,
+		configured.limits.MaxBreakpointsPerDebugSession,
+	)
+
+	compiler, err := core.NewCompiler(runtime, plans)
 	if err != nil {
 		return nil, err
 	}
 
+	executor := core.NewExecutor(plans, executions)
+	debugger := core.NewDebugger(plans, debugSessions)
+	lifecycleManager := core.NewLifecycle(connections, plans, executions, debugSessions)
 	grpcServer := grpc.NewServer(
 		grpc.MaxRecvMsgSize(configured.limits.MaxInboundMessageBytes),
 		grpc.MaxSendMsgSize(configured.limits.MaxOutboundMessageBytes),
 		grpc.UnaryInterceptor(grpcserver.UnaryRecoveryInterceptor),
 		grpc.StreamInterceptor(grpcserver.StreamRecoveryInterceptor),
 	)
-	grpcserver.New(host).Register(grpcServer)
+	grpcserver.New(info, connections, compiler, executor, debugger, lifecycleManager).Register(grpcServer)
 
-	return &Server{grpcServer: grpcServer, host: host}, nil
+	return &Server{grpcServer: grpcServer, lifecycle: lifecycleManager}, nil
 }
 
 // Serve serves the caller-owned listener until it fails, ctx is cancelled, or
@@ -155,7 +163,7 @@ func (s *Server) settleShutdown(deadline time.Time) {
 		}()
 	}
 
-	err = s.host.Close(context.Background())
+	err = s.lifecycle.Close(context.Background())
 	s.grpcServer.GracefulStop()
 }
 

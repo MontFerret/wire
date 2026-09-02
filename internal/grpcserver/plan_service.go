@@ -33,17 +33,19 @@ func (s *Server) CompileDebug(ctx context.Context, request *wirev1.CompileDebugR
 }
 
 func (s *Server) compile(ctx context.Context, request compileRequest, debug bool) (*wirev1.Plan, error) {
-	connection, err := s.connection(request.GetConnectionId())
+	operation, cancel, err := s.operationContext(ctx, request.GetConnectionId())
 	if err != nil {
 		return nil, err
 	}
+
+	defer cancel()
 
 	optimization, err := optimizationLevel(request.GetOptions())
 	if err != nil {
 		return nil, rpcError(err)
 	}
 
-	snapshot, err := connection.Compile(ctx, core.CompileInput{
+	snapshot, err := s.compiler.Compile(operation, core.CompileInput{
 		Source: api.Source{
 			Name:    request.GetSource().GetName(),
 			Content: request.GetSource().GetContent(),
@@ -84,12 +86,14 @@ func optimizationLevel(options *wirev1.CompileOptions) (*api.OptimizationLevel, 
 }
 
 func (s *Server) ReleasePlan(ctx context.Context, request *wirev1.ReleasePlanRequest) (*wirev1.ReleasePlanResponse, error) {
-	connection, err := s.connection(request.GetConnectionId())
+	operation, cancel, err := s.operationContext(ctx, request.GetConnectionId())
 	if err != nil {
 		return nil, err
 	}
 
-	if err := connection.ReleasePlan(ctx, core.PlanID(request.GetPlanId().GetValue())); err != nil {
+	defer cancel()
+
+	if err := s.lifecycle.ReleasePlan(operation, core.PlanID(request.GetPlanId().GetValue())); err != nil {
 		return nil, rpcError(err)
 	}
 

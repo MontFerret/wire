@@ -9,12 +9,19 @@ import (
 )
 
 func (s *Server) Frames(ctx context.Context, request *wirev1.FramesRequest) (*wirev1.FramesResponse, error) {
-	connection, err := s.connection(request.GetConnectionId())
+	operation, cancel, err := s.operationContext(ctx, request.GetConnectionId())
 	if err != nil {
 		return nil, err
 	}
 
-	values, err := connection.Frames(ctx, core.DebugSessionID(request.GetDebugSessionId().GetValue()))
+	defer cancel()
+
+	session, err := s.debugger.Session(operation, core.DebugSessionID(request.GetDebugSessionId().GetValue()))
+	if err != nil {
+		return nil, rpcError(err)
+	}
+
+	values, err := session.Frames(operation)
 	if err != nil {
 		return nil, rpcError(err)
 	}
@@ -25,6 +32,7 @@ func (s *Server) Frames(ctx context.Context, request *wirev1.FramesRequest) (*wi
 		if err != nil {
 			return nil, rpcError(err)
 		}
+
 		result[i] = converted
 	}
 
@@ -32,12 +40,19 @@ func (s *Server) Frames(ctx context.Context, request *wirev1.FramesRequest) (*wi
 }
 
 func (s *Server) FrameLocals(ctx context.Context, request *wirev1.FrameLocalsRequest) (*wirev1.FrameLocalsResponse, error) {
-	connection, err := s.connection(request.GetConnectionId())
+	operation, cancel, err := s.operationContext(ctx, request.GetConnectionId())
 	if err != nil {
 		return nil, err
 	}
 
-	values, err := connection.FrameLocals(ctx, core.DebugSessionID(request.GetDebugSessionId().GetValue()), int(request.GetFrameIndex()))
+	defer cancel()
+
+	session, err := s.debugger.Session(operation, core.DebugSessionID(request.GetDebugSessionId().GetValue()))
+	if err != nil {
+		return nil, rpcError(err)
+	}
+
+	values, err := session.FrameLocals(operation, int(request.GetFrameIndex()))
 	if err != nil {
 		return nil, rpcError(err)
 	}
@@ -48,6 +63,7 @@ func (s *Server) FrameLocals(ctx context.Context, request *wirev1.FrameLocalsReq
 		if err != nil {
 			return nil, rpcError(err)
 		}
+
 		result[i] = converted
 	}
 
@@ -55,17 +71,24 @@ func (s *Server) FrameLocals(ctx context.Context, request *wirev1.FrameLocalsReq
 }
 
 func (s *Server) Variables(ctx context.Context, request *wirev1.VariablesRequest) (*wirev1.VariablesResponse, error) {
-	connection, err := s.connection(request.GetConnectionId())
+	operation, cancel, err := s.operationContext(ctx, request.GetConnectionId())
 	if err != nil {
 		return nil, err
 	}
+
+	defer cancel()
 
 	reference, err := debuggerIDFromProto[debugger.ValueReference](request.GetReference(), "value reference")
 	if err != nil {
 		return nil, rpcError(err)
 	}
 
-	values, err := connection.Variables(ctx, core.DebugSessionID(request.GetDebugSessionId().GetValue()), reference)
+	session, err := s.debugger.Session(operation, core.DebugSessionID(request.GetDebugSessionId().GetValue()))
+	if err != nil {
+		return nil, rpcError(err)
+	}
+
+	values, err := session.Variables(operation, reference)
 	if err != nil {
 		return nil, rpcError(err)
 	}
@@ -76,6 +99,7 @@ func (s *Server) Variables(ctx context.Context, request *wirev1.VariablesRequest
 		if err != nil {
 			return nil, rpcError(err)
 		}
+
 		result[i] = converted
 	}
 
@@ -83,12 +107,19 @@ func (s *Server) Variables(ctx context.Context, request *wirev1.VariablesRequest
 }
 
 func (s *Server) EvaluateFrame(ctx context.Context, request *wirev1.EvaluateFrameRequest) (*wirev1.EvaluateFrameResponse, error) {
-	connection, err := s.connection(request.GetConnectionId())
+	operation, cancel, err := s.operationContext(ctx, request.GetConnectionId())
 	if err != nil {
 		return nil, err
 	}
 
-	value, err := connection.EvaluateFrame(ctx, core.DebugSessionID(request.GetDebugSessionId().GetValue()), int(request.GetFrameIndex()), request.GetExpression())
+	defer cancel()
+
+	session, err := s.debugger.Session(operation, core.DebugSessionID(request.GetDebugSessionId().GetValue()))
+	if err != nil {
+		return nil, rpcError(err)
+	}
+
+	value, err := session.EvaluateFrame(operation, int(request.GetFrameIndex()), request.GetExpression())
 	if err != nil {
 		return nil, rpcError(err)
 	}

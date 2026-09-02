@@ -19,10 +19,12 @@ func decodeParameters(input *wirev1.Parameters) (map[string]any, error) {
 		if name == "" {
 			return nil, fmt.Errorf("parameter name must not be empty")
 		}
+
 		value, err := decodeValue(inputValue, 0)
 		if err != nil {
 			return nil, fmt.Errorf("parameter %q: %w", name, err)
 		}
+
 		result[name] = value
 	}
 
@@ -73,15 +75,18 @@ func decodeValue(input *wirev1.Value, depth int) (any, error) {
 		if value.ObjectValue == nil {
 			return nil, fmt.Errorf("object value is required")
 		}
+
 		fields := make(map[string]any, len(value.ObjectValue.GetFields()))
 		for name, field := range value.ObjectValue.GetFields() {
 			if name == "" {
 				return nil, fmt.Errorf("object key must not be empty")
 			}
+
 			converted, err := decodeValue(field, depth+1)
 			if err != nil {
 				return nil, fmt.Errorf("object field %q: %w", name, err)
 			}
+
 			fields[name] = converted
 		}
 

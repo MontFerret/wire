@@ -6,15 +6,23 @@ import (
 )
 
 func (s *Server) WatchDebug(request *wirev1.WatchDebugRequest, stream wirev1.DebugService_WatchDebugServer) error {
-	connection, err := s.connection(request.GetConnectionId())
+	operation, cancel, err := s.operationContext(stream.Context(), request.GetConnectionId())
 	if err != nil {
 		return err
 	}
 
-	subscription, err := connection.WatchDebug(core.DebugSessionID(request.GetDebugSessionId().GetValue()))
+	defer cancel()
+
+	session, err := s.debugger.Session(operation, core.DebugSessionID(request.GetDebugSessionId().GetValue()))
 	if err != nil {
 		return rpcError(err)
 	}
+
+	subscription, err := session.Watch()
+	if err != nil {
+		return rpcError(err)
+	}
+
 	defer subscription.Cancel()
 
 	if subscription.Current.Sequence > 0 {
@@ -22,6 +30,7 @@ func (s *Server) WatchDebug(request *wirev1.WatchDebugRequest, stream wirev1.Deb
 		if err != nil {
 			return rpcError(err)
 		}
+
 		if err := stream.Send(converted); err != nil {
 			return err
 		}
@@ -29,6 +38,7 @@ func (s *Server) WatchDebug(request *wirev1.WatchDebugRequest, stream wirev1.Deb
 
 	eventsChannel := subscription.Events
 	errorsChannel := subscription.Errors
+
 	for {
 		select {
 		case <-stream.Context().Done():
@@ -42,6 +52,7 @@ func (s *Server) WatchDebug(request *wirev1.WatchDebugRequest, stream wirev1.Deb
 			if err != nil {
 				return rpcError(err)
 			}
+
 			if err := stream.Send(converted); err != nil {
 				return err
 			}

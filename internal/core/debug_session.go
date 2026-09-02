@@ -11,29 +11,6 @@ import (
 )
 
 type (
-	DebugState uint8
-
-	DebugEventKind uint8
-
-	DebugSnapshot struct {
-		ID               DebugSessionID
-		PlanID           PlanID
-		State            DebugState
-		StopReason       debugger.Reason
-		Location         source.Range
-		HitBreakpointIDs []debugger.BreakpointID
-		Depth            int
-		Output           *Output
-		Failure          *Failure
-	}
-
-	DebugEvent struct {
-		Session  DebugSessionID
-		Sequence uint64
-		Kind     DebugEventKind
-		Snapshot DebugSnapshot
-	}
-
 	DebugSubscription struct {
 		Current DebugEvent
 		Events  <-chan DebugEvent
@@ -50,7 +27,8 @@ type (
 	DebugSession struct {
 		mu             sync.Mutex
 		id             DebugSessionID
-		plan           *Plan
+		owner          ConnectionID
+		planID         PlanID
 		debugger       debugger.Session
 		ctx            context.Context
 		cancel         context.CancelCauseFunc
@@ -96,6 +74,26 @@ const (
 	DebugEventFailed
 	DebugEventTerminated
 )
+
+func closeAPIDebugSession(session debugger.Session) (err error) {
+	defer func() {
+		if recover() != nil {
+			err = internalError(errors.New("runtime debug cleanup panicked"))
+		}
+	}()
+
+	return session.Close()
+}
+
+func (d *DebugSession) Watch() (DebugSubscription, error) {
+	return d.subscribe()
+}
+
+func (d *DebugSession) Close(ctx context.Context) error {
+	d.beginClose()
+
+	return d.close.Wait(ctx)
+}
 
 func (d *DebugSession) start(
 	ctx context.Context,
@@ -169,6 +167,7 @@ func (d *DebugSession) finishCommand(event *debugger.Event, commandErr error) {
 	d.mu.Lock()
 	if d.state != DebugRunning {
 		d.mu.Unlock()
+
 		return
 	}
 
@@ -178,8 +177,10 @@ func (d *DebugSession) finishCommand(event *debugger.Event, commandErr error) {
 			d.publishLocked(DebugEventTerminated, true)
 			d.mu.Unlock()
 			d.beginClose()
+
 			return
 		}
+
 		d.state = DebugFailed
 		d.failure = failureFromError(ErrorInternal)
 		d.publishLocked(DebugEventFailed, true)
@@ -248,16 +249,6 @@ func (d *DebugSession) finishCommand(event *debugger.Event, commandErr error) {
 	}
 }
 
-func closeAPIDebugSession(session debugger.Session) (err error) {
-	defer func() {
-		if recover() != nil {
-			err = internalError(errors.New("runtime debug cleanup panicked"))
-		}
-	}()
-
-	return session.Close()
-}
-
 func (d *DebugSession) requireStoppedLocked(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -291,7 +282,7 @@ func (d *DebugSession) snapshot() DebugSnapshot {
 func (d *DebugSession) snapshotLocked() DebugSnapshot {
 	result := DebugSnapshot{
 		ID:               d.id,
-		PlanID:           d.plan.id,
+		PlanID:           d.planID,
 		State:            d.state,
 		StopReason:       d.reason,
 		Location:         d.location,
@@ -308,25 +299,6 @@ func (d *DebugSession) snapshotLocked() DebugSnapshot {
 	}
 
 	return result
-}
-
-func (s DebugSnapshot) clone() DebugSnapshot {
-	result := s
-	result.HitBreakpointIDs = append([]debugger.BreakpointID(nil), s.HitBreakpointIDs...)
-
-	if s.Output != nil {
-		result.Output = &Output{ContentType: s.Output.ContentType, Content: append([]byte(nil), s.Output.Content...)}
-	}
-
-	if s.Failure != nil {
-		result.Failure = &Failure{Category: s.Failure.Category, Message: s.Failure.Message}
-	}
-
-	return result
-}
-
-func (s DebugState) terminal() bool {
-	return s == DebugCompleted || s == DebugFailed || s == DebugTerminated
 }
 
 func (d *DebugSession) subscribe() (DebugSubscription, error) {
@@ -380,12 +352,6 @@ func (d *DebugSession) publishLocked(kind DebugEventKind, terminal bool) {
 	}
 }
 
-func (e DebugEvent) clone() DebugEvent {
-	e.Snapshot = e.Snapshot.clone()
-
-	return e
-}
-
 func (d *DebugSession) unsubscribe(id uint64) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -407,12 +373,6 @@ func (d *DebugSession) closeWatcherLocked(id uint64, watcher *debugWatcher, err 
 	close(watcher.events)
 	close(watcher.errors)
 	delete(d.watchers, id)
-}
-
-func (d *DebugSession) Close(ctx context.Context) error {
-	d.beginClose()
-
-	return d.close.Wait(ctx)
 }
 
 // Terminal command paths commit cleanup without waiting from the command

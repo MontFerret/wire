@@ -8,17 +8,19 @@ import (
 )
 
 func (s *Server) Execute(ctx context.Context, request *wirev1.ExecuteRequest) (*wirev1.ExecuteResponse, error) {
-	connection, err := s.connection(request.GetConnectionId())
+	operation, cancel, err := s.operationContext(ctx, request.GetConnectionId())
 	if err != nil {
 		return nil, err
 	}
+
+	defer cancel()
 
 	parameters, err := decodeParameters(request.GetParameters())
 	if err != nil {
 		return nil, rpcError(&core.DomainError{Category: core.ErrorInvalidRequest, Message: err.Error()})
 	}
 
-	snapshot, err := connection.Execute(ctx, core.ExecuteInput{
+	snapshot, err := s.executor.Execute(operation, core.ExecuteInput{
 		PlanID:            core.PlanID(request.GetPlanId().GetValue()),
 		Parameters:        parameters,
 		OutputContentType: request.GetOutputContentType(),
@@ -30,27 +32,33 @@ func (s *Server) Execute(ctx context.Context, request *wirev1.ExecuteRequest) (*
 	return &wirev1.ExecuteResponse{Execution: execution(snapshot)}, nil
 }
 
-func (s *Server) CancelExecution(_ context.Context, request *wirev1.CancelExecutionRequest) (*wirev1.CancelExecutionResponse, error) {
-	connection, err := s.connection(request.GetConnectionId())
+func (s *Server) CancelExecution(ctx context.Context, request *wirev1.CancelExecutionRequest) (*wirev1.CancelExecutionResponse, error) {
+	operation, cancel, err := s.operationContext(ctx, request.GetConnectionId())
 	if err != nil {
 		return nil, err
 	}
 
-	_, err = connection.CancelExecution(core.ExecutionID(request.GetExecutionId().GetValue()))
+	defer cancel()
+
+	execution, err := s.executor.Execution(operation, core.ExecutionID(request.GetExecutionId().GetValue()))
 	if err != nil {
 		return nil, rpcError(err)
 	}
+
+	execution.Cancel()
 
 	return &wirev1.CancelExecutionResponse{}, nil
 }
 
 func (s *Server) ReleaseExecution(ctx context.Context, request *wirev1.ReleaseExecutionRequest) (*wirev1.ReleaseExecutionResponse, error) {
-	connection, err := s.connection(request.GetConnectionId())
+	operation, cancel, err := s.operationContext(ctx, request.GetConnectionId())
 	if err != nil {
 		return nil, err
 	}
 
-	if err := connection.ReleaseExecution(ctx, core.ExecutionID(request.GetExecutionId().GetValue())); err != nil {
+	defer cancel()
+
+	if err := s.lifecycle.ReleaseExecution(operation, core.ExecutionID(request.GetExecutionId().GetValue())); err != nil {
 		return nil, rpcError(err)
 	}
 
@@ -58,15 +66,23 @@ func (s *Server) ReleaseExecution(ctx context.Context, request *wirev1.ReleaseEx
 }
 
 func (s *Server) WatchExecution(request *wirev1.WatchExecutionRequest, stream wirev1.ExecutionService_WatchExecutionServer) error {
-	connection, err := s.connection(request.GetConnectionId())
+	operation, cancel, err := s.operationContext(stream.Context(), request.GetConnectionId())
 	if err != nil {
 		return err
 	}
 
-	subscription, err := connection.WatchExecution(core.ExecutionID(request.GetExecutionId().GetValue()))
+	defer cancel()
+
+	execution, err := s.executor.Execution(operation, core.ExecutionID(request.GetExecutionId().GetValue()))
 	if err != nil {
 		return rpcError(err)
 	}
+
+	subscription, err := execution.Watch()
+	if err != nil {
+		return rpcError(err)
+	}
+
 	defer subscription.Cancel()
 
 	if subscription.Current.Sequence > 0 {
@@ -77,6 +93,7 @@ func (s *Server) WatchExecution(request *wirev1.WatchExecutionRequest, stream wi
 
 	eventsChannel := subscription.Events
 	errorsChannel := subscription.Errors
+
 	for {
 		select {
 		case <-stream.Context().Done():

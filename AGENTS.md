@@ -80,7 +80,8 @@ These rules are mandatory for handwritten Go code:
 * Prefer one grouped `type ( ... )` declaration for related package-level types.
 * Group structs, interfaces, aliases, and named primitive types when they form a
   cohesive responsibility.
-* Do not split files one type at a time merely because types have methods.
+* Keep one principal stateful type per file. Cohesive value, option, snapshot,
+  and watcher types may remain grouped with that principal type.
 * Keep related lifecycle or protocol-adaptation types together when proximity
   improves understanding.
 * Split files by responsibility, such as server lifecycle, execution handling,
@@ -98,8 +99,12 @@ These rules are mandatory for handwritten Go code:
 * Keep methods close to the state and lifecycle they own.
 * Constructors may live beside the types they construct.
 * A type-centered file must not mix in unrelated package-level functions.
+* A principal type's methods may be split into responsibility-focused files,
+  but those files must not mix methods from another substantial receiver.
 * If behavior belongs to a connection, plan, execution, debug session, watcher,
   server, or client lifecycle, prefer a method on that owner.
+* Do not introduce manager or facade types whose methods only forward to the
+  real operation owner. Components must own their use cases directly.
 * Move genuinely package-level behavior into a predictably named,
   responsibility-focused file.
 * Do not create arbitrary collections of small helper functions.

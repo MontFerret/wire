@@ -25,15 +25,6 @@ type (
 		RuntimeIdentity RuntimeIdentity
 	}
 
-	Limits struct {
-		MaxConnections                int
-		MaxPlansPerConnection         int
-		MaxExecutionsPerConnection    int
-		MaxDebugSessionsPerConnection int
-		MaxWatchersPerResource        int
-		MaxBreakpointsPerDebugSession int
-	}
-
 	ErrorCategory uint8
 
 	DomainError struct {
@@ -43,25 +34,6 @@ type (
 		Cause      error
 	}
 )
-
-func (limits Limits) validate() error {
-	values := []int{
-		limits.MaxConnections,
-		limits.MaxPlansPerConnection,
-		limits.MaxExecutionsPerConnection,
-		limits.MaxDebugSessionsPerConnection,
-		limits.MaxWatchersPerResource,
-		limits.MaxBreakpointsPerDebugSession,
-	}
-
-	for _, value := range values {
-		if value <= 0 {
-			return invalidRequest("runtime limits must be positive")
-		}
-	}
-
-	return nil
-}
 
 const (
 	ErrorInvalidRequest ErrorCategory = iota + 1
@@ -79,6 +51,22 @@ const (
 	ErrorResourceExhausted
 	ErrorBreakpointNotFound
 )
+
+func (e *DomainError) Error() string {
+	if e == nil {
+		return ""
+	}
+
+	if e.Message != "" {
+		return e.Message
+	}
+
+	return "Ferret Wire operation failed"
+}
+
+func (e *DomainError) Unwrap() error {
+	return e.Cause
+}
 
 func validateID[T ~string](value T, name string) error {
 	if value == "" {

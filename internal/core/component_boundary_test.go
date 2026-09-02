@@ -20,14 +20,14 @@ func TestHostRejectsNilRuntimeAndDoesNotCloseBorrowedRuntime(t *testing.T) {
 		"typed nil":     typedNil,
 	} {
 		t.Run(name, func(t *testing.T) {
-			if _, err := NewHost(runtime, RuntimeInfo{}, testLimits()); !hasCategory(err, ErrorInvalidRequest) {
+			if _, err := newTestHost(runtime, testLimits()); !hasCategory(err, ErrorInvalidRequest) {
 				t.Fatalf("unexpected nil runtime result: %v", err)
 			}
 		})
 	}
 
 	runtime := &spyRuntime{}
-	host, err := NewHost(runtime, RuntimeInfo{}, testLimits())
+	host, err := newTestHost(runtime, testLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +64,7 @@ func TestCompileExecuteRetainsReusableAPIPlanAndSessionOptions(t *testing.T) {
 	runtime := &spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 		return plan, nil
 	}}
-	host, err := NewHost(runtime, RuntimeInfo{}, testLimits())
+	host, err := newTestHost(runtime, testLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,18 +113,13 @@ func TestCompileExecuteRetainsReusableAPIPlanAndSessionOptions(t *testing.T) {
 	}
 
 	outputBytes[0] = '!'
-	retained.mu.Lock()
-	executionIDs := make([]ExecutionID, 0, len(retained.executions))
-	for id := range retained.executions {
-		executionIDs = append(executionIDs, id)
-	}
-	retained.mu.Unlock()
+	executionIDs := connection.host.executions.listByPlan(connection.ID(), retained.id)
 	for _, id := range executionIDs {
 		execution, lookupErr := connection.executions.lookup(id)
 		if lookupErr != nil {
 			continue
 		}
-		if got := execution.snapshot().Output.Content[0]; got != '{' {
+		if got := execution.Snapshot().Output.Content[0]; got != '{' {
 			t.Fatalf("execution retained runtime output storage: %q", got)
 		}
 	}
@@ -164,7 +159,7 @@ func TestCompileDelegatesDebugSelectionAndClosesAbandonedPlan(t *testing.T) {
 	runtime := &spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 		return compiled, nil
 	}}
-	host, err := NewHost(runtime, RuntimeInfo{}, testLimits())
+	host, err := newTestHost(runtime, testLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,7 +231,7 @@ func TestCompileForwardsOptionalOptimizationLevel(t *testing.T) {
 	runtime := &spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 		return &spyPlan{}, nil
 	}}
-	host, err := NewHost(runtime, RuntimeInfo{}, testLimits())
+	host, err := newTestHost(runtime, testLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -332,6 +327,51 @@ func TestCompilePanicsAreSanitizedAndCloseReturnedPlansOnce(t *testing.T) {
 		_, _, closeCalls := plan.snapshot()
 		if closeCalls != 1 {
 			t.Fatalf("abandoned plan cleanup attempted %d times", closeCalls)
+		}
+	})
+}
+
+func TestSessionConstructionPanicsAreSanitized(t *testing.T) {
+	t.Run("execution", func(t *testing.T) {
+		plan := &spyPlan{newSession: func(context.Context, sessionOptions) (api.Session, error) {
+			panic("session constructor secret")
+		}}
+		connection := newTestConnection(t, &spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
+			return plan, nil
+		}})
+		compiled, err := connection.Compile(context.Background(), CompileInput{Source: api.Source{Content: "RETURN 1"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		execution, err := connection.Execute(context.Background(), ExecuteInput{PlanID: compiled.ID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		finished := waitExecution(t, connection, execution.ID)
+		if finished.State != ExecutionFailed || finished.Failure == nil || finished.Failure.Category != ErrorInternal ||
+			strings.Contains(finished.Failure.Message, "secret") {
+			t.Fatalf("execution constructor panic was not sanitized: %#v", finished)
+		}
+	})
+
+	t.Run("debug", func(t *testing.T) {
+		plan := &spyPlan{newDebugSession: func(context.Context, sessionOptions) (debugger.Session, error) {
+			panic("debug constructor secret")
+		}}
+		connection := newTestConnection(t, &spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
+			return plan, nil
+		}})
+		compiled, err := connection.Compile(context.Background(), CompileInput{
+			Source:     api.Source{Content: "RETURN 1"},
+			Debuggable: true,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if _, err := connection.OpenDebugSession(context.Background(), OpenDebugInput{PlanID: compiled.ID}); !hasCategory(err, ErrorInternal) || strings.Contains(err.Error(), "secret") {
+			t.Fatalf("debug constructor panic was not sanitized: %v", err)
 		}
 	})
 }
@@ -516,9 +556,9 @@ func TestExecutionUsesPortableFailureFallbacks(t *testing.T) {
 	}
 }
 
-func newTestConnection(t *testing.T, runtime api.Runtime) *Connection {
+func newTestConnection(t *testing.T, runtime api.Runtime) *testEnvironment {
 	t.Helper()
-	host, err := NewHost(runtime, RuntimeInfo{}, testLimits())
+	host, err := newTestHost(runtime, testLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -530,7 +570,7 @@ func newTestConnection(t *testing.T, runtime api.Runtime) *Connection {
 	return connection
 }
 
-func waitExecution(t *testing.T, connection *Connection, id ExecutionID) ExecutionSnapshot {
+func waitExecution(t *testing.T, connection *testEnvironment, id ExecutionID) ExecutionSnapshot {
 	t.Helper()
 	execution, err := connection.executions.lookup(id)
 	if err != nil {
@@ -542,7 +582,7 @@ func waitExecution(t *testing.T, connection *Connection, id ExecutionID) Executi
 		t.Fatal("execution did not finish")
 	}
 
-	return execution.snapshot()
+	return execution.Snapshot()
 }
 
 func testContext(t *testing.T) context.Context {
@@ -553,8 +593,8 @@ func testContext(t *testing.T) context.Context {
 	return ctx
 }
 
-func testLimits() Limits {
-	return Limits{
+func testLimits() fixtureLimits {
+	return fixtureLimits{
 		MaxConnections:                4,
 		MaxPlansPerConnection:         4,
 		MaxExecutionsPerConnection:    4,

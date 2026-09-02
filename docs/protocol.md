@@ -39,10 +39,11 @@ Connection
 
 IDs are server-issued, opaque, and scoped to their owning connection. A client
 cannot use an ID through another connection. Explicit release invalidates the
-released ID. Releasing a Plan settles its debug sessions and executions before
+released ID. Releasing a Plan settles its executions and debug sessions before
 the Plan. Closing a connection, ending its Connect stream, or shutting down the
-server settles pending creation and then releases all descendants. Wire
-borrows the host's runtime and listener and never closes either one.
+server settles pending creation and then releases executions, debug sessions,
+and plans in that order. Wire borrows the host's runtime and listener and never
+closes either one.
 
 `Compile` and `CompileDebug` both create reusable Plan resources. Their only
 public data is the opaque ID and declared parameter names; the creating

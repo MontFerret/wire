@@ -7,15 +7,15 @@ import (
 	"github.com/MontFerret/api"
 )
 
-func BenchmarkConnectionCancelExecution(b *testing.B) {
+func BenchmarkExecutorCancelExecution(b *testing.B) {
 	plan := &spyPlan{newSession: func(context.Context, sessionOptions) (api.Session, error) {
 		return &spySession{run: func(context.Context) (api.Output, error) {
 			return api.Output{}, nil
 		}}, nil
 	}}
-	host, err := NewHost(&spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
+	host, err := newTestHost(&spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 		return plan, nil
-	}}, RuntimeInfo{}, testLimits())
+	}}, testLimits())
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -43,10 +43,15 @@ func BenchmarkConnectionCancelExecution(b *testing.B) {
 	})
 
 	b.ReportAllocs()
+	operation, cancel := connection.operation(context.Background())
+	defer cancel()
 	b.ResetTimer()
 	for b.Loop() {
-		if _, err := connection.CancelExecution(execution.ID); err != nil {
+		retained, err := connection.host.executor.Execution(operation, execution.ID)
+		if err != nil {
 			b.Fatal(err)
 		}
+
+		retained.Cancel()
 	}
 }

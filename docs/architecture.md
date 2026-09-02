@@ -10,7 +10,7 @@ particular runtime implementation.
 The dependency direction is:
 
 ```text
-consumers → protobuf/gRPC → Wire lifecycle host → Unified API → runtime implementation
+consumers → protobuf/gRPC → Wire components and lifecycle → Unified API → runtime implementation
 ```
 
 | Concern | Owner |
@@ -116,31 +116,56 @@ Wire connection
     └── debug sessions
 ```
 
-Internally, `Connection` owns only the logical lifetime and three concrete
-resource stores. The plan store owns compilation, plan capacity, and plan
-release. Execution and debug-session stores own their connection-wide indexes,
-capacity, and release coordination. These child indexes exist because RPCs
-address executions and debug sessions by ID alone; the owning `Plan` membership
-is the ownership authority. Indexing does not flatten or transfer ownership,
-and a child remains a plan member until its teardown settles.
+Internally, `Connection` owns only its opaque ID, cancellation context, open or
+closing state, and admission of in-flight operations. Server-scoped
+`ConnectionRegistry`, `PlanRegistry`, `ExecutionRegistry`, and
+`DebugSessionRegistry` instances own storage, indexes, and capacity accounting.
+Every plan, execution, and debug session records its owning connection ID;
+children also record their parent plan ID. An ID lookup always includes the
+requesting connection, so knowledge of another connection's ID never grants
+access.
+
+The server-scoped `Compiler`, `Executor`, and `Debugger` components own resource
+creation. Only `Compiler` depends on `api.Runtime`; execution and debugging use
+the `api.Plan` obtained from `PlanRegistry`. `Lifecycle` owns cleanup spanning
+resource types. Individual resources retain their own state machines, runtime
+handles, watches, and local close invariants. A per-operation Wire `Context`
+combines the unary or stream context with the resolved logical connection.
+
+```text
+Compiler ──► api.Runtime
+Compiler ──► PlanRegistry ◄── Executor
+                            ◄── Debugger
+Executor ──► ExecutionRegistry
+Debugger ──► DebugSessionRegistry
+Lifecycle ──► all four registries
+
+ConnectionRegistry ──► Connection ◄── operation Context
+```
+
+The arrows show dependencies: components depend on registries, registries do
+not depend on components, and `Connection` has no dependency on either.
 
 Creation uses reserve, create, and commit phases. Pending capacity is reserved
 before calling the Unified API, registry locks are released for runtime calls,
 and publication is committed only while the connection and parent plan still
-accept children. Plan release gates new children, waits for an in-flight debug
-constructor, releases debug sessions and executions, and only then closes the
+accept children. Plan release gates new children, waits for in-flight child
+constructors, releases executions and debug sessions, and only then closes the
 Unified API plan.
 
-The nested lock order is connection lifetime, plan store, plan, then execution
-or debug-session store. Release paths do not hold registry locks while waiting
-for children or calling the Unified API. Debug-session state locking remains
-resource-local so commands and inspection stay serialized without coupling
-unrelated registries.
+Each registry owns its collection lock and each resource owns its state lock.
+The only nested publication order is plan registry, plan, then the child
+registry. Connection shutdown first closes operation admission and waits for
+admitted creation to settle. Release paths never hold registry locks while
+waiting for constructors, children, or Unified API cleanup. Debug-session state
+locking remains resource-local so commands and inspection stay serialized
+without coupling unrelated registries.
 
 When the Connect stream terminates, cleanup rejects new operations and cancels
-in-flight creation, waits for creation to settle, closes debug sessions,
-cancels and releases executions, releases plans, and terminates owned state and
-goroutines.
+in-flight creation, waits for creation to settle, cancels and releases
+executions, closes debug sessions, releases plans, and terminates owned state
+and goroutines. Parent and connection traversal uses registry owner and plan
+indexes rather than nested resource collections.
 
 Release is committed teardown. Concurrent callers observing the same in-flight
 release wait for its retained result. After teardown finishes, the resource ID

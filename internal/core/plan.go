@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"errors"
 	"sync"
 
@@ -12,13 +13,12 @@ type (
 	Plan struct {
 		mu             sync.Mutex
 		id             PlanID
+		owner          ConnectionID
 		plan           api.Plan
 		parameters     []string
 		debuggable     bool
 		closing        bool
-		executions     map[ExecutionID]struct{}
-		debugSessions  map[DebugSessionID]struct{}
-		debugCreations sync.WaitGroup
+		childCreations sync.WaitGroup
 		release        lifecycle.Close
 	}
 
@@ -56,8 +56,51 @@ func closeAPIPlan(plan api.Plan) (err error) {
 }
 
 func (p *Plan) snapshot() PlanSnapshot {
-	return PlanSnapshot{
-		ID:         p.id,
-		Parameters: append([]string(nil), p.parameters...),
+	return PlanSnapshot{ID: p.id, Parameters: append([]string(nil), p.parameters...)}
+}
+
+func (p *Plan) beginChildCreation(debug bool) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.closing {
+		return notFound(ErrorPlanNotFound, string(p.id))
 	}
+
+	if debug && !p.debuggable {
+		return invalidState("plan was not compiled for debugging", nil)
+	}
+
+	p.childCreations.Add(1)
+
+	return nil
+}
+
+func (p *Plan) finishChildCreation() {
+	p.childCreations.Done()
+}
+
+func (p *Plan) markClosing() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.closing {
+		return false
+	}
+
+	p.closing = true
+
+	return p.release.Begin()
+}
+
+func (p *Plan) waitChildCreations() {
+	p.childCreations.Wait()
+}
+
+func (p *Plan) finishClose(err error) {
+	p.release.Finish(err)
+}
+
+func (p *Plan) waitClose(ctx context.Context) error {
+	return p.release.Wait(ctx)
 }

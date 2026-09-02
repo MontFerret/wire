@@ -4,22 +4,6 @@ import "errors"
 
 var ErrWatcherLagged = errors.New("wire watcher lagged")
 
-func (e *DomainError) Error() string {
-	if e == nil {
-		return ""
-	}
-
-	if e.Message != "" {
-		return e.Message
-	}
-
-	return "Ferret Wire operation failed"
-}
-
-func (e *DomainError) Unwrap() error {
-	return e.Cause
-}
-
 func invalidRequest(message string) error {
 	return &DomainError{Category: ErrorInvalidRequest, Message: message}
 }
@@ -34,6 +18,10 @@ func invalidState(message string, cause error) error {
 
 func internalError(cause error) error {
 	return &DomainError{Category: ErrorInternal, Message: "internal runtime failure", Cause: cause}
+}
+
+func compilationError(message string, cause error) error {
+	return &DomainError{Category: ErrorCompilation, Message: message, Cause: cause}
 }
 
 func resourceExhausted(message string) error {

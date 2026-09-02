@@ -8,20 +8,21 @@ import (
 )
 
 func (s *Server) Connect(_ *wirev1.ConnectRequest, stream wirev1.RuntimeService_ConnectServer) error {
-	connection, err := s.host.OpenConnection()
-	if err != nil {
+	connection := core.NewConnection()
+	if err := s.connections.Register(connection); err != nil {
 		return rpcError(err)
 	}
+
 	defer func() {
-		_ = s.host.CloseConnection(context.Background(), connection.ID())
+		_ = s.lifecycle.CloseConnection(context.Background(), connection.ID())
 	}()
 
-	info := s.host.Info()
 	response := &wirev1.ConnectResponse{
 		ConnectionId:    &wirev1.ConnectionId{Value: string(connection.ID())},
-		Protocol:        protocolInfo(info),
-		RuntimeIdentity: runtimeIdentity(info.RuntimeIdentity),
+		Protocol:        protocolInfo(s.info),
+		RuntimeIdentity: runtimeIdentity(s.info.RuntimeIdentity),
 	}
+
 	if err := stream.Send(response); err != nil {
 		return err
 	}
@@ -35,7 +36,7 @@ func (s *Server) Connect(_ *wirev1.ConnectRequest, stream wirev1.RuntimeService_
 }
 
 func (s *Server) CloseConnection(ctx context.Context, request *wirev1.CloseConnectionRequest) (*wirev1.CloseConnectionResponse, error) {
-	err := s.host.CloseConnection(ctx, core.ConnectionID(request.GetConnectionId().GetValue()))
+	err := s.lifecycle.CloseConnection(ctx, core.ConnectionID(request.GetConnectionId().GetValue()))
 	if err != nil {
 		return nil, rpcError(err)
 	}

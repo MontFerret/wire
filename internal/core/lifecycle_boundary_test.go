@@ -26,7 +26,7 @@ func TestPendingCompileCountsAgainstLimitAndConnectionCloseWaits(t *testing.T) {
 	}}
 	limits := testLimits()
 	limits.MaxPlansPerConnection = 1
-	host, err := NewHost(runtime, RuntimeInfo{}, limits)
+	host, err := newTestHost(runtime, limits)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,9 +76,9 @@ func TestPendingDebugCreationCountsAgainstLimitAndConnectionCloseWaits(t *testin
 	}}
 	limits := testLimits()
 	limits.MaxDebugSessionsPerConnection = 1
-	host, err := NewHost(&spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
+	host, err := newTestHost(&spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 		return plan, nil
-	}}, RuntimeInfo{}, limits)
+	}}, limits)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +131,7 @@ func TestClosingPlanCountsAgainstLimitUntilCleanupSettles(t *testing.T) {
 	}}
 	limits := testLimits()
 	limits.MaxPlansPerConnection = 1
-	host, err := NewHost(runtime, RuntimeInfo{}, limits)
+	host, err := newTestHost(runtime, limits)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -227,7 +227,7 @@ func TestResourceLimitsAndConnectionIsolationRemainWireOwned(t *testing.T) {
 	limits.MaxPlansPerConnection = 1
 	limits.MaxExecutionsPerConnection = 1
 	limits.MaxDebugSessionsPerConnection = 1
-	host, err := NewHost(runtime, RuntimeInfo{}, limits)
+	host, err := newTestHost(runtime, limits)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -308,9 +308,9 @@ func TestConcurrentConnectionCloseSharesResultAndThenBecomesStale(t *testing.T) 
 
 		return nil
 	}}
-	host, err := NewHost(&spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
+	host, err := newTestHost(&spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 		return plan, nil
-	}}, RuntimeInfo{}, testLimits())
+	}}, testLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -341,9 +341,9 @@ func TestConcurrentConnectionCloseSharesResultAndThenBecomesStale(t *testing.T) 
 	if err := host.CloseConnection(context.Background(), connection.ID()); !hasCategory(err, ErrorConnectionNotFound) {
 		t.Fatalf("closed connection did not become stale: %v", err)
 	}
-	host.mu.RLock()
-	closing := len(host.closing)
-	host.mu.RUnlock()
+	host.connections.mu.RLock()
+	closing := len(host.connections.closing)
+	host.connections.mu.RUnlock()
 	if closing != 0 {
 		t.Fatalf("host retained %d settled connection closes", closing)
 	}
@@ -366,7 +366,7 @@ func TestConnectionCloseCancelsExecutionAndReleasesWireResources(t *testing.T) {
 	runtime := &spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 		return plan, nil
 	}}
-	host, err := NewHost(runtime, RuntimeInfo{}, testLimits())
+	host, err := newTestHost(runtime, testLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -543,7 +543,7 @@ func TestPlanReleaseSettlesChildrenBeforeClosingAPIPlan(t *testing.T) {
 	orderMu.Lock()
 	settledOrder := append([]string(nil), order...)
 	orderMu.Unlock()
-	if !reflect.DeepEqual(settledOrder, []string{"debug", "execution", "plan"}) {
+	if !reflect.DeepEqual(settledOrder, []string{"execution", "debug", "plan"}) {
 		t.Fatalf("unexpected cleanup order: %#v", settledOrder)
 	}
 	if err := connection.ReleaseExecution(context.Background(), execution.ID); !hasCategory(err, ErrorExecutionNotFound) {
@@ -817,7 +817,7 @@ func TestDebugSessionStopAndParentCascadeCloseOnce(t *testing.T) {
 	})
 }
 
-func openTestDebugSession(t *testing.T, runtimeDebugger debugger.Session) (*Connection, PlanSnapshot, DebugSnapshot) {
+func openTestDebugSession(t *testing.T, runtimeDebugger debugger.Session) (*testEnvironment, PlanSnapshot, DebugSnapshot) {
 	t.Helper()
 	plan := &spyPlan{newDebugSession: func(context.Context, sessionOptions) (debugger.Session, error) {
 		return runtimeDebugger, nil
@@ -851,9 +851,9 @@ func TestSlowExecutionWatcherIsDetachedWithoutBlockingCompletion(t *testing.T) {
 			return api.Output{}, nil
 		}}, nil
 	}}
-	host, err := NewHost(&spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
+	host, err := newTestHost(&spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 		return plan, nil
-	}}, RuntimeInfo{}, limits)
+	}}, limits)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -873,7 +873,7 @@ func TestSlowExecutionWatcherIsDetachedWithoutBlockingCompletion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	subscription, err := execution.subscribe()
+	subscription, err := execution.Watch()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -891,11 +891,11 @@ func TestSlowExecutionWatcherIsDetachedWithoutBlockingCompletion(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("slow watcher was not detached")
 	}
-	if _, err := execution.subscribe(); !hasCategory(err, ErrorResourceExhausted) {
+	if _, err := execution.Watch(); !hasCategory(err, ErrorResourceExhausted) {
 		t.Fatalf("detached handler released watcher slot early: %v", err)
 	}
 	subscription.Cancel()
-	if next, err := execution.subscribe(); err != nil {
+	if next, err := execution.Watch(); err != nil {
 		t.Fatalf("watcher slot was not released: %v", err)
 	} else {
 		next.Cancel()
@@ -910,9 +910,9 @@ func TestSlowDebugWatcherIsDetachedAndRetainsSlotUntilCancelled(t *testing.T) {
 	plan := &spyPlan{newDebugSession: func(context.Context, sessionOptions) (debugger.Session, error) {
 		return &spyDebugger{}, nil
 	}}
-	host, err := NewHost(&spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
+	host, err := newTestHost(&spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 		return plan, nil
-	}}, RuntimeInfo{}, limits)
+	}}, limits)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -961,7 +961,7 @@ func TestSlowDebugWatcherIsDetachedAndRetainsSlotUntilCancelled(t *testing.T) {
 	}
 }
 
-func waitDebugState(t *testing.T, connection *Connection, id DebugSessionID, state DebugState) DebugSnapshot {
+func waitDebugState(t *testing.T, connection *testEnvironment, id DebugSessionID, state DebugState) DebugSnapshot {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {

@@ -2,46 +2,44 @@ package core
 
 import (
 	"context"
-	"errors"
 	"sync"
 
-	"github.com/MontFerret/api"
 	"github.com/MontFerret/wire/internal/lifecycle"
+	"github.com/google/uuid"
 )
 
-// Connection is the logical ownership scope established by RuntimeService.Connect.
-type Connection struct {
-	mu            sync.Mutex
-	id            ConnectionID
-	ctx           context.Context
-	cancel        context.CancelCauseFunc
-	plans         *planStore
-	executions    *executionStore
-	debugSessions *debugSessionStore
-	operations    sync.WaitGroup
-	closed        bool
-	close         lifecycle.Close
-}
+type (
+	connectionState uint8
 
-func newConnection(id ConnectionID, runtime api.Runtime, limits Limits) *Connection {
+	// Connection is the logical identity and lifetime established by
+	// RuntimeService.Connect. Resource ownership is represented in the global
+	// registries rather than by child collections on Connection.
+	Connection struct {
+		mu         sync.RWMutex
+		id         ConnectionID
+		ctx        context.Context
+		cancel     context.CancelCauseFunc
+		state      connectionState
+		operations sync.WaitGroup
+		close      lifecycle.Close
+	}
+)
+
+const (
+	connectionOpen connectionState = iota + 1
+	connectionClosing
+	connectionClosed
+)
+
+func NewConnection() *Connection {
 	ctx, cancel := context.WithCancelCause(context.Background())
-	connection := &Connection{
-		id:     id,
+
+	return &Connection{
+		id:     ConnectionID(uuid.NewString()),
 		ctx:    ctx,
 		cancel: cancel,
+		state:  connectionOpen,
 	}
-
-	connection.plans = newPlanStore(connection, runtime, limits.MaxPlansPerConnection)
-	connection.executions = newExecutionStore(connection, limits.MaxExecutionsPerConnection, limits.MaxWatchersPerResource)
-	connection.debugSessions = newDebugSessionStore(
-		connection,
-		limits.MaxDebugSessionsPerConnection,
-		limits.MaxWatchersPerResource,
-		limits.MaxBreakpointsPerDebugSession,
-	)
-	connection.plans.attachChildren(connection.executions, connection.debugSessions)
-
-	return connection
 }
 
 func (c *Connection) ID() ConnectionID {
@@ -52,49 +50,12 @@ func (c *Connection) Context() context.Context {
 	return c.ctx
 }
 
-func (c *Connection) Close(ctx context.Context) error {
-	if c.close.Begin() {
-		c.mu.Lock()
-		c.closed = true
-		c.cancel(context.Canceled)
-		c.mu.Unlock()
-
-		go func() {
-			var err error
-			defer func() {
-				if recover() != nil {
-					err = errors.Join(err, internalError(errors.New("connection cleanup panicked")))
-				}
-
-				c.close.Finish(err)
-			}()
-
-			err = c.settleClose()
-		}()
-	}
-
-	return c.close.Wait(ctx)
-}
-
-func (c *Connection) settleClose() error {
-	c.operations.Wait()
-
-	var result error
-	result = errors.Join(result, c.debugSessions.closeAll())
-	result = errors.Join(result, c.executions.closeAll())
-	result = errors.Join(result, c.plans.closeAll())
-
-	return result
-}
-
-// beginOperation registers creation before Close can begin waiting. Callers
-// must finish the operation after either committing or rolling back store state.
 func (c *Connection) beginOperation() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if err := c.ensureOpenLocked(); err != nil {
-		return err
+	if c.state != connectionOpen {
+		return invalidState("connection is closed", context.Canceled)
 	}
 
 	c.operations.Add(1)
@@ -106,35 +67,34 @@ func (c *Connection) finishOperation() {
 	c.operations.Done()
 }
 
-// commitCreation linearizes publication against connection shutdown. The
-// callback may take store and resource locks, but must not call external code.
-func (c *Connection) commitCreation(commit func() error) error {
+// beginClose linearizes connection cancellation against operation admission.
+// The caller that receives true owns cross-resource teardown.
+func (c *Connection) beginClose() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if err := c.ensureOpenLocked(); err != nil {
-		return err
+	if !c.close.Begin() {
+		return false
 	}
 
-	return commit()
+	c.state = connectionClosing
+	c.cancel(context.Canceled)
+
+	return true
 }
 
-func (c *Connection) operationContext(ctx context.Context) (context.Context, context.CancelFunc) {
-	operation, cancel := context.WithCancelCause(ctx)
-	stop := context.AfterFunc(c.ctx, func() {
-		cancel(context.Cause(c.ctx))
-	})
-
-	return operation, func() {
-		stop()
-		cancel(context.Canceled)
-	}
+func (c *Connection) waitOperations() {
+	c.operations.Wait()
 }
 
-func (c *Connection) ensureOpenLocked() error {
-	if c.closed {
-		return invalidState("connection is closed", context.Canceled)
-	}
+func (c *Connection) finishClose(err error) {
+	c.mu.Lock()
+	c.state = connectionClosed
+	c.mu.Unlock()
 
-	return nil
+	c.close.Finish(err)
+}
+
+func (c *Connection) waitClose(ctx context.Context) error {
+	return c.close.Wait(ctx)
 }
