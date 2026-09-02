@@ -27,28 +27,6 @@ const (
 	DebugEventTerminated
 )
 
-func (d *DebugSession) Watch() (DebugSubscription, error) {
-	subscription, err := d.events.subscribe()
-	if err != nil {
-		return DebugSubscription{}, resourceExhausted("debug watcher limit reached")
-	}
-
-	return DebugSubscription{
-		Current: subscription.current,
-		Events:  subscription.events,
-		Errors:  subscription.errors,
-		Cancel:  subscription.cancel,
-	}, nil
-}
-
-func (d *DebugSession) publishLocked(kind DebugEventKind, terminal bool) {
-	d.events.publish(DebugEvent{
-		Session:  d.id,
-		Kind:     kind,
-		Snapshot: d.snapshotLocked(),
-	}, terminal)
-}
-
 func (e DebugEvent) clone() DebugEvent {
 	e.Snapshot = e.Snapshot.clone()
 

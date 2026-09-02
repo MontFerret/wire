@@ -25,32 +25,6 @@ const (
 	ExecutionEventCancelled
 )
 
-func (e *Execution) Watch() (ExecutionSubscription, error) {
-	subscription, err := e.events.subscribe()
-	if err != nil {
-		return ExecutionSubscription{}, resourceExhausted("execution watcher limit reached")
-	}
-
-	return ExecutionSubscription{
-		Current: subscription.current,
-		Events:  subscription.events,
-		Errors:  subscription.errors,
-		Cancel:  subscription.cancel,
-	}, nil
-}
-
-func (e *Execution) publishLocked(kind ExecutionEventKind, terminal bool) {
-	e.events.publish(ExecutionEvent{
-		Execution: e.id,
-		Kind:      kind,
-		Snapshot:  e.snapshotLocked(),
-	}, terminal)
-
-	if terminal {
-		close(e.done)
-	}
-}
-
 func (e ExecutionEvent) clone() ExecutionEvent {
 	e.Snapshot = e.Snapshot.clone()
 

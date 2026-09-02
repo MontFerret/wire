@@ -101,25 +101,19 @@ func (c *Compiler) Compile(ctx *Context, input CompileInput) (PlanSnapshot, erro
 	return created.snapshot(), nil
 }
 
-func (c *Compiler) compileAPIPlan(ctx *Context, input CompileInput) (compiled api.Plan, err error, panicked bool) {
-	defer func() {
-		if recover() != nil {
-			compiled = nil
-			err = errors.New("runtime compilation panicked")
-			panicked = true
-		}
-	}()
-
+func (c *Compiler) compileAPIPlan(ctx *Context, input CompileInput) (api.Plan, error, bool) {
 	var options []api.PlanOption
 	if input.OptimizationLevel != nil {
 		options = append(options, api.WithOptimizationLevel(*input.OptimizationLevel))
 	}
 
 	if input.Debuggable {
-		compiled, err = c.runtime.CompileDebug(ctx, input.Source, options...)
-	} else {
-		compiled, err = c.runtime.Compile(ctx, input.Source, options...)
+		return callAPI("runtime compilation panicked", func() (api.Plan, error) {
+			return c.runtime.CompileDebug(ctx, input.Source, options...)
+		})
 	}
 
-	return
+	return callAPI("runtime compilation panicked", func() (api.Plan, error) {
+		return c.runtime.Compile(ctx, input.Source, options...)
+	})
 }

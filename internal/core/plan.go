@@ -2,7 +2,6 @@ package core
 
 import (
 	"context"
-	"errors"
 	"sync"
 
 	"github.com/MontFerret/api"
@@ -33,17 +32,6 @@ type (
 		Parameters []string
 	}
 )
-
-func apiPlanParameters(plan api.Plan) (parameters []string, err error) {
-	defer func() {
-		if recover() != nil {
-			parameters = nil
-			err = internalError(errors.New("runtime plan metadata panicked"))
-		}
-	}()
-
-	return append([]string(nil), plan.Params()...), nil
-}
 
 func (p *Plan) snapshot() PlanSnapshot {
 	return PlanSnapshot{ID: p.id, Parameters: append([]string(nil), p.parameters...)}

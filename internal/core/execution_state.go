@@ -29,26 +29,6 @@ const (
 	ExecutionCancelled
 )
 
-func (e *Execution) Snapshot() ExecutionSnapshot {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
-	return e.snapshotLocked()
-}
-
-func (e *Execution) snapshotLocked() ExecutionSnapshot {
-	result := ExecutionSnapshot{ID: e.id, PlanID: e.planID, State: e.state}
-	if e.output != nil {
-		result.Output = &Output{ContentType: e.output.ContentType, Content: append([]byte(nil), e.output.Content...)}
-	}
-
-	if e.failure != nil {
-		result.Failure = &Failure{Category: e.failure.Category, Message: e.failure.Message}
-	}
-
-	return result
-}
-
 func (s ExecutionSnapshot) clone() ExecutionSnapshot {
 	result := s
 

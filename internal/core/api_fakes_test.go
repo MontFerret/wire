@@ -43,6 +43,7 @@ type (
 		mu               sync.Mutex
 		start            func(context.Context) (*debugger.Event, error)
 		resume           func(context.Context) (*debugger.Event, error)
+		pause            func() error
 		setBreakpoint    func(source.Location, debugger.BreakpointOptions) (debugger.Breakpoint, error)
 		deleteBreakpoint func(debugger.BreakpointID) error
 		breakpoints      map[debugger.BreakpointID]debugger.Breakpoint
@@ -50,6 +51,7 @@ type (
 		locals           []debugger.Variable
 		setCalls         int
 		deleteCalls      int
+		pauseCalls       int
 		close            func() error
 		closeCalls       int
 	}
@@ -281,7 +283,16 @@ func (d *spyDebugger) resumeDebug(ctx context.Context) (*debugger.Event, error) 
 }
 
 func (d *spyDebugger) Pause() error {
-	return nil
+	d.mu.Lock()
+	d.pauseCalls++
+	pause := d.pause
+	d.mu.Unlock()
+
+	if pause == nil {
+		return nil
+	}
+
+	return pause()
 }
 
 func (d *spyDebugger) SetBreakpoint(position source.Location) (debugger.Breakpoint, error) {
@@ -290,11 +301,16 @@ func (d *spyDebugger) SetBreakpoint(position source.Location) (debugger.Breakpoi
 
 func (d *spyDebugger) SetBreakpointAt(position source.Location, options debugger.BreakpointOptions) (debugger.Breakpoint, error) {
 	d.mu.Lock()
-	defer d.mu.Unlock()
 	d.setCalls++
-	if d.setBreakpoint != nil {
-		return d.setBreakpoint(position, options)
+	setBreakpoint := d.setBreakpoint
+	d.mu.Unlock()
+
+	if setBreakpoint != nil {
+		return setBreakpoint(position, options)
 	}
+
+	d.mu.Lock()
+	defer d.mu.Unlock()
 
 	if d.breakpoints == nil {
 		d.breakpoints = make(map[debugger.BreakpointID]debugger.Breakpoint)
@@ -320,11 +336,16 @@ func (d *spyDebugger) SetBreakpointAt(position source.Location, options debugger
 
 func (d *spyDebugger) DeleteBreakpoint(id debugger.BreakpointID) error {
 	d.mu.Lock()
-	defer d.mu.Unlock()
 	d.deleteCalls++
-	if d.deleteBreakpoint != nil {
-		return d.deleteBreakpoint(id)
+	deleteBreakpoint := d.deleteBreakpoint
+	d.mu.Unlock()
+
+	if deleteBreakpoint != nil {
+		return deleteBreakpoint(id)
 	}
+
+	d.mu.Lock()
+	defer d.mu.Unlock()
 
 	delete(d.breakpoints, id)
 
@@ -392,6 +413,13 @@ func (d *spyDebugger) breakpointCalls() (int, int) {
 	defer d.mu.Unlock()
 
 	return d.setCalls, d.deleteCalls
+}
+
+func (d *spyDebugger) pauses() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	return d.pauseCalls
 }
 
 func (o *sessionOptions) SetParam(name string, value any) error {

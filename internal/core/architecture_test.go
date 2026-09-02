@@ -2,7 +2,12 @@ package core
 
 import (
 	"context"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -67,6 +72,7 @@ func TestOperationAggregatesDelegateSupportingInfrastructure(t *testing.T) {
 	t.Run("debug session", func(t *testing.T) {
 		typeOfSession := reflect.TypeFor[DebugSession]()
 		for _, name := range []string{
+			"debugger",
 			"reason",
 			"location",
 			"hitIDs",
@@ -100,7 +106,106 @@ func TestOperationAggregatesDelegateSupportingInfrastructure(t *testing.T) {
 		if !exists || events.Type != reflect.TypeFor[*eventStream[DebugEvent]]() {
 			t.Fatalf("DebugSession does not own the shared event stream: %v", events.Type)
 		}
+
+		controller, exists := typeOfSession.FieldByName("controller")
+		if !exists || controller.Type != reflect.TypeFor[*DebugController]() {
+			t.Fatalf("DebugSession does not own the debug controller: %v", controller.Type)
+		}
+
+		typeOfBreakpoints := reflect.TypeFor[breakpointSet]()
+		for _, name := range []string{"mu", "session"} {
+			if _, exists := typeOfBreakpoints.FieldByName(name); exists {
+				t.Fatalf("breakpointSet retained delegated field %q", name)
+			}
+		}
 	})
+}
+
+func TestPrincipalReceiversAndDebuggerHandleStayWithTheirOwners(t *testing.T) {
+	packages, err := parser.ParseDir(token.NewFileSet(), ".", nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	parsed := packages["core"]
+	for filename, file := range parsed.Files {
+		base := filepath.Base(filename)
+		if strings.HasSuffix(base, "_test.go") {
+			continue
+		}
+
+		for _, declaration := range file.Decls {
+			function, ok := declaration.(*ast.FuncDecl)
+			if ok && function.Recv != nil && len(function.Recv.List) == 1 {
+				receiver := receiverTypeName(function.Recv.List[0].Type)
+				switch receiver {
+				case "DebugSession":
+					if base != "debug_session.go" {
+						t.Errorf("DebugSession method %s is in %s", function.Name.Name, base)
+					}
+				case "DebugController":
+					if base != "debug_controller.go" {
+						t.Errorf("DebugController method %s is in %s", function.Name.Name, base)
+					}
+				case "Execution":
+					if base != "execution.go" {
+						t.Errorf("Execution method %s is in %s", function.Name.Name, base)
+					}
+				case "breakpointSet":
+					if base != "breakpoint_set.go" {
+						t.Errorf("breakpointSet method %s is in %s", function.Name.Name, base)
+					}
+				}
+			}
+
+			generic, ok := declaration.(*ast.GenDecl)
+			if !ok {
+				continue
+			}
+
+			for _, specification := range generic.Specs {
+				typeSpec, ok := specification.(*ast.TypeSpec)
+				if !ok {
+					continue
+				}
+
+				structure, ok := typeSpec.Type.(*ast.StructType)
+				if !ok {
+					continue
+				}
+
+				for _, field := range structure.Fields.List {
+					if debuggerSessionType(field.Type) && typeSpec.Name.Name != "DebugController" {
+						t.Errorf("%s stores debugger.Session in %s", typeSpec.Name.Name, base)
+					}
+				}
+			}
+		}
+	}
+}
+
+func receiverTypeName(expression ast.Expr) string {
+	if pointer, ok := expression.(*ast.StarExpr); ok {
+		expression = pointer.X
+	}
+
+	identifier, _ := expression.(*ast.Ident)
+	if identifier == nil {
+		return ""
+	}
+
+	return identifier.Name
+}
+
+func debuggerSessionType(expression ast.Expr) bool {
+	selector, ok := expression.(*ast.SelectorExpr)
+	if !ok || selector.Sel.Name != "Session" {
+		return false
+	}
+
+	packageName, _ := selector.X.(*ast.Ident)
+
+	return packageName != nil && packageName.Name == "debugger"
 }
 
 func TestContextCombinesRequestAndConnectionCancellation(t *testing.T) {

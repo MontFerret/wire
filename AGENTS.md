@@ -80,12 +80,15 @@ These rules are mandatory for handwritten Go code:
 * Prefer one grouped `type ( ... )` declaration for related package-level types.
 * Group structs, interfaces, aliases, and named primitive types when they form a
   cohesive responsibility.
-* Keep one principal stateful type per file. Cohesive value, option, snapshot,
-  and watcher types may remain grouped with that principal type.
+* Within `internal/core`, keep one principal stateful type and all of its
+  methods in one file. If that file becomes unreasonable, extract a real
+  state-owning collaborator rather than a method-category file.
+* Cohesive value, option, snapshot, and watcher types may remain grouped with
+  their principal type or in their own domain-focused file.
 * Keep related lifecycle or protocol-adaptation types together when proximity
   improves understanding.
-* Split files by responsibility, such as server lifecycle, execution handling,
-  debugger commands, debugger inspection, debugger events, or client lifecycle.
+* Outside `internal/core`, split files by cohesive responsibility when that
+  improves ownership and navigation.
 * Avoid overloaded files that combine unrelated responsibilities.
 * Do not create `helpers.go`, `utils.go`, or similar dumping grounds.
 
@@ -99,8 +102,8 @@ These rules are mandatory for handwritten Go code:
 * Keep methods close to the state and lifecycle they own.
 * Constructors may live beside the types they construct.
 * A type-centered file must not mix in unrelated package-level functions.
-* A principal type's methods may be split into responsibility-focused files,
-  but those files must not mix methods from another substantial receiver.
+* In `internal/core`, do not split a principal type's methods into lifecycle,
+  command, inspection, event, or other category files.
 * If behavior belongs to a connection, plan, execution, debug session, watcher,
   server, or client lifecycle, prefer a method on that owner.
 * Do not introduce manager or facade types whose methods only forward to the

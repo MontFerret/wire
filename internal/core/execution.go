@@ -65,34 +65,15 @@ func newExecution(
 }
 
 func (e *Execution) run() {
-	var session api.Session
-	closeAttempted := false
-
-	defer func() {
-		if recover() == nil {
-			return
-		}
-
-		if !isNil(session) && !closeAttempted {
-			closeAttempted = true
-			_ = closeAPISession(session)
-		}
-
-		e.finish(nil, errors.New("runtime execution panicked"), ErrorInternal)
-	}()
-
 	options := []api.SessionOption{api.WithParams(cloneParameters(e.parameters))}
 	if e.contentType != "" {
 		options = append(options, api.WithOutputContentType(e.contentType))
 	}
 
-	var err error
-	session, err = e.plan.NewSession(e.ctx, options...)
+	session, err, _ := openAPISession(e.ctx, e.plan, options)
 	if err != nil {
 		if !isNil(session) {
-			closeAttempted = true
 			err = errors.Join(err, closeAPISession(session))
-			session = nil
 		}
 
 		e.finish(nil, err, ErrorInternal)
@@ -106,14 +87,17 @@ func (e *Execution) run() {
 		return
 	}
 
-	output, runErr := session.Run(e.ctx)
-	closeAttempted = true
+	output, runErr, panicked := runAPISession(e.ctx, session)
 	closeErr := closeAPISession(session)
-	session = nil
 	err = errors.Join(runErr, closeErr)
-	result := &Output{ContentType: output.ContentType, Content: append([]byte(nil), output.Content...)}
+
+	var result *Output
+	if !panicked {
+		result = &Output{ContentType: output.ContentType, Content: append([]byte(nil), output.Content...)}
+	}
+
 	category := ErrorInternal
-	if runErr != nil {
+	if runErr != nil && !panicked {
 		category = ErrorExecution
 	}
 
@@ -170,4 +154,50 @@ func (e *Execution) settleClose() {
 	e.cancel(context.Canceled)
 	<-e.done
 	e.events.close()
+}
+
+func (e *Execution) Snapshot() ExecutionSnapshot {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	return e.snapshotLocked()
+}
+
+func (e *Execution) Watch() (ExecutionSubscription, error) {
+	subscription, err := e.events.subscribe()
+	if err != nil {
+		return ExecutionSubscription{}, resourceExhausted("execution watcher limit reached")
+	}
+
+	return ExecutionSubscription{
+		Current: subscription.current,
+		Events:  subscription.events,
+		Errors:  subscription.errors,
+		Cancel:  subscription.cancel,
+	}, nil
+}
+
+func (e *Execution) snapshotLocked() ExecutionSnapshot {
+	result := ExecutionSnapshot{ID: e.id, PlanID: e.planID, State: e.state}
+	if e.output != nil {
+		result.Output = &Output{ContentType: e.output.ContentType, Content: append([]byte(nil), e.output.Content...)}
+	}
+
+	if e.failure != nil {
+		result.Failure = &Failure{Category: e.failure.Category, Message: e.failure.Message}
+	}
+
+	return result
+}
+
+func (e *Execution) publishLocked(kind ExecutionEventKind, terminal bool) {
+	e.events.publish(ExecutionEvent{
+		Execution: e.id,
+		Kind:      kind,
+		Snapshot:  e.snapshotLocked(),
+	}, terminal)
+
+	if terminal {
+		close(e.done)
+	}
 }

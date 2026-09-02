@@ -509,17 +509,23 @@ func TestExecutionUsesPortableFailureFallbacks(t *testing.T) {
 		name       string
 		runErr     error
 		closeErr   error
+		panicRun   bool
 		want       ErrorCategory
 		wantOutput bool
 	}{
 		{name: "run", runErr: runSecret, want: ErrorExecution, wantOutput: true},
 		{name: "close", closeErr: closeSecret, want: ErrorInternal, wantOutput: true},
+		{name: "run panic", panicRun: true, want: ErrorInternal},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			session := &spySession{
 				run: func(context.Context) (api.Output, error) {
+					if test.panicRun {
+						panic("run secret must not escape")
+					}
+
 					return api.Output{ContentType: "application/json", Content: []byte("1")}, test.runErr
 				},
 				close: func() error { return test.closeErr },

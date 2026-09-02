@@ -5,7 +5,6 @@ import (
 	"errors"
 
 	"github.com/MontFerret/api"
-	"github.com/MontFerret/api/debugger"
 	"github.com/google/uuid"
 )
 
@@ -64,20 +63,25 @@ func (d *Debugger) Create(ctx *Context, input OpenDebugInput) (DebugSnapshot, er
 		return DebugSnapshot{}, internalError(err)
 	}
 
+	var controller *DebugController
+	if !isNil(runtimeDebugger) {
+		controller = newDebugController(runtimeDebugger)
+	}
+
 	if err != nil {
-		if !isNil(runtimeDebugger) {
-			return DebugSnapshot{}, errors.Join(internalError(err), closeAPIDebugSession(runtimeDebugger))
+		if controller != nil {
+			return DebugSnapshot{}, errors.Join(internalError(err), controller.Close())
 		}
 
 		return DebugSnapshot{}, internalError(err)
 	}
 
-	if isNil(runtimeDebugger) {
+	if controller == nil {
 		return DebugSnapshot{}, internalError(errors.New("runtime returned no debug session"))
 	}
 
 	if err := ctx.Err(); err != nil {
-		return DebugSnapshot{}, errors.Join(err, closeAPIDebugSession(runtimeDebugger))
+		return DebugSnapshot{}, errors.Join(err, controller.Close())
 	}
 
 	debugCtx, cancel := context.WithCancelCause(connection.Context())
@@ -85,7 +89,7 @@ func (d *Debugger) Create(ctx *Context, input OpenDebugInput) (DebugSnapshot, er
 		DebugSessionID(uuid.NewString()),
 		owner,
 		plan.id,
-		runtimeDebugger,
+		controller,
 		debugCtx,
 		cancel,
 		d.sessions.maxWatchers,
@@ -102,30 +106,12 @@ func (d *Debugger) Create(ctx *Context, input OpenDebugInput) (DebugSnapshot, er
 	if err != nil {
 		cancel(context.Canceled)
 
-		return DebugSnapshot{}, errors.Join(err, closeAPIDebugSession(runtimeDebugger))
+		return DebugSnapshot{}, errors.Join(err, controller.Close())
 	}
 
 	reserved = false
 
 	return created.snapshot(), nil
-}
-
-func openAPIDebugSession(
-	ctx context.Context,
-	plan api.Plan,
-	options []api.SessionOption,
-) (session debugger.Session, err error, panicked bool) {
-	defer func() {
-		if recover() != nil {
-			session = nil
-			err = errors.New("runtime debug session creation panicked")
-			panicked = true
-		}
-	}()
-
-	session, err = plan.NewDebugSession(ctx, options...)
-
-	return
 }
 
 func (d *Debugger) Session(ctx *Context, id DebugSessionID) (*DebugSession, error) {

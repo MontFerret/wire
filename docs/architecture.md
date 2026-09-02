@@ -152,10 +152,22 @@ generic event stream. The stream owns sequence allocation, latest-event replay,
 bounded watcher buffers, subscription accounting, fan-out, lag eviction, and
 channel shutdown; it has no knowledge of execution or debugger event meaning.
 `DebugSession` groups its current stop/result values in one cohesive state value
-and delegates breakpoint storage, limits, and runtime mutation to a
-session-local breakpoint component. The aggregate still owns command
-eligibility, runtime-session lifecycle, inspection serialization, and semantic
-event construction.
+and orchestrates a session-local breakpoint set, event stream, and
+`DebugController`. The controller exclusively owns and operates the Unified API
+`debugger.Session`; it contains only runtime-facing commands, inspection,
+breakpoint mutation, and idempotent close. The breakpoint set owns only the
+Wire-side limit and successful breakpoint records. The aggregate owns command
+eligibility, lifecycle and cancellation, breakpoint policy, serialization, and
+semantic event construction.
+
+```text
+DebugSession
+├── debugSessionState
+├── breakpointSet
+├── eventStream[DebugEvent]
+└── DebugController
+    └── debugger.Session
+```
 
 Creation uses reserve, create, and commit phases. Pending capacity is reserved
 before calling the Unified API, registry locks are released for runtime calls,
@@ -165,15 +177,16 @@ constructors, releases executions and debug sessions, and only then closes the
 Unified API plan.
 
 Each registry owns its collection lock, each resource owns its state lock, and
-the event-stream and breakpoint components own the locks protecting their local
-state. An execution or debug-session state lock may acquire one of its component
-locks, but components never acquire aggregate locks or call back into their
-aggregate. The only nested registry publication order is plan registry, plan,
+the event stream owns the lock protecting subscriptions and publication.
+`DebugSession` has a state mutex that protects only snapshots and transitions,
+plus a dedicated operation mutex that serializes stopped-state commands,
+inspection, breakpoint bookkeeping, pause requests, and command completion.
+The breakpoint set is accessed only under that operation mutex and therefore
+has no redundant lock. No debug-session state lock is held while invoking the
+Unified API. The only nested registry publication order is plan registry, plan,
 then the child registry. Connection shutdown first closes operation admission
 and waits for admitted creation to settle. Release paths never hold registry
 locks while waiting for constructors, children, or Unified API cleanup.
-Debug-session state locking remains resource-local so commands and inspection
-stay serialized without coupling unrelated registries.
 
 When the Connect stream terminates, cleanup rejects new operations and cancels
 in-flight creation, waits for creation to settle, cancels and releases
@@ -191,8 +204,12 @@ heartbeats, and reconnect tokens require a separate explicit contract.
 Every stateful resource has explicit synchronization, cancellation, ownership,
 and termination. Context cancellation propagates into Unified API operations.
 Debug inspection cannot wait through a resume and then inspect a later stop.
-Wire uses its explicit state lock and the Unified API debugger session rather
-than introducing a second command scheduler.
+An asynchronous resume releases the operation mutex while the runtime command
+is active so `Pause` and close can reach the controller. Command completion
+reacquires the operation mutex before committing state, which keeps pause
+responses and event ordering deterministic. Close cancels the session and calls
+the controller without waiting behind a potentially blocking stopped-state
+operation, then serializes the final state and event commit.
 
 Event buffers are bounded and producers are non-blocking. Each watch first
 replays the latest published snapshot when one exists, then receives ordered
