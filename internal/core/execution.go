@@ -10,40 +10,23 @@ import (
 )
 
 type (
-	ExecutionState uint8
-
-	ExecutionEventKind uint8
-
-	Output struct {
-		ContentType string
-		Content     []byte
-	}
-
-	Failure struct {
-		Category ErrorCategory
-		Message  string
-	}
-
-	ExecutionSnapshot struct {
-		ID      ExecutionID
-		PlanID  PlanID
-		State   ExecutionState
-		Output  *Output
-		Failure *Failure
-	}
-
-	ExecutionEvent struct {
-		Execution ExecutionID
-		Sequence  uint64
-		Kind      ExecutionEventKind
-		Snapshot  ExecutionSnapshot
-	}
-
-	ExecutionSubscription struct {
-		Current ExecutionEvent
-		Events  <-chan ExecutionEvent
-		Errors  <-chan error
-		Cancel  func()
+	Execution struct {
+		mu          sync.Mutex
+		id          ExecutionID
+		owner       ConnectionID
+		planID      PlanID
+		plan        api.Plan
+		ctx         context.Context
+		cancel      context.CancelCauseFunc
+		parameters  map[string]any
+		contentType string
+		state       ExecutionState
+		output      *Output
+		failure     *Failure
+		events      *eventStream[ExecutionEvent]
+		done        chan struct{}
+		close       lifecycle.Close
+		release     lifecycle.Close
 	}
 
 	ExecuteInput struct {
@@ -51,62 +34,34 @@ type (
 		Parameters        map[string]any
 		OutputContentType string
 	}
+)
 
-	executionWatcher struct {
-		events chan ExecutionEvent
-		errors chan error
+func newExecution(
+	id ExecutionID,
+	owner ConnectionID,
+	planID PlanID,
+	plan api.Plan,
+	ctx context.Context,
+	cancel context.CancelCauseFunc,
+	input ExecuteInput,
+	maxWatchers int,
+) *Execution {
+	execution := &Execution{
+		id:          id,
+		owner:       owner,
+		planID:      planID,
+		plan:        plan,
+		ctx:         ctx,
+		cancel:      cancel,
+		parameters:  cloneParameters(input.Parameters),
+		contentType: input.OutputContentType,
+		state:       ExecutionRunning,
+		events:      newEventStream[ExecutionEvent](maxWatchers),
+		done:        make(chan struct{}),
 	}
+	execution.publishLocked(ExecutionEventStarted, false)
 
-	Execution struct {
-		mu            sync.Mutex
-		id            ExecutionID
-		owner         ConnectionID
-		planID        PlanID
-		plan          api.Plan
-		session       api.Session
-		ctx           context.Context
-		cancel        context.CancelCauseFunc
-		parameters    map[string]any
-		contentType   string
-		maxWatchers   int
-		state         ExecutionState
-		output        *Output
-		failure       *Failure
-		sequence      uint64
-		lastEvent     ExecutionEvent
-		nextWatcher   uint64
-		subscriptions int
-		watchers      map[uint64]*executionWatcher
-		done          chan struct{}
-		close         lifecycle.Close
-		release       lifecycle.Close
-	}
-)
-
-const (
-	ExecutionRunning ExecutionState = iota + 1
-	ExecutionCompleted
-	ExecutionFailed
-	ExecutionCancelled
-)
-
-const (
-	ExecutionEventStarted ExecutionEventKind = iota + 1
-	ExecutionEventCompleted
-	ExecutionEventFailed
-	ExecutionEventCancelled
-)
-
-const watcherBufferSize = 8
-
-func closeAPISession(session api.Session) (err error) {
-	defer func() {
-		if recover() != nil {
-			err = internalError(errors.New("runtime session cleanup panicked"))
-		}
-	}()
-
-	return session.Close()
+	return execution
 }
 
 func (e *Execution) run() {
@@ -151,18 +106,9 @@ func (e *Execution) run() {
 		return
 	}
 
-	e.mu.Lock()
-	e.session = session
-	e.mu.Unlock()
-
 	output, runErr := session.Run(e.ctx)
 	closeAttempted = true
 	closeErr := closeAPISession(session)
-
-	e.mu.Lock()
-	e.session = nil
-	e.mu.Unlock()
-
 	session = nil
 	err = errors.Join(runErr, closeErr)
 	result := &Output{ContentType: output.ContentType, Content: append([]byte(nil), output.Content...)}
@@ -203,68 +149,6 @@ func (e *Execution) Cancel() ExecutionSnapshot {
 	return e.Snapshot()
 }
 
-func (e *Execution) Snapshot() ExecutionSnapshot {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
-	return e.snapshotLocked()
-}
-
-func (e *Execution) snapshotLocked() ExecutionSnapshot {
-	result := ExecutionSnapshot{ID: e.id, PlanID: e.planID, State: e.state}
-	if e.output != nil {
-		result.Output = &Output{ContentType: e.output.ContentType, Content: append([]byte(nil), e.output.Content...)}
-	}
-
-	if e.failure != nil {
-		result.Failure = &Failure{Category: e.failure.Category, Message: e.failure.Message}
-	}
-
-	return result
-}
-
-func (e *Execution) Watch() (ExecutionSubscription, error) {
-	e.mu.Lock()
-	if e.subscriptions >= e.maxWatchers {
-		e.mu.Unlock()
-
-		return ExecutionSubscription{}, resourceExhausted("execution watcher limit reached")
-	}
-
-	e.subscriptions++
-	e.nextWatcher++
-	id := e.nextWatcher
-	current := e.lastEvent.clone()
-
-	if e.state != ExecutionRunning {
-		events := make(chan ExecutionEvent)
-		errorsChannel := make(chan error)
-		close(events)
-		close(errorsChannel)
-		e.mu.Unlock()
-
-		var once sync.Once
-
-		return ExecutionSubscription{Current: current, Events: events, Errors: errorsChannel, Cancel: func() {
-			once.Do(func() { e.unsubscribe(id) })
-		}}, nil
-	}
-
-	watcher := &executionWatcher{events: make(chan ExecutionEvent, watcherBufferSize), errors: make(chan error, 1)}
-	e.watchers[id] = watcher
-	e.mu.Unlock()
-	var once sync.Once
-
-	return ExecutionSubscription{
-		Current: current,
-		Events:  watcher.events,
-		Errors:  watcher.errors,
-		Cancel: func() {
-			once.Do(func() { e.unsubscribe(id) })
-		},
-	}, nil
-}
-
 func (e *Execution) Close(ctx context.Context) error {
 	if e.close.Begin() {
 		go e.settleClose()
@@ -285,73 +169,5 @@ func (e *Execution) settleClose() {
 
 	e.cancel(context.Canceled)
 	<-e.done
-
-	e.mu.Lock()
-	for id, watcher := range e.watchers {
-		e.closeWatcherLocked(id, watcher, nil)
-	}
-	e.mu.Unlock()
-}
-
-func (e *Execution) publishLocked(kind ExecutionEventKind, terminal bool) {
-	e.sequence++
-	e.lastEvent = ExecutionEvent{Execution: e.id, Sequence: e.sequence, Kind: kind, Snapshot: e.snapshotLocked()}
-
-	for id, watcher := range e.watchers {
-		select {
-		case watcher.events <- e.lastEvent.clone():
-			if terminal {
-				e.closeWatcherLocked(id, watcher, nil)
-			}
-		default:
-			e.closeWatcherLocked(id, watcher, ErrWatcherLagged)
-		}
-	}
-
-	if terminal {
-		close(e.done)
-	}
-}
-
-func (e *Execution) unsubscribe(id uint64) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
-	if watcher := e.watchers[id]; watcher != nil {
-		e.closeWatcherLocked(id, watcher, nil)
-	}
-
-	if e.subscriptions > 0 {
-		e.subscriptions--
-	}
-}
-
-func (e *Execution) closeWatcherLocked(id uint64, watcher *executionWatcher, err error) {
-	if err != nil {
-		watcher.errors <- err
-	}
-
-	close(watcher.events)
-	close(watcher.errors)
-	delete(e.watchers, id)
-}
-
-func (e ExecutionEvent) clone() ExecutionEvent {
-	e.Snapshot = e.Snapshot.clone()
-
-	return e
-}
-
-func (s ExecutionSnapshot) clone() ExecutionSnapshot {
-	result := s
-
-	if s.Output != nil {
-		result.Output = &Output{ContentType: s.Output.ContentType, Content: append([]byte(nil), s.Output.Content...)}
-	}
-
-	if s.Failure != nil {
-		result.Failure = &Failure{Category: s.Failure.Category, Message: s.Failure.Message}
-	}
-
-	return result
+	e.events.close()
 }

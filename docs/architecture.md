@@ -146,6 +146,17 @@ ConnectionRegistry ──► Connection ◄── operation Context
 The arrows show dependencies: components depend on registries, registries do
 not depend on components, and `Connection` has no dependency on either.
 
+`Execution` and `DebugSession` retain their lifecycle and state-machine
+semantics while delegating reusable subscription mechanics to a package-private
+generic event stream. The stream owns sequence allocation, latest-event replay,
+bounded watcher buffers, subscription accounting, fan-out, lag eviction, and
+channel shutdown; it has no knowledge of execution or debugger event meaning.
+`DebugSession` groups its current stop/result values in one cohesive state value
+and delegates breakpoint storage, limits, and runtime mutation to a
+session-local breakpoint component. The aggregate still owns command
+eligibility, runtime-session lifecycle, inspection serialization, and semantic
+event construction.
+
 Creation uses reserve, create, and commit phases. Pending capacity is reserved
 before calling the Unified API, registry locks are released for runtime calls,
 and publication is committed only while the connection and parent plan still
@@ -153,13 +164,16 @@ accept children. Plan release gates new children, waits for in-flight child
 constructors, releases executions and debug sessions, and only then closes the
 Unified API plan.
 
-Each registry owns its collection lock and each resource owns its state lock.
-The only nested publication order is plan registry, plan, then the child
-registry. Connection shutdown first closes operation admission and waits for
-admitted creation to settle. Release paths never hold registry locks while
-waiting for constructors, children, or Unified API cleanup. Debug-session state
-locking remains resource-local so commands and inspection stay serialized
-without coupling unrelated registries.
+Each registry owns its collection lock, each resource owns its state lock, and
+the event-stream and breakpoint components own the locks protecting their local
+state. An execution or debug-session state lock may acquire one of its component
+locks, but components never acquire aggregate locks or call back into their
+aggregate. The only nested registry publication order is plan registry, plan,
+then the child registry. Connection shutdown first closes operation admission
+and waits for admitted creation to settle. Release paths never hold registry
+locks while waiting for constructors, children, or Unified API cleanup.
+Debug-session state locking remains resource-local so commands and inspection
+stay serialized without coupling unrelated registries.
 
 When the Connect stream terminates, cleanup rejects new operations and cancels
 in-flight creation, waits for creation to settle, cancels and releases

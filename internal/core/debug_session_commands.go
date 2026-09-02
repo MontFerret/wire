@@ -2,7 +2,6 @@ package core
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/MontFerret/api/debugger"
 	"github.com/MontFerret/api/source"
@@ -29,7 +28,7 @@ func (d *DebugSession) Pause(ctx context.Context) (DebugSnapshot, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	if d.state != DebugRunning {
+	if d.state.status != DebugRunning {
 		return DebugSnapshot{}, invalidState("debug session is not running", nil)
 	}
 
@@ -73,26 +72,11 @@ func (d *DebugSession) SetBreakpointAt(
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	if d.state != DebugCreated && d.state != DebugStopped {
+	if d.state.status != DebugCreated && d.state.status != DebugStopped {
 		return debugger.Breakpoint{}, invalidState("breakpoints require a created or stopped debug session", nil)
 	}
 
-	if len(d.breakpoints) >= d.maxBreakpoints {
-		return debugger.Breakpoint{}, resourceExhausted("breakpoint limit reached")
-	}
-
-	if err := ctx.Err(); err != nil {
-		return debugger.Breakpoint{}, err
-	}
-
-	value, err := d.debugger.SetBreakpointAt(location, options)
-	if err != nil {
-		return debugger.Breakpoint{}, invalidState("set breakpoint failed", err)
-	}
-
-	d.breakpoints[value.ID] = value
-
-	return value, nil
+	return d.breakpoints.set(ctx, location, options)
 }
 
 func (d *DebugSession) DeleteBreakpoint(ctx context.Context, breakpointID debugger.BreakpointID) error {
@@ -107,26 +91,11 @@ func (d *DebugSession) DeleteBreakpoint(ctx context.Context, breakpointID debugg
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	if d.state != DebugCreated && d.state != DebugStopped {
+	if d.state.status != DebugCreated && d.state.status != DebugStopped {
 		return invalidState("breakpoints require a created or stopped debug session", nil)
 	}
 
-	value, exists := d.breakpoints[breakpointID]
-	if !exists {
-		return notFound(ErrorBreakpointNotFound, fmt.Sprint(breakpointID))
-	}
-
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-
-	if err := d.debugger.DeleteBreakpoint(value.ID); err != nil {
-		return invalidState("delete breakpoint failed", err)
-	}
-
-	delete(d.breakpoints, breakpointID)
-
-	return nil
+	return d.breakpoints.delete(ctx, breakpointID)
 }
 
 func (d *DebugSession) Start(ctx context.Context) (DebugSnapshot, error) {

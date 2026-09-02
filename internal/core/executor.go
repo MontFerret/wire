@@ -52,22 +52,16 @@ func (e *Executor) Execute(ctx *Context, input ExecuteInput) (ExecutionSnapshot,
 	defer plan.finishChildCreation()
 
 	executionCtx, cancel := context.WithCancelCause(connection.Context())
-	created := &Execution{
-		id:          ExecutionID(uuid.NewString()),
-		owner:       owner,
-		planID:      plan.id,
-		plan:        plan.plan,
-		ctx:         executionCtx,
-		cancel:      cancel,
-		parameters:  cloneParameters(input.Parameters),
-		contentType: input.OutputContentType,
-		maxWatchers: e.executions.maxWatchers,
-		state:       ExecutionRunning,
-		watchers:    make(map[uint64]*executionWatcher),
-		done:        make(chan struct{}),
-	}
-
-	created.publishLocked(ExecutionEventStarted, false)
+	created := newExecution(
+		ExecutionID(uuid.NewString()),
+		owner,
+		plan.id,
+		plan.plan,
+		executionCtx,
+		cancel,
+		input,
+		e.executions.maxWatchers,
+	)
 
 	err = e.plans.commitChild(owner, input.PlanID, plan, func() error {
 		if err := ctx.Err(); err != nil {

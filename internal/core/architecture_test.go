@@ -41,6 +41,68 @@ func TestConnectionContainsOnlyLifetimeState(t *testing.T) {
 	}
 }
 
+func TestOperationAggregatesDelegateSupportingInfrastructure(t *testing.T) {
+	t.Run("execution", func(t *testing.T) {
+		typeOfExecution := reflect.TypeFor[Execution]()
+		for _, name := range []string{
+			"session",
+			"maxWatchers",
+			"sequence",
+			"lastEvent",
+			"nextWatcher",
+			"subscriptions",
+			"watchers",
+		} {
+			if _, exists := typeOfExecution.FieldByName(name); exists {
+				t.Fatalf("Execution retained delegated field %q", name)
+			}
+		}
+
+		events, exists := typeOfExecution.FieldByName("events")
+		if !exists || events.Type != reflect.TypeFor[*eventStream[ExecutionEvent]]() {
+			t.Fatalf("Execution does not own the shared event stream: %v", events.Type)
+		}
+	})
+
+	t.Run("debug session", func(t *testing.T) {
+		typeOfSession := reflect.TypeFor[DebugSession]()
+		for _, name := range []string{
+			"reason",
+			"location",
+			"hitIDs",
+			"depth",
+			"output",
+			"failure",
+			"maxWatchers",
+			"maxBreakpoints",
+			"sequence",
+			"lastEvent",
+			"nextWatcher",
+			"subscriptions",
+			"watchers",
+		} {
+			if _, exists := typeOfSession.FieldByName(name); exists {
+				t.Fatalf("DebugSession retained delegated field %q", name)
+			}
+		}
+
+		state, exists := typeOfSession.FieldByName("state")
+		if !exists || state.Type != reflect.TypeFor[debugSessionState]() {
+			t.Fatalf("DebugSession does not own cohesive debug state: %v", state.Type)
+		}
+
+		breakpoints, exists := typeOfSession.FieldByName("breakpoints")
+		if !exists || breakpoints.Type != reflect.TypeFor[*breakpointSet]() {
+			t.Fatalf("DebugSession does not own the breakpoint component: %v", breakpoints.Type)
+		}
+
+		events, exists := typeOfSession.FieldByName("events")
+		if !exists || events.Type != reflect.TypeFor[*eventStream[DebugEvent]]() {
+			t.Fatalf("DebugSession does not own the shared event stream: %v", events.Type)
+		}
+	})
+}
+
 func TestContextCombinesRequestAndConnectionCancellation(t *testing.T) {
 	connection := NewConnection()
 	request, cancelRequest := context.WithCancel(context.Background())

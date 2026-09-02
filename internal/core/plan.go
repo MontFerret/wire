@@ -45,16 +45,6 @@ func apiPlanParameters(plan api.Plan) (parameters []string, err error) {
 	return append([]string(nil), plan.Params()...), nil
 }
 
-func closeAPIPlan(plan api.Plan) (err error) {
-	defer func() {
-		if recover() != nil {
-			err = internalError(errors.New("runtime plan cleanup panicked"))
-		}
-	}()
-
-	return plan.Close()
-}
-
 func (p *Plan) snapshot() PlanSnapshot {
 	return PlanSnapshot{ID: p.id, Parameters: append([]string(nil), p.parameters...)}
 }

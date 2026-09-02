@@ -81,19 +81,16 @@ func (d *Debugger) Create(ctx *Context, input OpenDebugInput) (DebugSnapshot, er
 	}
 
 	debugCtx, cancel := context.WithCancelCause(connection.Context())
-	created := &DebugSession{
-		id:             DebugSessionID(uuid.NewString()),
-		owner:          owner,
-		planID:         plan.id,
-		debugger:       runtimeDebugger,
-		ctx:            debugCtx,
-		cancel:         cancel,
-		state:          DebugCreated,
-		breakpoints:    make(map[debugger.BreakpointID]debugger.Breakpoint),
-		maxWatchers:    d.sessions.maxWatchers,
-		maxBreakpoints: d.sessions.maxBreakpoints,
-		watchers:       make(map[uint64]*debugWatcher),
-	}
+	created := newDebugSession(
+		DebugSessionID(uuid.NewString()),
+		owner,
+		plan.id,
+		runtimeDebugger,
+		debugCtx,
+		cancel,
+		d.sessions.maxWatchers,
+		d.sessions.maxBreakpoints,
+	)
 
 	err = d.plans.commitChild(owner, input.PlanID, plan, func() error {
 		if err := ctx.Err(); err != nil {

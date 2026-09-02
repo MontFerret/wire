@@ -6,18 +6,10 @@ import (
 	"sync"
 
 	"github.com/MontFerret/api/debugger"
-	"github.com/MontFerret/api/source"
 	"github.com/MontFerret/wire/internal/lifecycle"
 )
 
 type (
-	DebugSubscription struct {
-		Current DebugEvent
-		Events  <-chan DebugEvent
-		Errors  <-chan error
-		Cancel  func()
-	}
-
 	OpenDebugInput struct {
 		PlanID            PlanID
 		Parameters        map[string]any
@@ -25,68 +17,42 @@ type (
 	}
 
 	DebugSession struct {
-		mu             sync.Mutex
-		id             DebugSessionID
-		owner          ConnectionID
-		planID         PlanID
-		debugger       debugger.Session
-		ctx            context.Context
-		cancel         context.CancelCauseFunc
-		state          DebugState
-		reason         debugger.Reason
-		location       source.Range
-		hitIDs         []debugger.BreakpointID
-		depth          int
-		output         *Output
-		failure        *Failure
-		breakpoints    map[debugger.BreakpointID]debugger.Breakpoint
-		maxWatchers    int
-		maxBreakpoints int
-		sequence       uint64
-		lastEvent      DebugEvent
-		nextWatcher    uint64
-		subscriptions  int
-		watchers       map[uint64]*debugWatcher
-		close          lifecycle.Close
-		release        lifecycle.Close
-	}
-
-	debugWatcher struct {
-		events chan DebugEvent
-		errors chan error
+		mu          sync.Mutex
+		id          DebugSessionID
+		owner       ConnectionID
+		planID      PlanID
+		debugger    debugger.Session
+		ctx         context.Context
+		cancel      context.CancelCauseFunc
+		state       debugSessionState
+		breakpoints *breakpointSet
+		events      *eventStream[DebugEvent]
+		close       lifecycle.Close
+		release     lifecycle.Close
 	}
 )
 
-const (
-	DebugCreated DebugState = iota + 1
-	DebugRunning
-	DebugStopped
-	DebugCompleted
-	DebugFailed
-	DebugTerminated
-)
-
-const (
-	DebugEventStarted DebugEventKind = iota + 1
-	DebugEventContinued
-	DebugEventStopped
-	DebugEventCompleted
-	DebugEventFailed
-	DebugEventTerminated
-)
-
-func closeAPIDebugSession(session debugger.Session) (err error) {
-	defer func() {
-		if recover() != nil {
-			err = internalError(errors.New("runtime debug cleanup panicked"))
-		}
-	}()
-
-	return session.Close()
-}
-
-func (d *DebugSession) Watch() (DebugSubscription, error) {
-	return d.subscribe()
+func newDebugSession(
+	id DebugSessionID,
+	owner ConnectionID,
+	planID PlanID,
+	runtime debugger.Session,
+	ctx context.Context,
+	cancel context.CancelCauseFunc,
+	maxWatchers int,
+	maxBreakpoints int,
+) *DebugSession {
+	return &DebugSession{
+		id:          id,
+		owner:       owner,
+		planID:      planID,
+		debugger:    runtime,
+		ctx:         ctx,
+		cancel:      cancel,
+		state:       debugSessionState{status: DebugCreated},
+		breakpoints: newBreakpointSet(runtime, maxBreakpoints),
+		events:      newEventStream[DebugEvent](maxWatchers),
+	}
 }
 
 func (d *DebugSession) Close(ctx context.Context) error {
@@ -103,10 +69,11 @@ func (d *DebugSession) start(
 	if err := ctx.Err(); err != nil {
 		return DebugSnapshot{}, err
 	}
-	d.mu.Lock()
 
+	d.mu.Lock()
 	if err := ctx.Err(); err != nil {
 		d.mu.Unlock()
+
 		return DebugSnapshot{}, err
 	}
 
@@ -115,19 +82,14 @@ func (d *DebugSession) start(
 		expected = DebugCreated
 	}
 
-	if d.state != expected {
+	if d.state.status != expected {
 		d.mu.Unlock()
+
 		return DebugSnapshot{}, invalidState("debug command is not valid in the current state", nil)
 	}
 
-	d.state = DebugRunning
-	d.reason = ""
-	d.location = source.Range{}
-	d.hitIDs = nil
-	d.depth = 0
-	d.failure = nil
+	d.state.beginRunning()
 	kind := DebugEventContinued
-
 	if initial {
 		kind = DebugEventStarted
 	}
@@ -151,11 +113,13 @@ func (d *DebugSession) runCommand(command func(context.Context) (*debugger.Event
 	event, err := command(d.ctx)
 	if err != nil {
 		d.finishCommand(nil, err)
+
 		return
 	}
 
 	if event == nil {
 		d.finishCommand(nil, errors.New("debug execution returned no event"))
+
 		return
 	}
 
@@ -165,7 +129,7 @@ func (d *DebugSession) runCommand(command func(context.Context) (*debugger.Event
 func (d *DebugSession) finishCommand(event *debugger.Event, commandErr error) {
 	terminal := false
 	d.mu.Lock()
-	if d.state != DebugRunning {
+	if d.state.status != DebugRunning {
 		d.mu.Unlock()
 
 		return
@@ -173,7 +137,7 @@ func (d *DebugSession) finishCommand(event *debugger.Event, commandErr error) {
 
 	if commandErr != nil {
 		if errors.Is(commandErr, context.Canceled) || errors.Is(context.Cause(d.ctx), context.Canceled) {
-			d.state = DebugTerminated
+			d.state.status = DebugTerminated
 			d.publishLocked(DebugEventTerminated, true)
 			d.mu.Unlock()
 			d.beginClose()
@@ -181,8 +145,8 @@ func (d *DebugSession) finishCommand(event *debugger.Event, commandErr error) {
 			return
 		}
 
-		d.state = DebugFailed
-		d.failure = failureFromError(ErrorInternal)
+		d.state.status = DebugFailed
+		d.state.failure = failureFromError(ErrorInternal)
 		d.publishLocked(DebugEventFailed, true)
 		d.mu.Unlock()
 		d.beginClose()
@@ -190,55 +154,58 @@ func (d *DebugSession) finishCommand(event *debugger.Event, commandErr error) {
 		return
 	}
 
-	d.location = event.Location
-	d.depth = event.Depth
+	d.state.location = event.Location
+	d.state.depth = event.Depth
 
 	switch event.Reason {
 	case debugger.ReasonEntry:
-		d.state = DebugStopped
-		d.reason = debugger.ReasonEntry
+		d.state.status = DebugStopped
+		d.state.reason = debugger.ReasonEntry
 		d.publishLocked(DebugEventStopped, false)
 	case debugger.ReasonBreakpoint:
-		d.state = DebugStopped
-		d.reason = debugger.ReasonBreakpoint
-		d.hitIDs = append([]debugger.BreakpointID(nil), event.HitBreakpointIDs...)
+		d.state.status = DebugStopped
+		d.state.reason = debugger.ReasonBreakpoint
+		d.state.hitIDs = append([]debugger.BreakpointID(nil), event.HitBreakpointIDs...)
 		d.publishLocked(DebugEventStopped, false)
 	case debugger.ReasonStep:
-		d.state = DebugStopped
-		d.reason = debugger.ReasonStep
+		d.state.status = DebugStopped
+		d.state.reason = debugger.ReasonStep
 		d.publishLocked(DebugEventStopped, false)
 	case debugger.ReasonPause:
-		d.state = DebugStopped
-		d.reason = debugger.ReasonPause
+		d.state.status = DebugStopped
+		d.state.reason = debugger.ReasonPause
 		d.publishLocked(DebugEventStopped, false)
 	case debugger.ReasonRuntimeError:
-		d.state = DebugStopped
-		d.reason = debugger.ReasonRuntimeError
-		d.failure = failureFromError(ErrorExecution)
+		d.state.status = DebugStopped
+		d.state.reason = debugger.ReasonRuntimeError
+		d.state.failure = failureFromError(ErrorExecution)
 		d.publishLocked(DebugEventStopped, false)
 	case debugger.ReasonCompleted:
-		d.state = DebugCompleted
+		d.state.status = DebugCompleted
 
 		if event.Output != nil {
-			d.output = &Output{ContentType: event.Output.ContentType, Content: append([]byte(nil), event.Output.Content...)}
+			d.state.output = &Output{
+				ContentType: event.Output.ContentType,
+				Content:     append([]byte(nil), event.Output.Content...),
+			}
 		}
 
 		d.publishLocked(DebugEventCompleted, true)
 		terminal = true
 	case debugger.ReasonTerminated:
 		if event.Error != nil && !errors.Is(context.Cause(d.ctx), context.Canceled) {
-			d.state = DebugFailed
-			d.failure = failureFromError(ErrorExecution)
+			d.state.status = DebugFailed
+			d.state.failure = failureFromError(ErrorExecution)
 			d.publishLocked(DebugEventFailed, true)
 		} else {
-			d.state = DebugTerminated
+			d.state.status = DebugTerminated
 			d.publishLocked(DebugEventTerminated, true)
 		}
 
 		terminal = true
 	default:
-		d.state = DebugFailed
-		d.failure = failureFromError(ErrorInternal)
+		d.state.status = DebugFailed
+		d.state.failure = failureFromError(ErrorInternal)
 		d.publishLocked(DebugEventFailed, true)
 		terminal = true
 	}
@@ -254,7 +221,7 @@ func (d *DebugSession) requireStoppedLocked(ctx context.Context) error {
 		return err
 	}
 
-	if d.state != DebugStopped {
+	if d.state.status != DebugStopped {
 		return invalidState("debug session is not stopped", nil)
 	}
 
@@ -276,103 +243,12 @@ func (d *DebugSession) operationContext(ctx context.Context) (context.Context, c
 func (d *DebugSession) snapshot() DebugSnapshot {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+
 	return d.snapshotLocked()
 }
 
 func (d *DebugSession) snapshotLocked() DebugSnapshot {
-	result := DebugSnapshot{
-		ID:               d.id,
-		PlanID:           d.planID,
-		State:            d.state,
-		StopReason:       d.reason,
-		Location:         d.location,
-		HitBreakpointIDs: append([]debugger.BreakpointID(nil), d.hitIDs...),
-		Depth:            d.depth,
-	}
-
-	if d.output != nil {
-		result.Output = &Output{ContentType: d.output.ContentType, Content: append([]byte(nil), d.output.Content...)}
-	}
-
-	if d.failure != nil {
-		result.Failure = &Failure{Category: d.failure.Category, Message: d.failure.Message}
-	}
-
-	return result
-}
-
-func (d *DebugSession) subscribe() (DebugSubscription, error) {
-	d.mu.Lock()
-	if d.subscriptions >= d.maxWatchers {
-		d.mu.Unlock()
-		return DebugSubscription{}, resourceExhausted("debug watcher limit reached")
-	}
-
-	d.subscriptions++
-	d.nextWatcher++
-	id := d.nextWatcher
-	current := d.lastEvent.clone()
-
-	if d.state.terminal() {
-		events := make(chan DebugEvent)
-		errorsChannel := make(chan error)
-		close(events)
-		close(errorsChannel)
-		d.mu.Unlock()
-		var once sync.Once
-
-		return DebugSubscription{Current: current, Events: events, Errors: errorsChannel, Cancel: func() {
-			once.Do(func() { d.unsubscribe(id) })
-		}}, nil
-	}
-
-	watcher := &debugWatcher{events: make(chan DebugEvent, watcherBufferSize), errors: make(chan error, 1)}
-	d.watchers[id] = watcher
-	d.mu.Unlock()
-	var once sync.Once
-
-	return DebugSubscription{Current: current, Events: watcher.events, Errors: watcher.errors, Cancel: func() {
-		once.Do(func() { d.unsubscribe(id) })
-	}}, nil
-}
-
-func (d *DebugSession) publishLocked(kind DebugEventKind, terminal bool) {
-	d.sequence++
-	d.lastEvent = DebugEvent{Session: d.id, Sequence: d.sequence, Kind: kind, Snapshot: d.snapshotLocked()}
-
-	for id, watcher := range d.watchers {
-		select {
-		case watcher.events <- d.lastEvent.clone():
-			if terminal {
-				d.closeWatcherLocked(id, watcher, nil)
-			}
-		default:
-			d.closeWatcherLocked(id, watcher, ErrWatcherLagged)
-		}
-	}
-}
-
-func (d *DebugSession) unsubscribe(id uint64) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-
-	if watcher := d.watchers[id]; watcher != nil {
-		d.closeWatcherLocked(id, watcher, nil)
-	}
-
-	if d.subscriptions > 0 {
-		d.subscriptions--
-	}
-}
-
-func (d *DebugSession) closeWatcherLocked(id uint64, watcher *debugWatcher, err error) {
-	if err != nil {
-		watcher.errors <- err
-	}
-
-	close(watcher.events)
-	close(watcher.errors)
-	delete(d.watchers, id)
+	return d.state.snapshot(d.id, d.planID)
 }
 
 // Terminal command paths commit cleanup without waiting from the command
@@ -397,18 +273,11 @@ func (d *DebugSession) settleClose() {
 	err = closeAPIDebugSession(d.debugger)
 
 	d.mu.Lock()
-	if !d.state.terminal() {
-		d.state = DebugTerminated
-		d.reason = ""
-		d.location = source.Range{}
-		d.depth = 0
-		d.failure = nil
+	if !d.state.status.terminal() {
+		d.state.terminate()
 		d.publishLocked(DebugEventTerminated, true)
 	}
-
-	for id, watcher := range d.watchers {
-		d.closeWatcherLocked(id, watcher, nil)
-	}
-
 	d.mu.Unlock()
+
+	d.events.close()
 }

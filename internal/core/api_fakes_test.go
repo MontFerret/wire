@@ -40,14 +40,18 @@ type (
 	}
 
 	spyDebugger struct {
-		mu          sync.Mutex
-		start       func(context.Context) (*debugger.Event, error)
-		resume      func(context.Context) (*debugger.Event, error)
-		breakpoints map[debugger.BreakpointID]debugger.Breakpoint
-		frames      []debugger.Frame
-		locals      []debugger.Variable
-		close       func() error
-		closeCalls  int
+		mu               sync.Mutex
+		start            func(context.Context) (*debugger.Event, error)
+		resume           func(context.Context) (*debugger.Event, error)
+		setBreakpoint    func(source.Location, debugger.BreakpointOptions) (debugger.Breakpoint, error)
+		deleteBreakpoint func(debugger.BreakpointID) error
+		breakpoints      map[debugger.BreakpointID]debugger.Breakpoint
+		frames           []debugger.Frame
+		locals           []debugger.Variable
+		setCalls         int
+		deleteCalls      int
+		close            func() error
+		closeCalls       int
 	}
 
 	sessionOptions struct {
@@ -287,6 +291,11 @@ func (d *spyDebugger) SetBreakpoint(position source.Location) (debugger.Breakpoi
 func (d *spyDebugger) SetBreakpointAt(position source.Location, options debugger.BreakpointOptions) (debugger.Breakpoint, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	d.setCalls++
+	if d.setBreakpoint != nil {
+		return d.setBreakpoint(position, options)
+	}
+
 	if d.breakpoints == nil {
 		d.breakpoints = make(map[debugger.BreakpointID]debugger.Breakpoint)
 	}
@@ -311,8 +320,13 @@ func (d *spyDebugger) SetBreakpointAt(position source.Location, options debugger
 
 func (d *spyDebugger) DeleteBreakpoint(id debugger.BreakpointID) error {
 	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.deleteCalls++
+	if d.deleteBreakpoint != nil {
+		return d.deleteBreakpoint(id)
+	}
+
 	delete(d.breakpoints, id)
-	d.mu.Unlock()
 
 	return nil
 }
@@ -371,6 +385,13 @@ func (d *spyDebugger) closes() int {
 	defer d.mu.Unlock()
 
 	return d.closeCalls
+}
+
+func (d *spyDebugger) breakpointCalls() (int, int) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	return d.setCalls, d.deleteCalls
 }
 
 func (o *sessionOptions) SetParam(name string, value any) error {
