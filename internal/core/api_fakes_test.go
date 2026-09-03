@@ -11,11 +11,12 @@ import (
 
 type (
 	spyRuntime struct {
-		mu             sync.Mutex
-		compile        func(context.Context, api.Source, bool) (api.Plan, error)
-		compileSources []api.Source
-		compileDebug   []bool
-		closeCalls     int
+		mu                  sync.Mutex
+		compile             func(context.Context, api.Source, bool) (api.Plan, error)
+		compileSources      []api.Source
+		compileDebug        []bool
+		compileOptimization []*api.OptimizationLevel
+		closeCalls          int
 	}
 
 	spyPlan struct {
@@ -39,19 +40,29 @@ type (
 	}
 
 	spyDebugger struct {
-		mu          sync.Mutex
-		start       func(context.Context) (*debugger.Event, error)
-		resume      func(context.Context) (*debugger.Event, error)
-		breakpoints map[debugger.BreakpointID]debugger.Breakpoint
-		frames      []debugger.Frame
-		locals      []debugger.Variable
-		close       func() error
-		closeCalls  int
+		mu               sync.Mutex
+		start            func(context.Context) (*debugger.Event, error)
+		resume           func(context.Context) (*debugger.Event, error)
+		pause            func() error
+		setBreakpoint    func(source.Location, debugger.BreakpointOptions) (debugger.Breakpoint, error)
+		deleteBreakpoint func(debugger.BreakpointID) error
+		breakpoints      map[debugger.BreakpointID]debugger.Breakpoint
+		frames           []debugger.Frame
+		locals           []debugger.Variable
+		setCalls         int
+		deleteCalls      int
+		pauseCalls       int
+		close            func() error
+		closeCalls       int
 	}
 
 	sessionOptions struct {
 		params      map[string]any
 		contentType string
+	}
+
+	planOptions struct {
+		optimizationLevel *api.OptimizationLevel
 	}
 )
 
@@ -59,18 +70,30 @@ func (r *spyRuntime) Run(context.Context, api.Source, ...api.SessionOption) (api
 	return api.Output{}, nil
 }
 
-func (r *spyRuntime) Compile(ctx context.Context, src api.Source, _ ...api.PlanOption) (api.Plan, error) {
-	return r.compilePlan(ctx, src, false)
+func (r *spyRuntime) Compile(ctx context.Context, src api.Source, options ...api.PlanOption) (api.Plan, error) {
+	return r.compilePlan(ctx, src, false, options)
 }
 
-func (r *spyRuntime) CompileDebug(ctx context.Context, src api.Source, _ ...api.PlanOption) (api.Plan, error) {
-	return r.compilePlan(ctx, src, true)
+func (r *spyRuntime) CompileDebug(ctx context.Context, src api.Source, options ...api.PlanOption) (api.Plan, error) {
+	return r.compilePlan(ctx, src, true, options)
 }
 
-func (r *spyRuntime) compilePlan(ctx context.Context, src api.Source, debug bool) (api.Plan, error) {
+func (r *spyRuntime) compilePlan(ctx context.Context, src api.Source, debug bool, options []api.PlanOption) (api.Plan, error) {
+	configured := &planOptions{}
+	for _, option := range options {
+		if option == nil {
+			continue
+		}
+
+		if err := option(configured); err != nil {
+			return nil, err
+		}
+	}
+
 	r.mu.Lock()
 	r.compileSources = append(r.compileSources, src)
 	r.compileDebug = append(r.compileDebug, debug)
+	r.compileOptimization = append(r.compileOptimization, configured.optimizationLevel)
 	compile := r.compile
 	r.mu.Unlock()
 
@@ -94,6 +117,29 @@ func (r *spyRuntime) snapshot() ([]api.Source, []bool, int) {
 	defer r.mu.Unlock()
 
 	return append([]api.Source(nil), r.compileSources...), append([]bool(nil), r.compileDebug...), r.closeCalls
+}
+
+func (r *spyRuntime) optimizationSnapshot() []*api.OptimizationLevel {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	result := make([]*api.OptimizationLevel, len(r.compileOptimization))
+	for index, level := range r.compileOptimization {
+		if level == nil {
+			continue
+		}
+
+		copied := *level
+		result[index] = &copied
+	}
+
+	return result
+}
+
+func (options *planOptions) SetOptimizationLevel(level api.OptimizationLevel) error {
+	options.optimizationLevel = &level
+
+	return nil
 }
 
 func (p *spyPlan) Params() []string {
@@ -237,7 +283,16 @@ func (d *spyDebugger) resumeDebug(ctx context.Context) (*debugger.Event, error) 
 }
 
 func (d *spyDebugger) Pause() error {
-	return nil
+	d.mu.Lock()
+	d.pauseCalls++
+	pause := d.pause
+	d.mu.Unlock()
+
+	if pause == nil {
+		return nil
+	}
+
+	return pause()
 }
 
 func (d *spyDebugger) SetBreakpoint(position source.Location) (debugger.Breakpoint, error) {
@@ -246,7 +301,17 @@ func (d *spyDebugger) SetBreakpoint(position source.Location) (debugger.Breakpoi
 
 func (d *spyDebugger) SetBreakpointAt(position source.Location, options debugger.BreakpointOptions) (debugger.Breakpoint, error) {
 	d.mu.Lock()
+	d.setCalls++
+	setBreakpoint := d.setBreakpoint
+	d.mu.Unlock()
+
+	if setBreakpoint != nil {
+		return setBreakpoint(position, options)
+	}
+
+	d.mu.Lock()
 	defer d.mu.Unlock()
+
 	if d.breakpoints == nil {
 		d.breakpoints = make(map[debugger.BreakpointID]debugger.Breakpoint)
 	}
@@ -271,8 +336,18 @@ func (d *spyDebugger) SetBreakpointAt(position source.Location, options debugger
 
 func (d *spyDebugger) DeleteBreakpoint(id debugger.BreakpointID) error {
 	d.mu.Lock()
-	delete(d.breakpoints, id)
+	d.deleteCalls++
+	deleteBreakpoint := d.deleteBreakpoint
 	d.mu.Unlock()
+
+	if deleteBreakpoint != nil {
+		return deleteBreakpoint(id)
+	}
+
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	delete(d.breakpoints, id)
 
 	return nil
 }
@@ -331,6 +406,20 @@ func (d *spyDebugger) closes() int {
 	defer d.mu.Unlock()
 
 	return d.closeCalls
+}
+
+func (d *spyDebugger) breakpointCalls() (int, int) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	return d.setCalls, d.deleteCalls
+}
+
+func (d *spyDebugger) pauses() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	return d.pauseCalls
 }
 
 func (o *sessionOptions) SetParam(name string, value any) error {

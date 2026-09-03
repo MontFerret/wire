@@ -4,9 +4,24 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/MontFerret/wire/internal/lifecycle"
 )
+
+const convenienceCleanupTimeout = 30 * time.Second
+
+func boundedCleanup(ctx context.Context, timeout time.Duration, close func(context.Context) error) error {
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), timeout)
+	defer cancel()
+
+	err := close(cleanupCtx)
+	if ctxErr := cleanupCtx.Err(); ctxErr != nil && !errors.Is(err, ctxErr) {
+		err = errors.Join(err, ctxErr)
+	}
+
+	return err
+}
 
 func retainedContext(ctx context.Context) (context.Context, context.CancelFunc) {
 	deadline, ok := ctx.Deadline()

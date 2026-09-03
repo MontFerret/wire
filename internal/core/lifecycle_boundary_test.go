@@ -12,6 +12,7 @@ import (
 	"github.com/MontFerret/api"
 	"github.com/MontFerret/api/debugger"
 	"github.com/MontFerret/api/source"
+	"github.com/MontFerret/wire/internal/panicboundary"
 )
 
 func TestPendingCompileCountsAgainstLimitAndConnectionCloseWaits(t *testing.T) {
@@ -26,7 +27,7 @@ func TestPendingCompileCountsAgainstLimitAndConnectionCloseWaits(t *testing.T) {
 	}}
 	limits := testLimits()
 	limits.MaxPlansPerConnection = 1
-	host, err := NewHost(runtime, RuntimeInfo{}, limits)
+	host, err := newTestHost(runtime, limits)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,9 +77,9 @@ func TestPendingDebugCreationCountsAgainstLimitAndConnectionCloseWaits(t *testin
 	}}
 	limits := testLimits()
 	limits.MaxDebugSessionsPerConnection = 1
-	host, err := NewHost(&spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
+	host, err := newTestHost(&spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 		return plan, nil
-	}}, RuntimeInfo{}, limits)
+	}}, limits)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +132,7 @@ func TestClosingPlanCountsAgainstLimitUntilCleanupSettles(t *testing.T) {
 	}}
 	limits := testLimits()
 	limits.MaxPlansPerConnection = 1
-	host, err := NewHost(runtime, RuntimeInfo{}, limits)
+	host, err := newTestHost(runtime, limits)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -227,7 +228,7 @@ func TestResourceLimitsAndConnectionIsolationRemainWireOwned(t *testing.T) {
 	limits.MaxPlansPerConnection = 1
 	limits.MaxExecutionsPerConnection = 1
 	limits.MaxDebugSessionsPerConnection = 1
-	host, err := NewHost(runtime, RuntimeInfo{}, limits)
+	host, err := newTestHost(runtime, limits)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -299,6 +300,55 @@ func TestPlanClosePanicIsSanitizedAndDoesNotRetainResource(t *testing.T) {
 	}
 }
 
+func TestConnectionCleanupContinuesAfterRuntimeClosePanic(t *testing.T) {
+	first := &spyPlan{close: func() error { panic("first close secret") }}
+	second := &spyPlan{}
+	plans := []api.Plan{first, second}
+	runtime := &spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
+		plan := plans[0]
+		plans = plans[1:]
+
+		return plan, nil
+	}}
+	host, err := newTestHost(runtime, testLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	connection, err := host.OpenConnection()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	firstSnapshot, err := connection.Compile(context.Background(), CompileInput{Source: api.Source{Content: "RETURN 1"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	secondSnapshot, err := connection.Compile(context.Background(), CompileInput{Source: api.Source{Content: "RETURN 2"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = host.CloseConnection(testContext(t), connection.ID())
+	var panicErr *panicboundary.Error
+	if !hasCategory(err, ErrorInternal) || !errors.As(err, &panicErr) || strings.Contains(err.Error(), "secret") {
+		t.Fatalf("cleanup panic was not retained and sanitized: %v", err)
+	}
+
+	_, _, firstCloses := first.snapshot()
+	_, _, secondCloses := second.snapshot()
+	if firstCloses != 1 || secondCloses != 1 {
+		t.Fatalf("cleanup did not continue across panic: first=%d second=%d", firstCloses, secondCloses)
+	}
+
+	for _, id := range []PlanID{firstSnapshot.ID, secondSnapshot.ID} {
+		if _, getErr := host.plans.get(connection.ID(), id); !hasCategory(getErr, ErrorPlanNotFound) {
+			t.Fatalf("plan %s remained after connection cleanup: %v", id, getErr)
+		}
+	}
+}
+
 func TestConcurrentConnectionCloseSharesResultAndThenBecomesStale(t *testing.T) {
 	started := make(chan struct{})
 	release := make(chan struct{})
@@ -308,9 +358,9 @@ func TestConcurrentConnectionCloseSharesResultAndThenBecomesStale(t *testing.T) 
 
 		return nil
 	}}
-	host, err := NewHost(&spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
+	host, err := newTestHost(&spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 		return plan, nil
-	}}, RuntimeInfo{}, testLimits())
+	}}, testLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -341,9 +391,9 @@ func TestConcurrentConnectionCloseSharesResultAndThenBecomesStale(t *testing.T) 
 	if err := host.CloseConnection(context.Background(), connection.ID()); !hasCategory(err, ErrorConnectionNotFound) {
 		t.Fatalf("closed connection did not become stale: %v", err)
 	}
-	host.mu.RLock()
-	closing := len(host.closing)
-	host.mu.RUnlock()
+	host.connections.mu.RLock()
+	closing := len(host.connections.closing)
+	host.connections.mu.RUnlock()
 	if closing != 0 {
 		t.Fatalf("host retained %d settled connection closes", closing)
 	}
@@ -366,7 +416,7 @@ func TestConnectionCloseCancelsExecutionAndReleasesWireResources(t *testing.T) {
 	runtime := &spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 		return plan, nil
 	}}
-	host, err := NewHost(runtime, RuntimeInfo{}, testLimits())
+	host, err := newTestHost(runtime, testLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -543,7 +593,7 @@ func TestPlanReleaseSettlesChildrenBeforeClosingAPIPlan(t *testing.T) {
 	orderMu.Lock()
 	settledOrder := append([]string(nil), order...)
 	orderMu.Unlock()
-	if !reflect.DeepEqual(settledOrder, []string{"debug", "execution", "plan"}) {
+	if !reflect.DeepEqual(settledOrder, []string{"execution", "debug", "plan"}) {
 		t.Fatalf("unexpected cleanup order: %#v", settledOrder)
 	}
 	if err := connection.ReleaseExecution(context.Background(), execution.ID); !hasCategory(err, ErrorExecutionNotFound) {
@@ -562,6 +612,7 @@ func TestDebugUsesUnifiedSessionAndPreservesWireState(t *testing.T) {
 			return &debugger.Event{
 				Reason:           debugger.ReasonBreakpoint,
 				HitBreakpointIDs: hitIDs,
+				Depth:            4,
 				Location: source.Range{Location: source.Location{
 					Position: source.Position{Line: 1, Column: 2},
 					File:     "debug.fql",
@@ -626,7 +677,8 @@ func TestDebugUsesUnifiedSessionAndPreservesWireState(t *testing.T) {
 	}
 	stopped := waitDebugState(t, connection, opened.ID, DebugStopped)
 	wantRange := source.Range{Location: requested, Span: source.Span{Start: 3, End: 8}}
-	if stopped.StopReason != debugger.ReasonBreakpoint || stopped.Location != wantRange || !reflect.DeepEqual(stopped.HitBreakpointIDs, []debugger.BreakpointID{1}) {
+	if stopped.StopReason != debugger.ReasonBreakpoint || stopped.Location != wantRange || stopped.Depth != 4 ||
+		!reflect.DeepEqual(stopped.HitBreakpointIDs, []debugger.BreakpointID{1}) {
 		t.Fatalf("unexpected stopped state: %#v", stopped)
 	}
 	hitIDs[0] = 90
@@ -815,7 +867,7 @@ func TestDebugSessionStopAndParentCascadeCloseOnce(t *testing.T) {
 	})
 }
 
-func openTestDebugSession(t *testing.T, runtimeDebugger debugger.Session) (*Connection, PlanSnapshot, DebugSnapshot) {
+func openTestDebugSession(t *testing.T, runtimeDebugger debugger.Session) (*testEnvironment, PlanSnapshot, DebugSnapshot) {
 	t.Helper()
 	plan := &spyPlan{newDebugSession: func(context.Context, sessionOptions) (debugger.Session, error) {
 		return runtimeDebugger, nil
@@ -838,132 +890,11 @@ func openTestDebugSession(t *testing.T, runtimeDebugger debugger.Session) (*Conn
 	return connection, compiled, opened
 }
 
-func TestSlowExecutionWatcherIsDetachedWithoutBlockingCompletion(t *testing.T) {
-	limits := testLimits()
-	limits.MaxWatchersPerResource = 1
-	release := make(chan struct{})
-	plan := &spyPlan{newSession: func(context.Context, sessionOptions) (api.Session, error) {
-		return &spySession{run: func(context.Context) (api.Output, error) {
-			<-release
-
-			return api.Output{}, nil
-		}}, nil
-	}}
-	host, err := NewHost(&spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
-		return plan, nil
-	}}, RuntimeInfo{}, limits)
-	if err != nil {
-		t.Fatal(err)
-	}
-	connection, err := host.OpenConnection()
-	if err != nil {
-		t.Fatal(err)
-	}
-	compiled, err := connection.Compile(context.Background(), CompileInput{Source: api.Source{Content: "RETURN 1"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	started, err := connection.Execute(context.Background(), ExecuteInput{PlanID: compiled.ID})
-	if err != nil {
-		t.Fatal(err)
-	}
-	execution, err := connection.execution(started.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	subscription, err := execution.subscribe()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	execution.mu.Lock()
-	for range watcherBufferSize + 1 {
-		execution.publishLocked(ExecutionEventStarted, false)
-	}
-	execution.mu.Unlock()
-	select {
-	case err := <-subscription.Errors:
-		if !errors.Is(err, ErrWatcherLagged) {
-			t.Fatalf("unexpected watcher error: %v", err)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("slow watcher was not detached")
-	}
-	if _, err := execution.subscribe(); !hasCategory(err, ErrorResourceExhausted) {
-		t.Fatalf("detached handler released watcher slot early: %v", err)
-	}
-	subscription.Cancel()
-	if next, err := execution.subscribe(); err != nil {
-		t.Fatalf("watcher slot was not released: %v", err)
-	} else {
-		next.Cancel()
-	}
-	close(release)
-	waitExecution(t, connection, started.ID)
-}
-
-func TestSlowDebugWatcherIsDetachedAndRetainsSlotUntilCancelled(t *testing.T) {
-	limits := testLimits()
-	limits.MaxWatchersPerResource = 1
-	plan := &spyPlan{newDebugSession: func(context.Context, sessionOptions) (debugger.Session, error) {
-		return &spyDebugger{}, nil
-	}}
-	host, err := NewHost(&spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
-		return plan, nil
-	}}, RuntimeInfo{}, limits)
-	if err != nil {
-		t.Fatal(err)
-	}
-	connection, err := host.OpenConnection()
-	if err != nil {
-		t.Fatal(err)
-	}
-	compiled, err := connection.Compile(context.Background(), CompileInput{Source: api.Source{Content: "RETURN 1"}, Debuggable: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	opened, err := connection.OpenDebugSession(context.Background(), OpenDebugInput{PlanID: compiled.ID})
-	if err != nil {
-		t.Fatal(err)
-	}
-	session, err := connection.debugSession(opened.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	subscription, err := session.subscribe()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	session.mu.Lock()
-	for range watcherBufferSize + 1 {
-		session.publishLocked(DebugEventStarted, false)
-	}
-	session.mu.Unlock()
-	select {
-	case err := <-subscription.Errors:
-		if !errors.Is(err, ErrWatcherLagged) {
-			t.Fatalf("unexpected watcher error: %v", err)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("slow debug watcher was not detached")
-	}
-	if _, err := session.subscribe(); !hasCategory(err, ErrorResourceExhausted) {
-		t.Fatalf("detached debug handler released watcher slot early: %v", err)
-	}
-	subscription.Cancel()
-	if next, err := session.subscribe(); err != nil {
-		t.Fatalf("debug watcher slot was not released: %v", err)
-	} else {
-		next.Cancel()
-	}
-}
-
-func waitDebugState(t *testing.T, connection *Connection, id DebugSessionID, state DebugState) DebugSnapshot {
+func waitDebugState(t *testing.T, connection *testEnvironment, id DebugSessionID, state DebugState) DebugSnapshot {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		session, err := connection.debugSession(id)
+		session, err := connection.debugSessions.lookup(id)
 		if err != nil {
 			t.Fatal(err)
 		}

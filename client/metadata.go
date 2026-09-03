@@ -28,29 +28,17 @@ type (
 	}
 )
 
-func convertRuntimeInfo(value *wirev1.RuntimeInfo) RuntimeInfo {
+func convertRuntimeInfo(protocol *wirev1.ProtocolInfo, identity *wirev1.RuntimeIdentity) RuntimeInfo {
 	result := RuntimeInfo{
-		APIIdentity:   value.GetApiIdentity(),
-		WireVersion:   value.GetWireVersion(),
-		FerretVersion: value.GetFerretVersion(),
+		APIIdentity: protocol.GetName(),
+		WireVersion: protocol.GetVersion(),
 	}
 
-	if identity := value.GetRuntimeIdentity(); identity != nil {
+	if identity != nil {
 		result.RuntimeIdentity = &RuntimeIdentity{
 			Name:       identity.GetName(),
 			Version:    identity.GetVersion(),
 			InstanceID: identity.GetInstanceId(),
-		}
-	}
-
-	for _, capability := range value.GetCapabilities() {
-		switch capability {
-		case wirev1.Capability_CAPABILITY_EXECUTION:
-			result.Capabilities.Execution = true
-		case wirev1.Capability_CAPABILITY_DEBUGGING:
-			result.Capabilities.Debugging = true
-		case wirev1.Capability_CAPABILITY_CANCELLATION:
-			result.Capabilities.Cancellation = true
 		}
 	}
 

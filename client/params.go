@@ -3,8 +3,6 @@ package client
 import (
 	"fmt"
 	"math"
-	"regexp"
-	"time"
 
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -39,7 +37,7 @@ func encodeValue(value any, depth int) (*wirev1.Value, error) {
 
 	switch value := value.(type) {
 	case nil:
-		return &wirev1.Value{Value: &wirev1.Value_NoneValue{NoneValue: structpb.NullValue_NULL_VALUE}}, nil
+		return &wirev1.Value{Value: &wirev1.Value_NullValue{NullValue: structpb.NullValue_NULL_VALUE}}, nil
 	case bool:
 		return &wirev1.Value{Value: &wirev1.Value_BooleanValue{BooleanValue: value}}, nil
 	case int:
@@ -78,18 +76,6 @@ func encodeValue(value any, depth int) (*wirev1.Value, error) {
 		return &wirev1.Value{Value: &wirev1.Value_StringValue{StringValue: value}}, nil
 	case []byte:
 		return &wirev1.Value{Value: &wirev1.Value_BinaryValue{BinaryValue: append([]byte(nil), value...)}}, nil
-	case time.Duration:
-		return &wirev1.Value{Value: &wirev1.Value_DurationNanos{DurationNanos: int64(value)}}, nil
-	case time.Time:
-		return &wirev1.Value{Value: &wirev1.Value_DatetimeValue{DatetimeValue: value.Format(time.RFC3339Nano)}}, nil
-	case regexp.Regexp:
-		return &wirev1.Value{Value: &wirev1.Value_RegexpValue{RegexpValue: value.String()}}, nil
-	case *regexp.Regexp:
-		if value == nil {
-			return nil, fmt.Errorf("regexp must not be nil")
-		}
-
-		return &wirev1.Value{Value: &wirev1.Value_RegexpValue{RegexpValue: value.String()}}, nil
 	case []any:
 		items := make([]*wirev1.Value, len(value))
 		for i, item := range value {

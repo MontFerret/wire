@@ -185,22 +185,16 @@ func TestExecutionWaitRejectsIncompleteTerminalSnapshots(t *testing.T) {
 		{
 			name: "completed without output",
 			event: &wirev1.WatchExecutionResponse{
-				ExecutionId: &wirev1.ExecutionId{Value: "execution-1"},
-				Sequence:    1,
-				Payload: &wirev1.WatchExecutionResponse_Completed{Completed: &wirev1.ExecutionCompleted{
-					Execution: executionSnapshotProto("execution-1", wirev1.ExecutionState_EXECUTION_STATE_COMPLETED, nil, nil),
-				}},
+				Sequence:  1,
+				Execution: executionSnapshotProto("execution-1", wirev1.ExecutionState_EXECUTION_STATE_COMPLETED, nil, nil),
 			},
 			message: "Wire server returned a completed execution without output",
 		},
 		{
 			name: "failed without details",
 			event: &wirev1.WatchExecutionResponse{
-				ExecutionId: &wirev1.ExecutionId{Value: "execution-1"},
-				Sequence:    1,
-				Payload: &wirev1.WatchExecutionResponse_Failed{Failed: &wirev1.ExecutionFailed{
-					Execution: executionSnapshotProto("execution-1", wirev1.ExecutionState_EXECUTION_STATE_FAILED, nil, nil),
-				}},
+				Sequence:  1,
+				Execution: executionSnapshotProto("execution-1", wirev1.ExecutionState_EXECUTION_STATE_FAILED, nil, nil),
 			},
 			message: "Wire server returned a failed execution without failure details",
 		},
@@ -248,7 +242,6 @@ func openTestExecution(t *testing.T, server *clientTestServer) (*Client, *Plan, 
 func executionSnapshotProto(id string, state wirev1.ExecutionState, output *wirev1.Output, failure *wirev1.Failure) *wirev1.Execution {
 	return &wirev1.Execution{
 		Id:      &wirev1.ExecutionId{Value: id},
-		PlanId:  &wirev1.PlanId{Value: "plan-1"},
 		State:   state,
 		Output:  output,
 		Failure: failure,
@@ -257,24 +250,18 @@ func executionSnapshotProto(id string, state wirev1.ExecutionState, output *wire
 
 func executionStartedEvent(id string) *wirev1.WatchExecutionResponse {
 	return &wirev1.WatchExecutionResponse{
-		ExecutionId: &wirev1.ExecutionId{Value: id},
-		Sequence:    1,
-		Payload: &wirev1.WatchExecutionResponse_Started{Started: &wirev1.ExecutionStarted{
-			Execution: executionSnapshotProto(id, wirev1.ExecutionState_EXECUTION_STATE_RUNNING, nil, nil),
-		}},
+		Sequence:  1,
+		Execution: executionSnapshotProto(id, wirev1.ExecutionState_EXECUTION_STATE_RUNNING, nil, nil),
 	}
 }
 
 func executionCompletedEvent(id string, contentType string, content []byte) *wirev1.WatchExecutionResponse {
 	return &wirev1.WatchExecutionResponse{
-		ExecutionId: &wirev1.ExecutionId{Value: id},
-		Sequence:    2,
-		Payload: &wirev1.WatchExecutionResponse_Completed{Completed: &wirev1.ExecutionCompleted{
-			Execution: executionSnapshotProto(id, wirev1.ExecutionState_EXECUTION_STATE_COMPLETED, &wirev1.Output{
-				ContentType: contentType,
-				Content:     append([]byte(nil), content...),
-			}, nil),
-		}},
+		Sequence: 2,
+		Execution: executionSnapshotProto(id, wirev1.ExecutionState_EXECUTION_STATE_COMPLETED, &wirev1.Output{
+			ContentType: contentType,
+			Content:     append([]byte(nil), content...),
+		}, nil),
 	}
 }
 
@@ -285,20 +272,14 @@ func executionFailedEvent(id string, content []byte, failure *wirev1.Failure) *w
 	}
 
 	return &wirev1.WatchExecutionResponse{
-		ExecutionId: &wirev1.ExecutionId{Value: id},
-		Sequence:    2,
-		Payload: &wirev1.WatchExecutionResponse_Failed{Failed: &wirev1.ExecutionFailed{
-			Execution: executionSnapshotProto(id, wirev1.ExecutionState_EXECUTION_STATE_FAILED, output, failure),
-		}},
+		Sequence:  2,
+		Execution: executionSnapshotProto(id, wirev1.ExecutionState_EXECUTION_STATE_FAILED, output, failure),
 	}
 }
 
 func executionCancelledEvent(id string) *wirev1.WatchExecutionResponse {
 	return &wirev1.WatchExecutionResponse{
-		ExecutionId: &wirev1.ExecutionId{Value: id},
-		Sequence:    2,
-		Payload: &wirev1.WatchExecutionResponse_Cancelled{Cancelled: &wirev1.ExecutionCancelled{
-			Execution: executionSnapshotProto(id, wirev1.ExecutionState_EXECUTION_STATE_CANCELLED, nil, nil),
-		}},
+		Sequence:  2,
+		Execution: executionSnapshotProto(id, wirev1.ExecutionState_EXECUTION_STATE_CANCELLED, nil, nil),
 	}
 }

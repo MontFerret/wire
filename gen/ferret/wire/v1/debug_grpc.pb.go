@@ -19,8 +19,8 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	DebugService_OpenDebugSession_FullMethodName    = "/ferret.wire.v1.DebugService/OpenDebugSession"
-	DebugService_StartDebug_FullMethodName          = "/ferret.wire.v1.DebugService/StartDebug"
+	DebugService_CreateDebugSession_FullMethodName  = "/ferret.wire.v1.DebugService/CreateDebugSession"
+	DebugService_Start_FullMethodName               = "/ferret.wire.v1.DebugService/Start"
 	DebugService_SetBreakpoint_FullMethodName       = "/ferret.wire.v1.DebugService/SetBreakpoint"
 	DebugService_DeleteBreakpoint_FullMethodName    = "/ferret.wire.v1.DebugService/DeleteBreakpoint"
 	DebugService_Continue_FullMethodName            = "/ferret.wire.v1.DebugService/Continue"
@@ -32,7 +32,7 @@ const (
 	DebugService_FrameLocals_FullMethodName         = "/ferret.wire.v1.DebugService/FrameLocals"
 	DebugService_Variables_FullMethodName           = "/ferret.wire.v1.DebugService/Variables"
 	DebugService_EvaluateFrame_FullMethodName       = "/ferret.wire.v1.DebugService/EvaluateFrame"
-	DebugService_StopDebug_FullMethodName           = "/ferret.wire.v1.DebugService/StopDebug"
+	DebugService_Terminate_FullMethodName           = "/ferret.wire.v1.DebugService/Terminate"
 	DebugService_ReleaseDebugSession_FullMethodName = "/ferret.wire.v1.DebugService/ReleaseDebugSession"
 	DebugService_WatchDebug_FullMethodName          = "/ferret.wire.v1.DebugService/WatchDebug"
 )
@@ -41,9 +41,8 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type DebugServiceClient interface {
-	OpenDebugSession(ctx context.Context, in *OpenDebugSessionRequest, opts ...grpc.CallOption) (*OpenDebugSessionResponse, error)
-	StartDebug(ctx context.Context, in *StartDebugRequest, opts ...grpc.CallOption) (*StartDebugResponse, error)
-	// Breakpoints are singular Ferret-owned resources, not DAP source replacements.
+	CreateDebugSession(ctx context.Context, in *CreateDebugSessionRequest, opts ...grpc.CallOption) (*CreateDebugSessionResponse, error)
+	Start(ctx context.Context, in *StartRequest, opts ...grpc.CallOption) (*StartResponse, error)
 	SetBreakpoint(ctx context.Context, in *SetBreakpointRequest, opts ...grpc.CallOption) (*SetBreakpointResponse, error)
 	DeleteBreakpoint(ctx context.Context, in *DeleteBreakpointRequest, opts ...grpc.CallOption) (*DeleteBreakpointResponse, error)
 	Continue(ctx context.Context, in *ContinueRequest, opts ...grpc.CallOption) (*ContinueResponse, error)
@@ -55,10 +54,11 @@ type DebugServiceClient interface {
 	FrameLocals(ctx context.Context, in *FrameLocalsRequest, opts ...grpc.CallOption) (*FrameLocalsResponse, error)
 	Variables(ctx context.Context, in *VariablesRequest, opts ...grpc.CallOption) (*VariablesResponse, error)
 	EvaluateFrame(ctx context.Context, in *EvaluateFrameRequest, opts ...grpc.CallOption) (*EvaluateFrameResponse, error)
-	StopDebug(ctx context.Context, in *StopDebugRequest, opts ...grpc.CallOption) (*StopDebugResponse, error)
+	// Terminate stops debugger execution without releasing its remote resource.
+	Terminate(ctx context.Context, in *TerminateRequest, opts ...grpc.CallOption) (*TerminateResponse, error)
 	// ReleaseDebugSession commits termination and cleanup. The session ID then becomes stale.
 	ReleaseDebugSession(ctx context.Context, in *ReleaseDebugSessionRequest, opts ...grpc.CallOption) (*ReleaseDebugSessionResponse, error)
-	// WatchDebug is finite, ordered, and ends after one terminal snapshot.
+	// WatchDebug sends the latest published state, then ordered changes through one terminal state.
 	WatchDebug(ctx context.Context, in *WatchDebugRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[WatchDebugResponse], error)
 }
 
@@ -70,20 +70,20 @@ func NewDebugServiceClient(cc grpc.ClientConnInterface) DebugServiceClient {
 	return &debugServiceClient{cc}
 }
 
-func (c *debugServiceClient) OpenDebugSession(ctx context.Context, in *OpenDebugSessionRequest, opts ...grpc.CallOption) (*OpenDebugSessionResponse, error) {
+func (c *debugServiceClient) CreateDebugSession(ctx context.Context, in *CreateDebugSessionRequest, opts ...grpc.CallOption) (*CreateDebugSessionResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(OpenDebugSessionResponse)
-	err := c.cc.Invoke(ctx, DebugService_OpenDebugSession_FullMethodName, in, out, cOpts...)
+	out := new(CreateDebugSessionResponse)
+	err := c.cc.Invoke(ctx, DebugService_CreateDebugSession_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *debugServiceClient) StartDebug(ctx context.Context, in *StartDebugRequest, opts ...grpc.CallOption) (*StartDebugResponse, error) {
+func (c *debugServiceClient) Start(ctx context.Context, in *StartRequest, opts ...grpc.CallOption) (*StartResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(StartDebugResponse)
-	err := c.cc.Invoke(ctx, DebugService_StartDebug_FullMethodName, in, out, cOpts...)
+	out := new(StartResponse)
+	err := c.cc.Invoke(ctx, DebugService_Start_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -200,10 +200,10 @@ func (c *debugServiceClient) EvaluateFrame(ctx context.Context, in *EvaluateFram
 	return out, nil
 }
 
-func (c *debugServiceClient) StopDebug(ctx context.Context, in *StopDebugRequest, opts ...grpc.CallOption) (*StopDebugResponse, error) {
+func (c *debugServiceClient) Terminate(ctx context.Context, in *TerminateRequest, opts ...grpc.CallOption) (*TerminateResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(StopDebugResponse)
-	err := c.cc.Invoke(ctx, DebugService_StopDebug_FullMethodName, in, out, cOpts...)
+	out := new(TerminateResponse)
+	err := c.cc.Invoke(ctx, DebugService_Terminate_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -243,9 +243,8 @@ type DebugService_WatchDebugClient = grpc.ServerStreamingClient[WatchDebugRespon
 // All implementations must embed UnimplementedDebugServiceServer
 // for forward compatibility.
 type DebugServiceServer interface {
-	OpenDebugSession(context.Context, *OpenDebugSessionRequest) (*OpenDebugSessionResponse, error)
-	StartDebug(context.Context, *StartDebugRequest) (*StartDebugResponse, error)
-	// Breakpoints are singular Ferret-owned resources, not DAP source replacements.
+	CreateDebugSession(context.Context, *CreateDebugSessionRequest) (*CreateDebugSessionResponse, error)
+	Start(context.Context, *StartRequest) (*StartResponse, error)
 	SetBreakpoint(context.Context, *SetBreakpointRequest) (*SetBreakpointResponse, error)
 	DeleteBreakpoint(context.Context, *DeleteBreakpointRequest) (*DeleteBreakpointResponse, error)
 	Continue(context.Context, *ContinueRequest) (*ContinueResponse, error)
@@ -257,10 +256,11 @@ type DebugServiceServer interface {
 	FrameLocals(context.Context, *FrameLocalsRequest) (*FrameLocalsResponse, error)
 	Variables(context.Context, *VariablesRequest) (*VariablesResponse, error)
 	EvaluateFrame(context.Context, *EvaluateFrameRequest) (*EvaluateFrameResponse, error)
-	StopDebug(context.Context, *StopDebugRequest) (*StopDebugResponse, error)
+	// Terminate stops debugger execution without releasing its remote resource.
+	Terminate(context.Context, *TerminateRequest) (*TerminateResponse, error)
 	// ReleaseDebugSession commits termination and cleanup. The session ID then becomes stale.
 	ReleaseDebugSession(context.Context, *ReleaseDebugSessionRequest) (*ReleaseDebugSessionResponse, error)
-	// WatchDebug is finite, ordered, and ends after one terminal snapshot.
+	// WatchDebug sends the latest published state, then ordered changes through one terminal state.
 	WatchDebug(*WatchDebugRequest, grpc.ServerStreamingServer[WatchDebugResponse]) error
 	mustEmbedUnimplementedDebugServiceServer()
 }
@@ -272,11 +272,11 @@ type DebugServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedDebugServiceServer struct{}
 
-func (UnimplementedDebugServiceServer) OpenDebugSession(context.Context, *OpenDebugSessionRequest) (*OpenDebugSessionResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method OpenDebugSession not implemented")
+func (UnimplementedDebugServiceServer) CreateDebugSession(context.Context, *CreateDebugSessionRequest) (*CreateDebugSessionResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CreateDebugSession not implemented")
 }
-func (UnimplementedDebugServiceServer) StartDebug(context.Context, *StartDebugRequest) (*StartDebugResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method StartDebug not implemented")
+func (UnimplementedDebugServiceServer) Start(context.Context, *StartRequest) (*StartResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Start not implemented")
 }
 func (UnimplementedDebugServiceServer) SetBreakpoint(context.Context, *SetBreakpointRequest) (*SetBreakpointResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SetBreakpoint not implemented")
@@ -311,8 +311,8 @@ func (UnimplementedDebugServiceServer) Variables(context.Context, *VariablesRequ
 func (UnimplementedDebugServiceServer) EvaluateFrame(context.Context, *EvaluateFrameRequest) (*EvaluateFrameResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method EvaluateFrame not implemented")
 }
-func (UnimplementedDebugServiceServer) StopDebug(context.Context, *StopDebugRequest) (*StopDebugResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method StopDebug not implemented")
+func (UnimplementedDebugServiceServer) Terminate(context.Context, *TerminateRequest) (*TerminateResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Terminate not implemented")
 }
 func (UnimplementedDebugServiceServer) ReleaseDebugSession(context.Context, *ReleaseDebugSessionRequest) (*ReleaseDebugSessionResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ReleaseDebugSession not implemented")
@@ -341,38 +341,38 @@ func RegisterDebugServiceServer(s grpc.ServiceRegistrar, srv DebugServiceServer)
 	s.RegisterService(&DebugService_ServiceDesc, srv)
 }
 
-func _DebugService_OpenDebugSession_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(OpenDebugSessionRequest)
+func _DebugService_CreateDebugSession_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateDebugSessionRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(DebugServiceServer).OpenDebugSession(ctx, in)
+		return srv.(DebugServiceServer).CreateDebugSession(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: DebugService_OpenDebugSession_FullMethodName,
+		FullMethod: DebugService_CreateDebugSession_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DebugServiceServer).OpenDebugSession(ctx, req.(*OpenDebugSessionRequest))
+		return srv.(DebugServiceServer).CreateDebugSession(ctx, req.(*CreateDebugSessionRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _DebugService_StartDebug_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(StartDebugRequest)
+func _DebugService_Start_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(StartRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(DebugServiceServer).StartDebug(ctx, in)
+		return srv.(DebugServiceServer).Start(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: DebugService_StartDebug_FullMethodName,
+		FullMethod: DebugService_Start_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DebugServiceServer).StartDebug(ctx, req.(*StartDebugRequest))
+		return srv.(DebugServiceServer).Start(ctx, req.(*StartRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -575,20 +575,20 @@ func _DebugService_EvaluateFrame_Handler(srv interface{}, ctx context.Context, d
 	return interceptor(ctx, in, info, handler)
 }
 
-func _DebugService_StopDebug_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(StopDebugRequest)
+func _DebugService_Terminate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(TerminateRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(DebugServiceServer).StopDebug(ctx, in)
+		return srv.(DebugServiceServer).Terminate(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: DebugService_StopDebug_FullMethodName,
+		FullMethod: DebugService_Terminate_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DebugServiceServer).StopDebug(ctx, req.(*StopDebugRequest))
+		return srv.(DebugServiceServer).Terminate(ctx, req.(*TerminateRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -630,12 +630,12 @@ var DebugService_ServiceDesc = grpc.ServiceDesc{
 	HandlerType: (*DebugServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
-			MethodName: "OpenDebugSession",
-			Handler:    _DebugService_OpenDebugSession_Handler,
+			MethodName: "CreateDebugSession",
+			Handler:    _DebugService_CreateDebugSession_Handler,
 		},
 		{
-			MethodName: "StartDebug",
-			Handler:    _DebugService_StartDebug_Handler,
+			MethodName: "Start",
+			Handler:    _DebugService_Start_Handler,
 		},
 		{
 			MethodName: "SetBreakpoint",
@@ -682,8 +682,8 @@ var DebugService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _DebugService_EvaluateFrame_Handler,
 		},
 		{
-			MethodName: "StopDebug",
-			Handler:    _DebugService_StopDebug_Handler,
+			MethodName: "Terminate",
+			Handler:    _DebugService_Terminate_Handler,
 		},
 		{
 			MethodName: "ReleaseDebugSession",

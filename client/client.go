@@ -89,8 +89,8 @@ func New(ctx context.Context, connection grpc.ClientConnInterface) (*Client, err
 		response = result.response
 	}
 
-	opened := response.GetOpened()
-	if opened == nil || opened.GetConnectionId().GetValue() == "" || opened.GetRuntimeInfo() == nil {
+	if response.GetConnectionId().GetValue() == "" || response.GetProtocol() == nil ||
+		response.GetProtocol().GetName() == "" || response.GetProtocol().GetVersion() == "" {
 		streamCancel()
 		return nil, errors.New("Wire server returned an invalid Connect handshake")
 	}
@@ -101,8 +101,8 @@ func New(ctx context.Context, connection grpc.ClientConnInterface) (*Client, err
 		planClient:      wirev1.NewPlanServiceClient(connection),
 		executionClient: wirev1.NewExecutionServiceClient(connection),
 		debugClient:     wirev1.NewDebugServiceClient(connection),
-		connectionID:    opened.GetConnectionId().GetValue(),
-		info:            convertRuntimeInfo(opened.GetRuntimeInfo()),
+		connectionID:    response.GetConnectionId().GetValue(),
+		info:            convertRuntimeInfo(response.GetProtocol(), response.GetRuntimeIdentity()),
 		stream:          stream,
 		streamCancel:    streamCancel,
 		streamDone:      make(chan struct{}),
@@ -139,7 +139,7 @@ func (c *Client) Run(ctx context.Context, src api.Source, parameters Parameters,
 	}
 
 	output, runErr := plan.Run(ctx, parameters, options.Execute)
-	closeErr := plan.Close(context.WithoutCancel(ctx))
+	closeErr := boundedCleanup(ctx, convenienceCleanupTimeout, plan.Close)
 
 	return output, errors.Join(runErr, closeErr)
 }

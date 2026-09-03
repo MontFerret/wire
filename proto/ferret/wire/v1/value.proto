@@ -6,17 +6,18 @@ import "google/protobuf/struct.proto";
 
 option go_package = "github.com/MontFerret/wire/gen/ferret/wire/v1;wirev1";
 
+// Value is the portable parameter subset supported by Wire.
 message Value {
+  reserved 7, 8, 9;
+  reserved "none_value", "duration_nanos", "datetime_value", "regexp_value";
+
   oneof value {
-    google.protobuf.NullValue none_value = 1;
+    google.protobuf.NullValue null_value = 1;
     bool boolean_value = 2;
     sint64 integer_value = 3;
     double float_value = 4;
     string string_value = 5;
     bytes binary_value = 6;
-    sint64 duration_nanos = 7;
-    string datetime_value = 8;
-    string regexp_value = 9;
     ArrayValue array_value = 10;
     ObjectValue object_value = 11;
   }

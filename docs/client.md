@@ -36,14 +36,19 @@ EvaluateFrame(context.Context, int, string) (debugger.Value, error)
 ```
 
 The slice index returned by `Frames` is the index accepted by `FrameLocals`
-and `EvaluateFrame`; Wire does not expose a second frame-identity type. The v1
-protobuf transport cannot carry every Unified API debugger field. Returned
-`source.Range.Span`, breakpoint point and function IDs, and frame function IDs
-therefore remain at their zero values. Breakpoint binding mode also remains its
-Unified API zero value. Wire does not infer or fabricate the missing metadata.
+and `EvaluateFrame`; Wire does not expose or transmit a second frame-identity
+type. Breakpoints preserve requested and resolved locations, spans, point and
+function IDs, binding mode, and bound state. Frames preserve their function ID,
+variables preserve mutable and parameter flags, and debug snapshots preserve
+depth, stop reason, hit breakpoint IDs, output, and failure.
+
+The protocol accepts explicit breakpoint binding options. The temporary client
+facade continues to call `SetBreakpoint` with no explicit option, so the server
+uses the Unified API default binding behavior. Exposing the option through a
+redesigned client API is deferred.
 
 Compilation and one-shot execution accept `api.Source` directly. Its `Name`
-maps to the protocol's legacy source identity field.
+and `Content` map to the protocol `Source` message.
 
 ```go
 src := api.NewSource("query.fql", "RETURN @input")
@@ -70,8 +75,16 @@ defer func() {
 output, err := execution.Wait(ctx)
 ```
 
-Plan metadata is immutable. `Parameters` returns a defensive copy, and
-`Debuggable` reports the compile option reflected by the server.
+Plan metadata is immutable. `Parameters` returns a defensive copy.
+`CompileOptions.Debuggable` temporarily chooses the protocol's `CompileDebug`
+operation instead of `Compile`; the `Plan` retains that choice locally so
+`Debuggable` remains compatible without adding debug capability to the remote
+Plan resource.
+
+The metadata facade maps `APIIdentity` and `WireVersion` from the handshake's
+protocol name and version and maps optional host runtime identity directly.
+Legacy Ferret-version and capability fields remain empty rather than
+fabricating values not carried by the protocol.
 
 ## Convenience execution
 
@@ -119,10 +132,11 @@ terminal snapshots return `*client.Failure`; remote cancellation returns
 `client.ErrExecutionCancelled`. Cancellation of the caller's waiting context
 instead returns that context's error.
 
-Convenience cleanup is synchronous and uses a cancellation-detached context,
-so resources created by `Run` are still released after the request context is
-cancelled. Execution and cleanup errors are joined rather than replacing one
-another.
+Convenience cleanup is synchronous and uses a cancellation-detached context
+with a fresh 30-second deadline for each release, so resources created by
+`Run` are still released after the request context is cancelled without
+allowing a stalled cleanup call to block forever. Execution and cleanup errors
+are joined rather than replacing one another.
 
 ## Snapshots and events
 
@@ -178,9 +192,11 @@ termination and resource release.
 ## Errors
 
 Immediate Wire failures are exposed as `*client.Error` with a stable
-`ErrorCategory`, sanitized message, and optional structured diagnostics. With
-the current Unified API, diagnostics are empty because it has no portable
-diagnostic contract. The error unwraps its transport cause, so callers that
+`ErrorCategory` and sanitized gRPC message. The temporary facade retains its
+legacy diagnostics slice, but it is always empty because neither the protocol
+nor the Unified API has a portable diagnostic contract. Invalid requests,
+cancellation, and resource exhaustion use their native gRPC codes without a
+duplicate Wire category. The error unwraps its transport cause, so callers that
 need the gRPC status can use `status.Code(err)` without making transport codes
 part of the client-domain type. Protocol resource identifiers remain private.
 
@@ -200,6 +216,12 @@ The client package is limited to:
 - explicit parameter conversion;
 - immutable domain snapshots and structured error mapping;
 - hiding protobuf and gRPC ceremony without hiding protocol concepts.
+
+Parameter conversion deliberately accepts only the portable Wire subset:
+null, booleans, signed integers, doubles, strings, bytes, `[]any`, and
+`map[string]any`. Duration, datetime, regexp, and custom values are rejected
+locally. A full client redesign, including a smaller metadata surface and
+explicit compile and breakpoint options, is deferred.
 
 Closing the Client never closes the caller-owned gRPC connection. The facade
 does not construct runtimes or transports. Its convenience execution methods

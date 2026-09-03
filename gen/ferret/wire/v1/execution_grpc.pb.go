@@ -29,12 +29,12 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type ExecutionServiceClient interface {
-	// Execute publishes a connection-owned execution of an existing plan.
+	// Execute publishes an asynchronous execution of an existing reusable plan.
 	Execute(ctx context.Context, in *ExecuteRequest, opts ...grpc.CallOption) (*ExecuteResponse, error)
 	CancelExecution(ctx context.Context, in *CancelExecutionRequest, opts ...grpc.CallOption) (*CancelExecutionResponse, error)
 	// ReleaseExecution commits cancellation and cleanup. The execution ID then becomes stale.
 	ReleaseExecution(ctx context.Context, in *ReleaseExecutionRequest, opts ...grpc.CallOption) (*ReleaseExecutionResponse, error)
-	// WatchExecution is finite, ordered, and ends after one terminal snapshot.
+	// WatchExecution sends the latest snapshot, then ordered changes through one terminal snapshot.
 	WatchExecution(ctx context.Context, in *WatchExecutionRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[WatchExecutionResponse], error)
 }
 
@@ -99,12 +99,12 @@ type ExecutionService_WatchExecutionClient = grpc.ServerStreamingClient[WatchExe
 // All implementations must embed UnimplementedExecutionServiceServer
 // for forward compatibility.
 type ExecutionServiceServer interface {
-	// Execute publishes a connection-owned execution of an existing plan.
+	// Execute publishes an asynchronous execution of an existing reusable plan.
 	Execute(context.Context, *ExecuteRequest) (*ExecuteResponse, error)
 	CancelExecution(context.Context, *CancelExecutionRequest) (*CancelExecutionResponse, error)
 	// ReleaseExecution commits cancellation and cleanup. The execution ID then becomes stale.
 	ReleaseExecution(context.Context, *ReleaseExecutionRequest) (*ReleaseExecutionResponse, error)
-	// WatchExecution is finite, ordered, and ends after one terminal snapshot.
+	// WatchExecution sends the latest snapshot, then ordered changes through one terminal snapshot.
 	WatchExecution(*WatchExecutionRequest, grpc.ServerStreamingServer[WatchExecutionResponse]) error
 	mustEmbedUnimplementedExecutionServiceServer()
 }

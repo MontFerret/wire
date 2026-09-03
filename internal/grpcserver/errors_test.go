@@ -9,20 +9,18 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-func TestRPCErrorMapsResourceExhaustionAndBreakpointMetadata(t *testing.T) {
+func TestRPCErrorUsesGRPCStatusAndMinimalWireCategory(t *testing.T) {
 	tests := []struct {
-		name       string
-		domain     *core.DomainError
-		code       codes.Code
-		category   wirev1.ErrorCategory
-		resource   wirev1.ResourceKind
-		resourceID string
+		name     string
+		domain   *core.DomainError
+		code     codes.Code
+		category wirev1.ErrorCategory
 	}{
 		{
 			name:     "resource exhaustion",
 			domain:   &core.DomainError{Category: core.ErrorResourceExhausted, Message: "plan limit reached"},
 			code:     codes.ResourceExhausted,
-			category: wirev1.ErrorCategory_ERROR_CATEGORY_RESOURCE_EXHAUSTED,
+			category: wirev1.ErrorCategory_ERROR_CATEGORY_UNSPECIFIED,
 		},
 		{
 			name: "breakpoint not found",
@@ -31,10 +29,8 @@ func TestRPCErrorMapsResourceExhaustionAndBreakpointMetadata(t *testing.T) {
 				Message:    "resource not found",
 				ResourceID: "42",
 			},
-			code:       codes.NotFound,
-			category:   wirev1.ErrorCategory_ERROR_CATEGORY_BREAKPOINT_NOT_FOUND,
-			resource:   wirev1.ResourceKind_RESOURCE_KIND_BREAKPOINT,
-			resourceID: "42",
+			code:     codes.NotFound,
+			category: wirev1.ErrorCategory_ERROR_CATEGORY_BREAKPOINT_NOT_FOUND,
 		},
 	}
 
@@ -52,8 +48,12 @@ func TestRPCErrorMapsResourceExhaustionAndBreakpointMetadata(t *testing.T) {
 					break
 				}
 			}
-			if detail == nil || detail.GetCategory() != test.category || detail.GetResource() != test.resource || detail.GetResourceId() != test.resourceID {
-				t.Fatalf("unexpected Wire error detail: %#v", detail)
+			if test.category == wirev1.ErrorCategory_ERROR_CATEGORY_UNSPECIFIED {
+				if detail != nil {
+					t.Fatalf("gRPC-native failure carried redundant detail: %#v", detail)
+				}
+			} else if detail == nil || detail.GetCategory() != test.category {
+				t.Fatalf("unexpected Wire error category: %#v", detail)
 			}
 		})
 	}

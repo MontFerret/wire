@@ -21,6 +21,62 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+type OptimizationLevel int32
+
+const (
+	// Unspecified passes no plan option and preserves the runtime default.
+	OptimizationLevel_OPTIMIZATION_LEVEL_UNSPECIFIED OptimizationLevel = 0
+	OptimizationLevel_OPTIMIZATION_LEVEL_NONE        OptimizationLevel = 1
+	OptimizationLevel_OPTIMIZATION_LEVEL_BASIC       OptimizationLevel = 2
+	OptimizationLevel_OPTIMIZATION_LEVEL_FULL        OptimizationLevel = 3
+	OptimizationLevel_OPTIMIZATION_LEVEL_AGGRESSIVE  OptimizationLevel = 4
+)
+
+// Enum value maps for OptimizationLevel.
+var (
+	OptimizationLevel_name = map[int32]string{
+		0: "OPTIMIZATION_LEVEL_UNSPECIFIED",
+		1: "OPTIMIZATION_LEVEL_NONE",
+		2: "OPTIMIZATION_LEVEL_BASIC",
+		3: "OPTIMIZATION_LEVEL_FULL",
+		4: "OPTIMIZATION_LEVEL_AGGRESSIVE",
+	}
+	OptimizationLevel_value = map[string]int32{
+		"OPTIMIZATION_LEVEL_UNSPECIFIED": 0,
+		"OPTIMIZATION_LEVEL_NONE":        1,
+		"OPTIMIZATION_LEVEL_BASIC":       2,
+		"OPTIMIZATION_LEVEL_FULL":        3,
+		"OPTIMIZATION_LEVEL_AGGRESSIVE":  4,
+	}
+)
+
+func (x OptimizationLevel) Enum() *OptimizationLevel {
+	p := new(OptimizationLevel)
+	*p = x
+	return p
+}
+
+func (x OptimizationLevel) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (OptimizationLevel) Descriptor() protoreflect.EnumDescriptor {
+	return file_ferret_wire_v1_plan_proto_enumTypes[0].Descriptor()
+}
+
+func (OptimizationLevel) Type() protoreflect.EnumType {
+	return &file_ferret_wire_v1_plan_proto_enumTypes[0]
+}
+
+func (x OptimizationLevel) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use OptimizationLevel.Descriptor instead.
+func (OptimizationLevel) EnumDescriptor() ([]byte, []int) {
+	return file_ferret_wire_v1_plan_proto_rawDescGZIP(), []int{0}
+}
+
 type PlanId struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Value         string                 `protobuf:"bytes,1,opt,name=value,proto3" json:"value,omitempty"`
@@ -65,68 +121,16 @@ func (x *PlanId) GetValue() string {
 	return ""
 }
 
-type Source struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Content       string                 `protobuf:"bytes,1,opt,name=content,proto3" json:"content,omitempty"`
-	Identity      string                 `protobuf:"bytes,2,opt,name=identity,proto3" json:"identity,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *Source) Reset() {
-	*x = Source{}
-	mi := &file_ferret_wire_v1_plan_proto_msgTypes[1]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *Source) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*Source) ProtoMessage() {}
-
-func (x *Source) ProtoReflect() protoreflect.Message {
-	mi := &file_ferret_wire_v1_plan_proto_msgTypes[1]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use Source.ProtoReflect.Descriptor instead.
-func (*Source) Descriptor() ([]byte, []int) {
-	return file_ferret_wire_v1_plan_proto_rawDescGZIP(), []int{1}
-}
-
-func (x *Source) GetContent() string {
-	if x != nil {
-		return x.Content
-	}
-	return ""
-}
-
-func (x *Source) GetIdentity() string {
-	if x != nil {
-		return x.Identity
-	}
-	return ""
-}
-
 type CompileOptions struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Debuggable    bool                   `protobuf:"varint,1,opt,name=debuggable,proto3" json:"debuggable,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	OptimizationLevel OptimizationLevel      `protobuf:"varint,2,opt,name=optimization_level,json=optimizationLevel,proto3,enum=ferret.wire.v1.OptimizationLevel" json:"optimization_level,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *CompileOptions) Reset() {
 	*x = CompileOptions{}
-	mi := &file_ferret_wire_v1_plan_proto_msgTypes[2]
+	mi := &file_ferret_wire_v1_plan_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -138,7 +142,7 @@ func (x *CompileOptions) String() string {
 func (*CompileOptions) ProtoMessage() {}
 
 func (x *CompileOptions) ProtoReflect() protoreflect.Message {
-	mi := &file_ferret_wire_v1_plan_proto_msgTypes[2]
+	mi := &file_ferret_wire_v1_plan_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -151,28 +155,27 @@ func (x *CompileOptions) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CompileOptions.ProtoReflect.Descriptor instead.
 func (*CompileOptions) Descriptor() ([]byte, []int) {
-	return file_ferret_wire_v1_plan_proto_rawDescGZIP(), []int{2}
+	return file_ferret_wire_v1_plan_proto_rawDescGZIP(), []int{1}
 }
 
-func (x *CompileOptions) GetDebuggable() bool {
+func (x *CompileOptions) GetOptimizationLevel() OptimizationLevel {
 	if x != nil {
-		return x.Debuggable
+		return x.OptimizationLevel
 	}
-	return false
+	return OptimizationLevel_OPTIMIZATION_LEVEL_UNSPECIFIED
 }
 
 type Plan struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            *PlanId                `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Parameters    []string               `protobuf:"bytes,2,rep,name=parameters,proto3" json:"parameters,omitempty"`
-	Debuggable    bool                   `protobuf:"varint,3,opt,name=debuggable,proto3" json:"debuggable,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Plan) Reset() {
 	*x = Plan{}
-	mi := &file_ferret_wire_v1_plan_proto_msgTypes[3]
+	mi := &file_ferret_wire_v1_plan_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -184,7 +187,7 @@ func (x *Plan) String() string {
 func (*Plan) ProtoMessage() {}
 
 func (x *Plan) ProtoReflect() protoreflect.Message {
-	mi := &file_ferret_wire_v1_plan_proto_msgTypes[3]
+	mi := &file_ferret_wire_v1_plan_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -197,7 +200,7 @@ func (x *Plan) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Plan.ProtoReflect.Descriptor instead.
 func (*Plan) Descriptor() ([]byte, []int) {
-	return file_ferret_wire_v1_plan_proto_rawDescGZIP(), []int{3}
+	return file_ferret_wire_v1_plan_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *Plan) GetId() *PlanId {
@@ -214,13 +217,6 @@ func (x *Plan) GetParameters() []string {
 	return nil
 }
 
-func (x *Plan) GetDebuggable() bool {
-	if x != nil {
-		return x.Debuggable
-	}
-	return false
-}
-
 type CompileRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	ConnectionId  *ConnectionId          `protobuf:"bytes,1,opt,name=connection_id,json=connectionId,proto3" json:"connection_id,omitempty"`
@@ -232,7 +228,7 @@ type CompileRequest struct {
 
 func (x *CompileRequest) Reset() {
 	*x = CompileRequest{}
-	mi := &file_ferret_wire_v1_plan_proto_msgTypes[4]
+	mi := &file_ferret_wire_v1_plan_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -244,7 +240,7 @@ func (x *CompileRequest) String() string {
 func (*CompileRequest) ProtoMessage() {}
 
 func (x *CompileRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ferret_wire_v1_plan_proto_msgTypes[4]
+	mi := &file_ferret_wire_v1_plan_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -257,7 +253,7 @@ func (x *CompileRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CompileRequest.ProtoReflect.Descriptor instead.
 func (*CompileRequest) Descriptor() ([]byte, []int) {
-	return file_ferret_wire_v1_plan_proto_rawDescGZIP(), []int{4}
+	return file_ferret_wire_v1_plan_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *CompileRequest) GetConnectionId() *ConnectionId {
@@ -290,7 +286,7 @@ type CompileResponse struct {
 
 func (x *CompileResponse) Reset() {
 	*x = CompileResponse{}
-	mi := &file_ferret_wire_v1_plan_proto_msgTypes[5]
+	mi := &file_ferret_wire_v1_plan_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -302,7 +298,7 @@ func (x *CompileResponse) String() string {
 func (*CompileResponse) ProtoMessage() {}
 
 func (x *CompileResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ferret_wire_v1_plan_proto_msgTypes[5]
+	mi := &file_ferret_wire_v1_plan_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -315,10 +311,114 @@ func (x *CompileResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CompileResponse.ProtoReflect.Descriptor instead.
 func (*CompileResponse) Descriptor() ([]byte, []int) {
-	return file_ferret_wire_v1_plan_proto_rawDescGZIP(), []int{5}
+	return file_ferret_wire_v1_plan_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *CompileResponse) GetPlan() *Plan {
+	if x != nil {
+		return x.Plan
+	}
+	return nil
+}
+
+type CompileDebugRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ConnectionId  *ConnectionId          `protobuf:"bytes,1,opt,name=connection_id,json=connectionId,proto3" json:"connection_id,omitempty"`
+	Source        *Source                `protobuf:"bytes,2,opt,name=source,proto3" json:"source,omitempty"`
+	Options       *CompileOptions        `protobuf:"bytes,3,opt,name=options,proto3" json:"options,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CompileDebugRequest) Reset() {
+	*x = CompileDebugRequest{}
+	mi := &file_ferret_wire_v1_plan_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CompileDebugRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CompileDebugRequest) ProtoMessage() {}
+
+func (x *CompileDebugRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_ferret_wire_v1_plan_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CompileDebugRequest.ProtoReflect.Descriptor instead.
+func (*CompileDebugRequest) Descriptor() ([]byte, []int) {
+	return file_ferret_wire_v1_plan_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *CompileDebugRequest) GetConnectionId() *ConnectionId {
+	if x != nil {
+		return x.ConnectionId
+	}
+	return nil
+}
+
+func (x *CompileDebugRequest) GetSource() *Source {
+	if x != nil {
+		return x.Source
+	}
+	return nil
+}
+
+func (x *CompileDebugRequest) GetOptions() *CompileOptions {
+	if x != nil {
+		return x.Options
+	}
+	return nil
+}
+
+type CompileDebugResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Plan          *Plan                  `protobuf:"bytes,1,opt,name=plan,proto3" json:"plan,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CompileDebugResponse) Reset() {
+	*x = CompileDebugResponse{}
+	mi := &file_ferret_wire_v1_plan_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CompileDebugResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CompileDebugResponse) ProtoMessage() {}
+
+func (x *CompileDebugResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_ferret_wire_v1_plan_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CompileDebugResponse.ProtoReflect.Descriptor instead.
+func (*CompileDebugResponse) Descriptor() ([]byte, []int) {
+	return file_ferret_wire_v1_plan_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *CompileDebugResponse) GetPlan() *Plan {
 	if x != nil {
 		return x.Plan
 	}
@@ -335,7 +435,7 @@ type ReleasePlanRequest struct {
 
 func (x *ReleasePlanRequest) Reset() {
 	*x = ReleasePlanRequest{}
-	mi := &file_ferret_wire_v1_plan_proto_msgTypes[6]
+	mi := &file_ferret_wire_v1_plan_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -347,7 +447,7 @@ func (x *ReleasePlanRequest) String() string {
 func (*ReleasePlanRequest) ProtoMessage() {}
 
 func (x *ReleasePlanRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ferret_wire_v1_plan_proto_msgTypes[6]
+	mi := &file_ferret_wire_v1_plan_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -360,7 +460,7 @@ func (x *ReleasePlanRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReleasePlanRequest.ProtoReflect.Descriptor instead.
 func (*ReleasePlanRequest) Descriptor() ([]byte, []int) {
-	return file_ferret_wire_v1_plan_proto_rawDescGZIP(), []int{6}
+	return file_ferret_wire_v1_plan_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *ReleasePlanRequest) GetConnectionId() *ConnectionId {
@@ -385,7 +485,7 @@ type ReleasePlanResponse struct {
 
 func (x *ReleasePlanResponse) Reset() {
 	*x = ReleasePlanResponse{}
-	mi := &file_ferret_wire_v1_plan_proto_msgTypes[7]
+	mi := &file_ferret_wire_v1_plan_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -397,7 +497,7 @@ func (x *ReleasePlanResponse) String() string {
 func (*ReleasePlanResponse) ProtoMessage() {}
 
 func (x *ReleasePlanResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ferret_wire_v1_plan_proto_msgTypes[7]
+	mi := &file_ferret_wire_v1_plan_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -410,43 +510,50 @@ func (x *ReleasePlanResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReleasePlanResponse.ProtoReflect.Descriptor instead.
 func (*ReleasePlanResponse) Descriptor() ([]byte, []int) {
-	return file_ferret_wire_v1_plan_proto_rawDescGZIP(), []int{7}
+	return file_ferret_wire_v1_plan_proto_rawDescGZIP(), []int{8}
 }
 
 var File_ferret_wire_v1_plan_proto protoreflect.FileDescriptor
 
 const file_ferret_wire_v1_plan_proto_rawDesc = "" +
 	"\n" +
-	"\x19ferret/wire/v1/plan.proto\x12\x0eferret.wire.v1\x1a\x1cferret/wire/v1/runtime.proto\"\x1e\n" +
+	"\x19ferret/wire/v1/plan.proto\x12\x0eferret.wire.v1\x1a\x1cferret/wire/v1/runtime.proto\x1a\x1bferret/wire/v1/source.proto\"\x1e\n" +
 	"\x06PlanId\x12\x14\n" +
-	"\x05value\x18\x01 \x01(\tR\x05value\">\n" +
-	"\x06Source\x12\x18\n" +
-	"\acontent\x18\x01 \x01(\tR\acontent\x12\x1a\n" +
-	"\bidentity\x18\x02 \x01(\tR\bidentity\"0\n" +
-	"\x0eCompileOptions\x12\x1e\n" +
-	"\n" +
-	"debuggable\x18\x01 \x01(\bR\n" +
-	"debuggable\"n\n" +
+	"\x05value\x18\x01 \x01(\tR\x05value\"t\n" +
+	"\x0eCompileOptions\x12P\n" +
+	"\x12optimization_level\x18\x02 \x01(\x0e2!.ferret.wire.v1.OptimizationLevelR\x11optimizationLevelJ\x04\b\x01\x10\x02R\n" +
+	"debuggable\"`\n" +
 	"\x04Plan\x12&\n" +
 	"\x02id\x18\x01 \x01(\v2\x16.ferret.wire.v1.PlanIdR\x02id\x12\x1e\n" +
 	"\n" +
 	"parameters\x18\x02 \x03(\tR\n" +
-	"parameters\x12\x1e\n" +
-	"\n" +
-	"debuggable\x18\x03 \x01(\bR\n" +
+	"parametersJ\x04\b\x03\x10\x04R\n" +
 	"debuggable\"\xbd\x01\n" +
 	"\x0eCompileRequest\x12A\n" +
 	"\rconnection_id\x18\x01 \x01(\v2\x1c.ferret.wire.v1.ConnectionIdR\fconnectionId\x12.\n" +
 	"\x06source\x18\x02 \x01(\v2\x16.ferret.wire.v1.SourceR\x06source\x128\n" +
 	"\aoptions\x18\x03 \x01(\v2\x1e.ferret.wire.v1.CompileOptionsR\aoptions\"N\n" +
 	"\x0fCompileResponse\x12(\n" +
-	"\x04plan\x18\x01 \x01(\v2\x14.ferret.wire.v1.PlanR\x04planJ\x04\b\x02\x10\x03R\vdiagnostics\"\x88\x01\n" +
+	"\x04plan\x18\x01 \x01(\v2\x14.ferret.wire.v1.PlanR\x04planJ\x04\b\x02\x10\x03R\vdiagnostics\"\xc2\x01\n" +
+	"\x13CompileDebugRequest\x12A\n" +
+	"\rconnection_id\x18\x01 \x01(\v2\x1c.ferret.wire.v1.ConnectionIdR\fconnectionId\x12.\n" +
+	"\x06source\x18\x02 \x01(\v2\x16.ferret.wire.v1.SourceR\x06source\x128\n" +
+	"\aoptions\x18\x03 \x01(\v2\x1e.ferret.wire.v1.CompileOptionsR\aoptions\"@\n" +
+	"\x14CompileDebugResponse\x12(\n" +
+	"\x04plan\x18\x01 \x01(\v2\x14.ferret.wire.v1.PlanR\x04plan\"\x88\x01\n" +
 	"\x12ReleasePlanRequest\x12A\n" +
 	"\rconnection_id\x18\x01 \x01(\v2\x1c.ferret.wire.v1.ConnectionIdR\fconnectionId\x12/\n" +
 	"\aplan_id\x18\x02 \x01(\v2\x16.ferret.wire.v1.PlanIdR\x06planId\"\x15\n" +
-	"\x13ReleasePlanResponse2\xb1\x01\n" +
+	"\x13ReleasePlanResponse*\xb2\x01\n" +
+	"\x11OptimizationLevel\x12\"\n" +
+	"\x1eOPTIMIZATION_LEVEL_UNSPECIFIED\x10\x00\x12\x1b\n" +
+	"\x17OPTIMIZATION_LEVEL_NONE\x10\x01\x12\x1c\n" +
+	"\x18OPTIMIZATION_LEVEL_BASIC\x10\x02\x12\x1b\n" +
+	"\x17OPTIMIZATION_LEVEL_FULL\x10\x03\x12!\n" +
+	"\x1dOPTIMIZATION_LEVEL_AGGRESSIVE\x10\x042\x8c\x02\n" +
 	"\vPlanService\x12J\n" +
-	"\aCompile\x12\x1e.ferret.wire.v1.CompileRequest\x1a\x1f.ferret.wire.v1.CompileResponse\x12V\n" +
+	"\aCompile\x12\x1e.ferret.wire.v1.CompileRequest\x1a\x1f.ferret.wire.v1.CompileResponse\x12Y\n" +
+	"\fCompileDebug\x12#.ferret.wire.v1.CompileDebugRequest\x1a$.ferret.wire.v1.CompileDebugResponse\x12V\n" +
 	"\vReleasePlan\x12\".ferret.wire.v1.ReleasePlanRequest\x1a#.ferret.wire.v1.ReleasePlanResponseB6Z4github.com/MontFerret/wire/gen/ferret/wire/v1;wirev1b\x06proto3"
 
 var (
@@ -461,35 +568,46 @@ func file_ferret_wire_v1_plan_proto_rawDescGZIP() []byte {
 	return file_ferret_wire_v1_plan_proto_rawDescData
 }
 
-var file_ferret_wire_v1_plan_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_ferret_wire_v1_plan_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_ferret_wire_v1_plan_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_ferret_wire_v1_plan_proto_goTypes = []any{
-	(*PlanId)(nil),              // 0: ferret.wire.v1.PlanId
-	(*Source)(nil),              // 1: ferret.wire.v1.Source
-	(*CompileOptions)(nil),      // 2: ferret.wire.v1.CompileOptions
-	(*Plan)(nil),                // 3: ferret.wire.v1.Plan
-	(*CompileRequest)(nil),      // 4: ferret.wire.v1.CompileRequest
-	(*CompileResponse)(nil),     // 5: ferret.wire.v1.CompileResponse
-	(*ReleasePlanRequest)(nil),  // 6: ferret.wire.v1.ReleasePlanRequest
-	(*ReleasePlanResponse)(nil), // 7: ferret.wire.v1.ReleasePlanResponse
-	(*ConnectionId)(nil),        // 8: ferret.wire.v1.ConnectionId
+	(OptimizationLevel)(0),       // 0: ferret.wire.v1.OptimizationLevel
+	(*PlanId)(nil),               // 1: ferret.wire.v1.PlanId
+	(*CompileOptions)(nil),       // 2: ferret.wire.v1.CompileOptions
+	(*Plan)(nil),                 // 3: ferret.wire.v1.Plan
+	(*CompileRequest)(nil),       // 4: ferret.wire.v1.CompileRequest
+	(*CompileResponse)(nil),      // 5: ferret.wire.v1.CompileResponse
+	(*CompileDebugRequest)(nil),  // 6: ferret.wire.v1.CompileDebugRequest
+	(*CompileDebugResponse)(nil), // 7: ferret.wire.v1.CompileDebugResponse
+	(*ReleasePlanRequest)(nil),   // 8: ferret.wire.v1.ReleasePlanRequest
+	(*ReleasePlanResponse)(nil),  // 9: ferret.wire.v1.ReleasePlanResponse
+	(*ConnectionId)(nil),         // 10: ferret.wire.v1.ConnectionId
+	(*Source)(nil),               // 11: ferret.wire.v1.Source
 }
 var file_ferret_wire_v1_plan_proto_depIdxs = []int32{
-	0, // 0: ferret.wire.v1.Plan.id:type_name -> ferret.wire.v1.PlanId
-	8, // 1: ferret.wire.v1.CompileRequest.connection_id:type_name -> ferret.wire.v1.ConnectionId
-	1, // 2: ferret.wire.v1.CompileRequest.source:type_name -> ferret.wire.v1.Source
-	2, // 3: ferret.wire.v1.CompileRequest.options:type_name -> ferret.wire.v1.CompileOptions
-	3, // 4: ferret.wire.v1.CompileResponse.plan:type_name -> ferret.wire.v1.Plan
-	8, // 5: ferret.wire.v1.ReleasePlanRequest.connection_id:type_name -> ferret.wire.v1.ConnectionId
-	0, // 6: ferret.wire.v1.ReleasePlanRequest.plan_id:type_name -> ferret.wire.v1.PlanId
-	4, // 7: ferret.wire.v1.PlanService.Compile:input_type -> ferret.wire.v1.CompileRequest
-	6, // 8: ferret.wire.v1.PlanService.ReleasePlan:input_type -> ferret.wire.v1.ReleasePlanRequest
-	5, // 9: ferret.wire.v1.PlanService.Compile:output_type -> ferret.wire.v1.CompileResponse
-	7, // 10: ferret.wire.v1.PlanService.ReleasePlan:output_type -> ferret.wire.v1.ReleasePlanResponse
-	9, // [9:11] is the sub-list for method output_type
-	7, // [7:9] is the sub-list for method input_type
-	7, // [7:7] is the sub-list for extension type_name
-	7, // [7:7] is the sub-list for extension extendee
-	0, // [0:7] is the sub-list for field type_name
+	0,  // 0: ferret.wire.v1.CompileOptions.optimization_level:type_name -> ferret.wire.v1.OptimizationLevel
+	1,  // 1: ferret.wire.v1.Plan.id:type_name -> ferret.wire.v1.PlanId
+	10, // 2: ferret.wire.v1.CompileRequest.connection_id:type_name -> ferret.wire.v1.ConnectionId
+	11, // 3: ferret.wire.v1.CompileRequest.source:type_name -> ferret.wire.v1.Source
+	2,  // 4: ferret.wire.v1.CompileRequest.options:type_name -> ferret.wire.v1.CompileOptions
+	3,  // 5: ferret.wire.v1.CompileResponse.plan:type_name -> ferret.wire.v1.Plan
+	10, // 6: ferret.wire.v1.CompileDebugRequest.connection_id:type_name -> ferret.wire.v1.ConnectionId
+	11, // 7: ferret.wire.v1.CompileDebugRequest.source:type_name -> ferret.wire.v1.Source
+	2,  // 8: ferret.wire.v1.CompileDebugRequest.options:type_name -> ferret.wire.v1.CompileOptions
+	3,  // 9: ferret.wire.v1.CompileDebugResponse.plan:type_name -> ferret.wire.v1.Plan
+	10, // 10: ferret.wire.v1.ReleasePlanRequest.connection_id:type_name -> ferret.wire.v1.ConnectionId
+	1,  // 11: ferret.wire.v1.ReleasePlanRequest.plan_id:type_name -> ferret.wire.v1.PlanId
+	4,  // 12: ferret.wire.v1.PlanService.Compile:input_type -> ferret.wire.v1.CompileRequest
+	6,  // 13: ferret.wire.v1.PlanService.CompileDebug:input_type -> ferret.wire.v1.CompileDebugRequest
+	8,  // 14: ferret.wire.v1.PlanService.ReleasePlan:input_type -> ferret.wire.v1.ReleasePlanRequest
+	5,  // 15: ferret.wire.v1.PlanService.Compile:output_type -> ferret.wire.v1.CompileResponse
+	7,  // 16: ferret.wire.v1.PlanService.CompileDebug:output_type -> ferret.wire.v1.CompileDebugResponse
+	9,  // 17: ferret.wire.v1.PlanService.ReleasePlan:output_type -> ferret.wire.v1.ReleasePlanResponse
+	15, // [15:18] is the sub-list for method output_type
+	12, // [12:15] is the sub-list for method input_type
+	12, // [12:12] is the sub-list for extension type_name
+	12, // [12:12] is the sub-list for extension extendee
+	0,  // [0:12] is the sub-list for field type_name
 }
 
 func init() { file_ferret_wire_v1_plan_proto_init() }
@@ -498,18 +616,20 @@ func file_ferret_wire_v1_plan_proto_init() {
 		return
 	}
 	file_ferret_wire_v1_runtime_proto_init()
+	file_ferret_wire_v1_source_proto_init()
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_ferret_wire_v1_plan_proto_rawDesc), len(file_ferret_wire_v1_plan_proto_rawDesc)),
-			NumEnums:      0,
-			NumMessages:   8,
+			NumEnums:      1,
+			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
 		GoTypes:           file_ferret_wire_v1_plan_proto_goTypes,
 		DependencyIndexes: file_ferret_wire_v1_plan_proto_depIdxs,
+		EnumInfos:         file_ferret_wire_v1_plan_proto_enumTypes,
 		MessageInfos:      file_ferret_wire_v1_plan_proto_msgTypes,
 	}.Build()
 	File_ferret_wire_v1_plan_proto = out.File

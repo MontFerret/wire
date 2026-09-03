@@ -1,9 +1,8 @@
 package client
 
-import wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
-
 type (
-	// DiagnosticSpan is a labeled half-open UTF-8 byte span in source.
+	// DiagnosticSpan is retained until the client facade is rebuilt. Wire v1
+	// does not transport diagnostics without a portable Unified API contract.
 	DiagnosticSpan struct {
 		Start   uint64
 		End     uint64
@@ -11,7 +10,8 @@ type (
 		Primary bool
 	}
 
-	// Diagnostic is a structured Ferret compiler or runtime diagnostic.
+	// Diagnostic is retained until the client facade is rebuilt. Diagnostic
+	// slices returned by the current facade are always empty.
 	Diagnostic struct {
 		Kind           string
 		Message        string
@@ -21,38 +21,3 @@ type (
 		Spans          []DiagnosticSpan
 	}
 )
-
-func convertDiagnostics(values []*wirev1.Diagnostic) []Diagnostic {
-	result := make([]Diagnostic, len(values))
-
-	for i, value := range values {
-		if value == nil {
-			continue
-		}
-
-		spans := make([]DiagnosticSpan, len(value.GetSpans()))
-		for j, span := range value.GetSpans() {
-			if span == nil {
-				continue
-			}
-
-			spans[j] = DiagnosticSpan{
-				Start:   span.GetStartByte(),
-				End:     span.GetEndByte(),
-				Label:   span.GetLabel(),
-				Primary: span.GetPrimary(),
-			}
-		}
-
-		result[i] = Diagnostic{
-			Kind:           value.GetKind(),
-			Message:        value.GetMessage(),
-			Hint:           value.GetHint(),
-			Note:           value.GetNote(),
-			SourceIdentity: value.GetSourceIdentity(),
-			Spans:          spans,
-		}
-	}
-
-	return result
-}

@@ -19,16 +19,19 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	PlanService_Compile_FullMethodName     = "/ferret.wire.v1.PlanService/Compile"
-	PlanService_ReleasePlan_FullMethodName = "/ferret.wire.v1.PlanService/ReleasePlan"
+	PlanService_Compile_FullMethodName      = "/ferret.wire.v1.PlanService/Compile"
+	PlanService_CompileDebug_FullMethodName = "/ferret.wire.v1.PlanService/CompileDebug"
+	PlanService_ReleasePlan_FullMethodName  = "/ferret.wire.v1.PlanService/ReleasePlan"
 )
 
 // PlanServiceClient is the client API for PlanService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type PlanServiceClient interface {
-	// Compile creates a connection-owned runtime plan from FQL source.
+	// Compile creates a reusable connection-owned runtime plan from source.
 	Compile(ctx context.Context, in *CompileRequest, opts ...grpc.CallOption) (*CompileResponse, error)
+	// CompileDebug creates the same Plan resource with debugger metadata.
+	CompileDebug(ctx context.Context, in *CompileDebugRequest, opts ...grpc.CallOption) (*CompileDebugResponse, error)
 	// ReleasePlan cancels and releases the plan and all of its child resources.
 	// The plan ID becomes stale after cleanup completes.
 	ReleasePlan(ctx context.Context, in *ReleasePlanRequest, opts ...grpc.CallOption) (*ReleasePlanResponse, error)
@@ -52,6 +55,16 @@ func (c *planServiceClient) Compile(ctx context.Context, in *CompileRequest, opt
 	return out, nil
 }
 
+func (c *planServiceClient) CompileDebug(ctx context.Context, in *CompileDebugRequest, opts ...grpc.CallOption) (*CompileDebugResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CompileDebugResponse)
+	err := c.cc.Invoke(ctx, PlanService_CompileDebug_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *planServiceClient) ReleasePlan(ctx context.Context, in *ReleasePlanRequest, opts ...grpc.CallOption) (*ReleasePlanResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ReleasePlanResponse)
@@ -66,8 +79,10 @@ func (c *planServiceClient) ReleasePlan(ctx context.Context, in *ReleasePlanRequ
 // All implementations must embed UnimplementedPlanServiceServer
 // for forward compatibility.
 type PlanServiceServer interface {
-	// Compile creates a connection-owned runtime plan from FQL source.
+	// Compile creates a reusable connection-owned runtime plan from source.
 	Compile(context.Context, *CompileRequest) (*CompileResponse, error)
+	// CompileDebug creates the same Plan resource with debugger metadata.
+	CompileDebug(context.Context, *CompileDebugRequest) (*CompileDebugResponse, error)
 	// ReleasePlan cancels and releases the plan and all of its child resources.
 	// The plan ID becomes stale after cleanup completes.
 	ReleasePlan(context.Context, *ReleasePlanRequest) (*ReleasePlanResponse, error)
@@ -83,6 +98,9 @@ type UnimplementedPlanServiceServer struct{}
 
 func (UnimplementedPlanServiceServer) Compile(context.Context, *CompileRequest) (*CompileResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Compile not implemented")
+}
+func (UnimplementedPlanServiceServer) CompileDebug(context.Context, *CompileDebugRequest) (*CompileDebugResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CompileDebug not implemented")
 }
 func (UnimplementedPlanServiceServer) ReleasePlan(context.Context, *ReleasePlanRequest) (*ReleasePlanResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ReleasePlan not implemented")
@@ -126,6 +144,24 @@ func _PlanService_Compile_Handler(srv interface{}, ctx context.Context, dec func
 	return interceptor(ctx, in, info, handler)
 }
 
+func _PlanService_CompileDebug_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CompileDebugRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PlanServiceServer).CompileDebug(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: PlanService_CompileDebug_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PlanServiceServer).CompileDebug(ctx, req.(*CompileDebugRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _PlanService_ReleasePlan_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ReleasePlanRequest)
 	if err := dec(in); err != nil {
@@ -154,6 +190,10 @@ var PlanService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Compile",
 			Handler:    _PlanService_Compile_Handler,
+		},
+		{
+			MethodName: "CompileDebug",
+			Handler:    _PlanService_CompileDebug_Handler,
 		},
 		{
 			MethodName: "ReleasePlan",

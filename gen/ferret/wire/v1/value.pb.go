@@ -22,19 +22,17 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// Value is the portable parameter subset supported by Wire.
 type Value struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Types that are valid to be assigned to Value:
 	//
-	//	*Value_NoneValue
+	//	*Value_NullValue
 	//	*Value_BooleanValue
 	//	*Value_IntegerValue
 	//	*Value_FloatValue
 	//	*Value_StringValue
 	//	*Value_BinaryValue
-	//	*Value_DurationNanos
-	//	*Value_DatetimeValue
-	//	*Value_RegexpValue
 	//	*Value_ArrayValue
 	//	*Value_ObjectValue
 	Value         isValue_Value `protobuf_oneof:"value"`
@@ -79,10 +77,10 @@ func (x *Value) GetValue() isValue_Value {
 	return nil
 }
 
-func (x *Value) GetNoneValue() structpb.NullValue {
+func (x *Value) GetNullValue() structpb.NullValue {
 	if x != nil {
-		if x, ok := x.Value.(*Value_NoneValue); ok {
-			return x.NoneValue
+		if x, ok := x.Value.(*Value_NullValue); ok {
+			return x.NullValue
 		}
 	}
 	return structpb.NullValue(0)
@@ -133,33 +131,6 @@ func (x *Value) GetBinaryValue() []byte {
 	return nil
 }
 
-func (x *Value) GetDurationNanos() int64 {
-	if x != nil {
-		if x, ok := x.Value.(*Value_DurationNanos); ok {
-			return x.DurationNanos
-		}
-	}
-	return 0
-}
-
-func (x *Value) GetDatetimeValue() string {
-	if x != nil {
-		if x, ok := x.Value.(*Value_DatetimeValue); ok {
-			return x.DatetimeValue
-		}
-	}
-	return ""
-}
-
-func (x *Value) GetRegexpValue() string {
-	if x != nil {
-		if x, ok := x.Value.(*Value_RegexpValue); ok {
-			return x.RegexpValue
-		}
-	}
-	return ""
-}
-
 func (x *Value) GetArrayValue() *ArrayValue {
 	if x != nil {
 		if x, ok := x.Value.(*Value_ArrayValue); ok {
@@ -182,8 +153,8 @@ type isValue_Value interface {
 	isValue_Value()
 }
 
-type Value_NoneValue struct {
-	NoneValue structpb.NullValue `protobuf:"varint,1,opt,name=none_value,json=noneValue,proto3,enum=google.protobuf.NullValue,oneof"`
+type Value_NullValue struct {
+	NullValue structpb.NullValue `protobuf:"varint,1,opt,name=null_value,json=nullValue,proto3,enum=google.protobuf.NullValue,oneof"`
 }
 
 type Value_BooleanValue struct {
@@ -206,18 +177,6 @@ type Value_BinaryValue struct {
 	BinaryValue []byte `protobuf:"bytes,6,opt,name=binary_value,json=binaryValue,proto3,oneof"`
 }
 
-type Value_DurationNanos struct {
-	DurationNanos int64 `protobuf:"zigzag64,7,opt,name=duration_nanos,json=durationNanos,proto3,oneof"`
-}
-
-type Value_DatetimeValue struct {
-	DatetimeValue string `protobuf:"bytes,8,opt,name=datetime_value,json=datetimeValue,proto3,oneof"`
-}
-
-type Value_RegexpValue struct {
-	RegexpValue string `protobuf:"bytes,9,opt,name=regexp_value,json=regexpValue,proto3,oneof"`
-}
-
 type Value_ArrayValue struct {
 	ArrayValue *ArrayValue `protobuf:"bytes,10,opt,name=array_value,json=arrayValue,proto3,oneof"`
 }
@@ -226,7 +185,7 @@ type Value_ObjectValue struct {
 	ObjectValue *ObjectValue `protobuf:"bytes,11,opt,name=object_value,json=objectValue,proto3,oneof"`
 }
 
-func (*Value_NoneValue) isValue_Value() {}
+func (*Value_NullValue) isValue_Value() {}
 
 func (*Value_BooleanValue) isValue_Value() {}
 
@@ -237,12 +196,6 @@ func (*Value_FloatValue) isValue_Value() {}
 func (*Value_StringValue) isValue_Value() {}
 
 func (*Value_BinaryValue) isValue_Value() {}
-
-func (*Value_DurationNanos) isValue_Value() {}
-
-func (*Value_DatetimeValue) isValue_Value() {}
-
-func (*Value_RegexpValue) isValue_Value() {}
 
 func (*Value_ArrayValue) isValue_Value() {}
 
@@ -384,24 +337,23 @@ var File_ferret_wire_v1_value_proto protoreflect.FileDescriptor
 
 const file_ferret_wire_v1_value_proto_rawDesc = "" +
 	"\n" +
-	"\x1aferret/wire/v1/value.proto\x12\x0eferret.wire.v1\x1a\x1cgoogle/protobuf/struct.proto\"\x80\x04\n" +
+	"\x1aferret/wire/v1/value.proto\x12\x0eferret.wire.v1\x1a\x1cgoogle/protobuf/struct.proto\"\xd5\x03\n" +
 	"\x05Value\x12;\n" +
 	"\n" +
-	"none_value\x18\x01 \x01(\x0e2\x1a.google.protobuf.NullValueH\x00R\tnoneValue\x12%\n" +
+	"null_value\x18\x01 \x01(\x0e2\x1a.google.protobuf.NullValueH\x00R\tnullValue\x12%\n" +
 	"\rboolean_value\x18\x02 \x01(\bH\x00R\fbooleanValue\x12%\n" +
 	"\rinteger_value\x18\x03 \x01(\x12H\x00R\fintegerValue\x12!\n" +
 	"\vfloat_value\x18\x04 \x01(\x01H\x00R\n" +
 	"floatValue\x12#\n" +
 	"\fstring_value\x18\x05 \x01(\tH\x00R\vstringValue\x12#\n" +
-	"\fbinary_value\x18\x06 \x01(\fH\x00R\vbinaryValue\x12'\n" +
-	"\x0eduration_nanos\x18\a \x01(\x12H\x00R\rdurationNanos\x12'\n" +
-	"\x0edatetime_value\x18\b \x01(\tH\x00R\rdatetimeValue\x12#\n" +
-	"\fregexp_value\x18\t \x01(\tH\x00R\vregexpValue\x12=\n" +
+	"\fbinary_value\x18\x06 \x01(\fH\x00R\vbinaryValue\x12=\n" +
 	"\varray_value\x18\n" +
 	" \x01(\v2\x1a.ferret.wire.v1.ArrayValueH\x00R\n" +
 	"arrayValue\x12@\n" +
 	"\fobject_value\x18\v \x01(\v2\x1b.ferret.wire.v1.ObjectValueH\x00R\vobjectValueB\a\n" +
-	"\x05value\";\n" +
+	"\x05valueJ\x04\b\a\x10\bJ\x04\b\b\x10\tJ\x04\b\t\x10\n" +
+	"R\n" +
+	"none_valueR\x0eduration_nanosR\x0edatetime_valueR\fregexp_value\";\n" +
 	"\n" +
 	"ArrayValue\x12-\n" +
 	"\x06values\x18\x01 \x03(\v2\x15.ferret.wire.v1.ValueR\x06values\"\xa0\x01\n" +
@@ -440,7 +392,7 @@ var file_ferret_wire_v1_value_proto_goTypes = []any{
 	(structpb.NullValue)(0), // 6: google.protobuf.NullValue
 }
 var file_ferret_wire_v1_value_proto_depIdxs = []int32{
-	6, // 0: ferret.wire.v1.Value.none_value:type_name -> google.protobuf.NullValue
+	6, // 0: ferret.wire.v1.Value.null_value:type_name -> google.protobuf.NullValue
 	1, // 1: ferret.wire.v1.Value.array_value:type_name -> ferret.wire.v1.ArrayValue
 	2, // 2: ferret.wire.v1.Value.object_value:type_name -> ferret.wire.v1.ObjectValue
 	0, // 3: ferret.wire.v1.ArrayValue.values:type_name -> ferret.wire.v1.Value
@@ -461,15 +413,12 @@ func file_ferret_wire_v1_value_proto_init() {
 		return
 	}
 	file_ferret_wire_v1_value_proto_msgTypes[0].OneofWrappers = []any{
-		(*Value_NoneValue)(nil),
+		(*Value_NullValue)(nil),
 		(*Value_BooleanValue)(nil),
 		(*Value_IntegerValue)(nil),
 		(*Value_FloatValue)(nil),
 		(*Value_StringValue)(nil),
 		(*Value_BinaryValue)(nil),
-		(*Value_DurationNanos)(nil),
-		(*Value_DatetimeValue)(nil),
-		(*Value_RegexpValue)(nil),
 		(*Value_ArrayValue)(nil),
 		(*Value_ObjectValue)(nil),
 	}

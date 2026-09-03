@@ -49,14 +49,16 @@ type (
 		lastOutputContentType string
 		releaseExecutionCalls int
 		releasePlanCalls      int
+		releaseExecutionLimit time.Time
+		releasePlanLimit      time.Time
 	}
 )
 
 func (s *clientTestServer) Connect(_ *wirev1.ConnectRequest, stream wirev1.RuntimeService_ConnectServer) error {
-	if err := stream.Send(&wirev1.ConnectResponse{Opened: &wirev1.ConnectionOpened{
+	if err := stream.Send(&wirev1.ConnectResponse{
 		ConnectionId: &wirev1.ConnectionId{Value: "connection"},
-		RuntimeInfo:  &wirev1.RuntimeInfo{ApiIdentity: "ferret.wire.v1"},
-	}}); err != nil {
+		Protocol:     &wirev1.ProtocolInfo{Name: "ferret.wire", Version: "v1"},
+	}); err != nil {
 		return err
 	}
 
@@ -72,11 +74,29 @@ func (s *clientTestServer) CloseConnection(_ context.Context, request *wirev1.Cl
 }
 
 func (s *clientTestServer) Compile(_ context.Context, request *wirev1.CompileRequest) (*wirev1.CompileResponse, error) {
+	plan, err := s.compile(request.GetConnectionId(), request.GetSource(), false)
+	if err != nil {
+		return nil, err
+	}
+
+	return &wirev1.CompileResponse{Plan: plan}, nil
+}
+
+func (s *clientTestServer) CompileDebug(_ context.Context, request *wirev1.CompileDebugRequest) (*wirev1.CompileDebugResponse, error) {
+	plan, err := s.compile(request.GetConnectionId(), request.GetSource(), true)
+	if err != nil {
+		return nil, err
+	}
+
+	return &wirev1.CompileDebugResponse{Plan: plan}, nil
+}
+
+func (s *clientTestServer) compile(connectionID *wirev1.ConnectionId, source *wirev1.Source, debug bool) (*wirev1.Plan, error) {
 	s.mu.Lock()
-	s.calls = append(s.calls, call("compile", request.GetConnectionId().GetValue(), ""))
-	s.lastCompileDebuggable = request.GetOptions().GetDebuggable()
-	s.lastCompileSourceName = request.GetSource().GetIdentity()
-	s.lastCompileContent = request.GetSource().GetContent()
+	s.calls = append(s.calls, call("compile", connectionID.GetValue(), ""))
+	s.lastCompileDebuggable = debug
+	s.lastCompileSourceName = source.GetName()
+	s.lastCompileContent = source.GetContent()
 	err := s.compileErr
 	if err == nil {
 		s.plans++
@@ -88,13 +108,14 @@ func (s *clientTestServer) Compile(_ context.Context, request *wirev1.CompileReq
 		return nil, err
 	}
 
-	return &wirev1.CompileResponse{Plan: &wirev1.Plan{Id: &wirev1.PlanId{Value: planID}}}, nil
+	return &wirev1.Plan{Id: &wirev1.PlanId{Value: planID}}, nil
 }
 
-func (s *clientTestServer) ReleasePlan(_ context.Context, request *wirev1.ReleasePlanRequest) (*wirev1.ReleasePlanResponse, error) {
+func (s *clientTestServer) ReleasePlan(ctx context.Context, request *wirev1.ReleasePlanRequest) (*wirev1.ReleasePlanResponse, error) {
 	s.mu.Lock()
 	s.releasePlanCalls++
 	s.calls = append(s.calls, call("release-plan", request.GetConnectionId().GetValue(), request.GetPlanId().GetValue()))
+	s.releasePlanLimit, _ = ctx.Deadline()
 	err := s.releasePlanErr
 	s.mu.Unlock()
 
@@ -123,10 +144,11 @@ func (s *clientTestServer) Execute(_ context.Context, request *wirev1.ExecuteReq
 	return &wirev1.ExecuteResponse{Execution: executionSnapshotProto(executionID, wirev1.ExecutionState_EXECUTION_STATE_RUNNING, nil, nil)}, nil
 }
 
-func (s *clientTestServer) ReleaseExecution(_ context.Context, request *wirev1.ReleaseExecutionRequest) (*wirev1.ReleaseExecutionResponse, error) {
+func (s *clientTestServer) ReleaseExecution(ctx context.Context, request *wirev1.ReleaseExecutionRequest) (*wirev1.ReleaseExecutionResponse, error) {
 	s.mu.Lock()
 	s.releaseExecutionCalls++
 	s.calls = append(s.calls, call("release-execution", request.GetConnectionId().GetValue(), request.GetExecutionId().GetValue()))
+	s.releaseExecutionLimit, _ = ctx.Deadline()
 	err := s.releaseExecutionErr
 	s.mu.Unlock()
 
@@ -178,6 +200,26 @@ func (s *clientTestServer) callSnapshot() ([]string, int, int, int) {
 	defer s.mu.Unlock()
 
 	return append([]string(nil), s.calls...), s.watchCalls, s.releaseExecutionCalls, s.releasePlanCalls
+}
+
+func (s *clientTestServer) releaseDeadlineSnapshot() (time.Time, time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.releaseExecutionLimit, s.releasePlanLimit
+}
+
+func assertCleanupDeadline(t *testing.T, kind string, deadline time.Time) {
+	t.Helper()
+
+	if deadline.IsZero() {
+		t.Fatalf("%s cleanup has no deadline", kind)
+	}
+
+	remaining := time.Until(deadline)
+	if remaining <= 0 || remaining > convenienceCleanupTimeout {
+		t.Fatalf("unexpected %s cleanup deadline: %v", kind, remaining)
+	}
 }
 
 func TestClientRunOwnsCreatedResources(t *testing.T) {
@@ -280,6 +322,10 @@ func TestClientRunOwnsCreatedResources(t *testing.T) {
 		if releaseExecutionCalls != 1 || releasePlanCalls != 1 {
 			t.Fatalf("cancelled Client.Run cleanup: execution=%d plan=%d", releaseExecutionCalls, releasePlanCalls)
 		}
+
+		executionDeadline, planDeadline := server.releaseDeadlineSnapshot()
+		assertCleanupDeadline(t, "execution", executionDeadline)
+		assertCleanupDeadline(t, "plan", planDeadline)
 	})
 
 	t.Run("stream failure still cleans up", func(t *testing.T) {

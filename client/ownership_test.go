@@ -47,10 +47,10 @@ func (s *handleServer) Connect(_ *wirev1.ConnectRequest, stream wirev1.RuntimeSe
 	id := fmt.Sprintf("connection-%d", s.connections)
 	s.mu.Unlock()
 
-	if err := stream.Send(&wirev1.ConnectResponse{Opened: &wirev1.ConnectionOpened{
+	if err := stream.Send(&wirev1.ConnectResponse{
 		ConnectionId: &wirev1.ConnectionId{Value: id},
-		RuntimeInfo:  &wirev1.RuntimeInfo{ApiIdentity: "ferret.wire.v1"},
-	}}); err != nil {
+		Protocol:     &wirev1.ProtocolInfo{Name: "ferret.wire", Version: "v1"},
+	}); err != nil {
 		return err
 	}
 
@@ -72,7 +72,16 @@ func (s *handleServer) Compile(_ context.Context, request *wirev1.CompileRequest
 	return &wirev1.CompileResponse{Plan: &wirev1.Plan{
 		Id:         &wirev1.PlanId{Value: "plan-" + connectionID},
 		Parameters: []string{"input"},
-		Debuggable: request.GetOptions().GetDebuggable(),
+	}}, nil
+}
+
+func (s *handleServer) CompileDebug(_ context.Context, request *wirev1.CompileDebugRequest) (*wirev1.CompileDebugResponse, error) {
+	connectionID := request.GetConnectionId().GetValue()
+	s.record("compile", connectionID, "")
+
+	return &wirev1.CompileDebugResponse{Plan: &wirev1.Plan{
+		Id:         &wirev1.PlanId{Value: "plan-" + connectionID},
+		Parameters: []string{"input"},
 	}}, nil
 }
 
@@ -107,13 +116,13 @@ func (s *handleServer) Execute(_ context.Context, request *wirev1.ExecuteRequest
 	s.calls = append(s.calls, call("execute", request.GetConnectionId().GetValue(), request.GetPlanId().GetValue()))
 	s.mu.Unlock()
 
-	return &wirev1.ExecuteResponse{Execution: executionProto(id, request.GetPlanId().GetValue())}, nil
+	return &wirev1.ExecuteResponse{Execution: executionProto(id)}, nil
 }
 
 func (s *handleServer) CancelExecution(_ context.Context, request *wirev1.CancelExecutionRequest) (*wirev1.CancelExecutionResponse, error) {
 	s.record("cancel", request.GetConnectionId().GetValue(), request.GetExecutionId().GetValue())
 
-	return &wirev1.CancelExecutionResponse{Execution: executionProto(request.GetExecutionId().GetValue(), "plan")}, nil
+	return &wirev1.CancelExecutionResponse{}, nil
 }
 
 func (s *handleServer) ReleaseExecution(_ context.Context, request *wirev1.ReleaseExecutionRequest) (*wirev1.ReleaseExecutionResponse, error) {
@@ -145,70 +154,72 @@ func (s *handleServer) WatchExecution(request *wirev1.WatchExecutionRequest, str
 	id := request.GetExecutionId().GetValue()
 
 	return stream.Send(&wirev1.WatchExecutionResponse{
-		ExecutionId: &wirev1.ExecutionId{Value: id},
-		Sequence:    1,
-		Payload: &wirev1.WatchExecutionResponse_Started{Started: &wirev1.ExecutionStarted{
-			Execution: executionProto(id, "plan"),
-		}},
+		Sequence:  1,
+		Execution: executionProto(id),
 	})
 }
 
-func (s *handleServer) OpenDebugSession(_ context.Context, request *wirev1.OpenDebugSessionRequest) (*wirev1.OpenDebugSessionResponse, error) {
+func (s *handleServer) CreateDebugSession(_ context.Context, request *wirev1.CreateDebugSessionRequest) (*wirev1.CreateDebugSessionResponse, error) {
 	connectionID := request.GetConnectionId().GetValue()
 	s.record("new-debug", connectionID, request.GetPlanId().GetValue())
 
-	return &wirev1.OpenDebugSessionResponse{Session: debugProto("debug-" + connectionID)}, nil
+	return &wirev1.CreateDebugSessionResponse{Session: debugProto("debug-" + connectionID)}, nil
 }
 
-func (s *handleServer) StartDebug(_ context.Context, request *wirev1.StartDebugRequest) (*wirev1.StartDebugResponse, error) {
-	s.recordCommand("start", request.GetCommand())
+func (s *handleServer) Start(_ context.Context, request *wirev1.StartRequest) (*wirev1.StartResponse, error) {
+	s.record("start", request.GetConnectionId().GetValue(), request.GetDebugSessionId().GetValue())
 
-	return &wirev1.StartDebugResponse{Session: debugProto(request.GetCommand().GetDebugSessionId().GetValue())}, nil
+	return &wirev1.StartResponse{}, nil
 }
 
 func (s *handleServer) Continue(_ context.Context, request *wirev1.ContinueRequest) (*wirev1.ContinueResponse, error) {
-	s.recordCommand("continue", request.GetCommand())
+	s.record("continue", request.GetConnectionId().GetValue(), request.GetDebugSessionId().GetValue())
 
-	return &wirev1.ContinueResponse{Session: debugProto(request.GetCommand().GetDebugSessionId().GetValue())}, nil
+	return &wirev1.ContinueResponse{}, nil
 }
 
 func (s *handleServer) Pause(_ context.Context, request *wirev1.PauseRequest) (*wirev1.PauseResponse, error) {
-	s.recordCommand("pause", request.GetCommand())
+	s.record("pause", request.GetConnectionId().GetValue(), request.GetDebugSessionId().GetValue())
 
-	return &wirev1.PauseResponse{Session: debugProto(request.GetCommand().GetDebugSessionId().GetValue())}, nil
+	return &wirev1.PauseResponse{}, nil
 }
 
 func (s *handleServer) Next(_ context.Context, request *wirev1.NextRequest) (*wirev1.NextResponse, error) {
-	s.recordCommand("next", request.GetCommand())
+	s.record("next", request.GetConnectionId().GetValue(), request.GetDebugSessionId().GetValue())
 
-	return &wirev1.NextResponse{Session: debugProto(request.GetCommand().GetDebugSessionId().GetValue())}, nil
+	return &wirev1.NextResponse{}, nil
 }
 
 func (s *handleServer) Step(_ context.Context, request *wirev1.StepRequest) (*wirev1.StepResponse, error) {
-	s.recordCommand("step", request.GetCommand())
+	s.record("step", request.GetConnectionId().GetValue(), request.GetDebugSessionId().GetValue())
 
-	return &wirev1.StepResponse{Session: debugProto(request.GetCommand().GetDebugSessionId().GetValue())}, nil
+	return &wirev1.StepResponse{}, nil
 }
 
 func (s *handleServer) Out(_ context.Context, request *wirev1.OutRequest) (*wirev1.OutResponse, error) {
-	s.recordCommand("out", request.GetCommand())
+	s.record("out", request.GetConnectionId().GetValue(), request.GetDebugSessionId().GetValue())
 
-	return &wirev1.OutResponse{Session: debugProto(request.GetCommand().GetDebugSessionId().GetValue())}, nil
+	return &wirev1.OutResponse{}, nil
 }
 
-func (s *handleServer) StopDebug(_ context.Context, request *wirev1.StopDebugRequest) (*wirev1.StopDebugResponse, error) {
-	s.recordCommand("stop", request.GetCommand())
+func (s *handleServer) Terminate(_ context.Context, request *wirev1.TerminateRequest) (*wirev1.TerminateResponse, error) {
+	s.record("stop", request.GetConnectionId().GetValue(), request.GetDebugSessionId().GetValue())
 
-	return &wirev1.StopDebugResponse{Session: debugProto(request.GetCommand().GetDebugSessionId().GetValue())}, nil
+	return &wirev1.TerminateResponse{}, nil
 }
 
 func (s *handleServer) SetBreakpoint(_ context.Context, request *wirev1.SetBreakpointRequest) (*wirev1.SetBreakpointResponse, error) {
 	s.record("set-breakpoint", request.GetConnectionId().GetValue(), request.GetDebugSessionId().GetValue())
 
 	return &wirev1.SetBreakpointResponse{Breakpoint: &wirev1.Breakpoint{
-		Id: 1, File: request.GetLocation().GetFile(), RequestedLine: request.GetLocation().GetLine(),
-		RequestedColumn: request.GetLocation().GetColumn(), Line: request.GetLocation().GetLine(),
-		Column: request.GetLocation().GetColumn(), Verified: true,
+		Id:                1,
+		RequestedLocation: request.GetLocation(),
+		Location: &wirev1.Range{
+			Location: request.GetLocation(),
+			Span:     &wirev1.Span{},
+		},
+		BindingMode: wirev1.BreakpointBindingMode_BREAKPOINT_BINDING_MODE_NEXT_EXECUTABLE_IN_FILE,
+		Bound:       true,
 	}}, nil
 }
 
@@ -222,7 +233,7 @@ func (s *handleServer) Frames(_ context.Context, request *wirev1.FramesRequest) 
 	s.record("frames", request.GetConnectionId().GetValue(), request.GetDebugSessionId().GetValue())
 
 	return &wirev1.FramesResponse{Frames: []*wirev1.Frame{{
-		Index: 0, Name: "main", Location: &wirev1.SourceLocation{File: "query.fql", Line: 1},
+		Name: "main", Location: debugTestLocation("query.fql", 1, 0),
 	}}}, nil
 }
 
@@ -257,16 +268,10 @@ func (s *handleServer) WatchDebug(request *wirev1.WatchDebugRequest, stream wire
 	id := request.GetDebugSessionId().GetValue()
 
 	return stream.Send(&wirev1.WatchDebugResponse{
-		DebugSessionId: &wirev1.DebugSessionId{Value: id},
-		Sequence:       1,
-		Payload: &wirev1.WatchDebugResponse_Stopped{Stopped: &wirev1.DebugStopped{
-			Session: debugProto(id),
-		}},
+		Sequence: 1,
+		Kind:     wirev1.DebugEventKind_DEBUG_EVENT_KIND_STOPPED,
+		Session:  debugProto(id),
 	})
-}
-
-func (s *handleServer) recordCommand(name string, command *wirev1.DebugCommand) {
-	s.record(name, command.GetConnectionId().GetValue(), command.GetDebugSessionId().GetValue())
 }
 
 func (s *handleServer) record(name string, connectionID string, resourceID string) {
@@ -286,18 +291,18 @@ func call(name string, connectionID string, resourceID string) string {
 	return name + "|" + connectionID + "|" + resourceID
 }
 
-func executionProto(id string, planID string) *wirev1.Execution {
+func executionProto(id string) *wirev1.Execution {
 	return &wirev1.Execution{
-		Id: &wirev1.ExecutionId{Value: id}, PlanId: &wirev1.PlanId{Value: planID},
+		Id:    &wirev1.ExecutionId{Value: id},
 		State: wirev1.ExecutionState_EXECUTION_STATE_RUNNING,
 	}
 }
 
 func debugProto(id string) *wirev1.DebugSession {
 	return &wirev1.DebugSession{
-		Id: &wirev1.DebugSessionId{Value: id}, PlanId: &wirev1.PlanId{Value: "plan"},
+		Id:    &wirev1.DebugSessionId{Value: id},
 		State: wirev1.DebugState_DEBUG_STATE_STOPPED, StopReason: wirev1.DebugStopReason_DEBUG_STOP_REASON_BREAKPOINT,
-		Location: &wirev1.SourceLocation{File: "query.fql", Line: 1}, HitBreakpointIds: []uint64{1},
+		Location: debugTestRange("query.fql", 1, 0, 0, 0), HitBreakpointIds: []uint64{1},
 	}
 }
 

@@ -21,15 +21,18 @@ func (d *DebugSession) SetBreakpoint(ctx context.Context, location source.Locati
 		return debugger.Breakpoint{}, errors.New("breakpoint file is required")
 	}
 
-	if location.Line <= 0 || location.Line > math.MaxInt32 || location.Column < 0 || location.Column > math.MaxInt32 {
+	if location.Line <= 0 || location.Column < 0 {
 		return debugger.Breakpoint{}, errors.New("breakpoint has an invalid line or column")
 	}
 
 	response, err := d.client.debugClient.SetBreakpoint(ctx, &wirev1.SetBreakpointRequest{
 		ConnectionId:   d.client.connectionProto(),
 		DebugSessionId: &wirev1.DebugSessionId{Value: d.id},
-		Location: &wirev1.SourceLocation{
-			File: location.File, Line: int32(location.Line), Column: int32(location.Column),
+		Location: &wirev1.Location{
+			File: location.File,
+			Position: &wirev1.Position{
+				Line: int64(location.Line), Column: int64(location.Column),
+			},
 		},
 	})
 	if err != nil {
@@ -180,32 +183,52 @@ func convertBreakpoint(value *wirev1.Breakpoint) (debugger.Breakpoint, error) {
 		return debugger.Breakpoint{}, err
 	}
 
-	requested := source.Location{
-		Position: source.Position{Line: int(value.GetRequestedLine()), Column: int(value.GetRequestedColumn())},
-		File:     value.GetFile(),
-	}
-	if requested.File == "" || requested.Line <= 0 || requested.Column < 0 {
-		return debugger.Breakpoint{}, invalidDebuggerResponse("requested breakpoint location is invalid")
+	requested, err := convertSourceLocation(value.GetRequestedLocation())
+	if err != nil {
+		return debugger.Breakpoint{}, err
 	}
 
-	resolved := source.Range{}
-	if value.GetLine() != 0 || value.GetColumn() != 0 {
-		if value.GetLine() <= 0 || value.GetColumn() < 0 {
-			return debugger.Breakpoint{}, invalidDebuggerResponse("resolved breakpoint location is invalid")
-		}
-		resolved.Location = source.Location{
-			Position: source.Position{Line: int(value.GetLine()), Column: int(value.GetColumn())},
-			File:     value.GetFile(),
-		}
-	} else if value.GetVerified() {
-		return debugger.Breakpoint{}, invalidDebuggerResponse("verified breakpoint has no resolved location")
+	if requested == nil {
+		return debugger.Breakpoint{}, invalidDebuggerResponse("requested breakpoint location is missing")
+	}
+
+	resolved, err := convertSourceRange(value.GetLocation())
+	if err != nil {
+		return debugger.Breakpoint{}, err
+	}
+
+	if value.GetBound() && resolved == nil {
+		return debugger.Breakpoint{}, invalidDebuggerResponse("bound breakpoint has no resolved location")
+	}
+
+	pointID, err := debuggerIDFromProto[debugger.PointID](value.GetPointId(), "breakpoint point ID", true)
+	if err != nil {
+		return debugger.Breakpoint{}, err
+	}
+
+	functionID, err := debuggerIDFromProto[debugger.FunctionID](value.GetFunctionId(), "breakpoint function ID", true)
+	if err != nil {
+		return debugger.Breakpoint{}, err
+	}
+
+	bindingMode, err := convertBreakpointBindingMode(value.GetBindingMode())
+	if err != nil {
+		return debugger.Breakpoint{}, err
+	}
+
+	var location source.Range
+	if resolved != nil {
+		location = *resolved
 	}
 
 	return debugger.Breakpoint{
-		Location:          resolved,
-		RequestedLocation: requested,
+		Location:          location,
+		RequestedLocation: *requested,
 		ID:                id,
-		Bound:             value.GetVerified(),
+		PointID:           pointID,
+		FunctionID:        functionID,
+		BindingMode:       bindingMode,
+		Bound:             value.GetBound(),
 	}, nil
 }
 
@@ -214,20 +237,34 @@ func convertFrame(value *wirev1.Frame, index int) (debugger.Frame, error) {
 		return debugger.Frame{}, invalidDebuggerResponse("frame %d is missing", index)
 	}
 
-	if value.GetIndex() != int32(index) {
-		return debugger.Frame{}, invalidDebuggerResponse("frame index %d is out of order", value.GetIndex())
-	}
-
 	location, err := convertSourceLocation(value.GetLocation())
 	if err != nil {
 		return debugger.Frame{}, err
 	}
-	result := debugger.Frame{Name: value.GetName()}
+	functionID, err := debuggerIDFromProto[debugger.FunctionID](value.GetFunctionId(), "frame function ID", true)
+	if err != nil {
+		return debugger.Frame{}, err
+	}
+
+	result := debugger.Frame{Name: value.GetName(), FunctionID: functionID}
 	if location != nil {
 		result.Location = *location
 	}
 
 	return result, nil
+}
+
+func convertBreakpointBindingMode(value wirev1.BreakpointBindingMode) (debugger.BreakpointBindingMode, error) {
+	switch value {
+	case wirev1.BreakpointBindingMode_BREAKPOINT_BINDING_MODE_NEXT_EXECUTABLE_IN_FILE:
+		return debugger.BreakpointBindNextExecutableInFile, nil
+	case wirev1.BreakpointBindingMode_BREAKPOINT_BINDING_MODE_EXACT:
+		return debugger.BreakpointBindExact, nil
+	case wirev1.BreakpointBindingMode_BREAKPOINT_BINDING_MODE_NEXT_EXECUTABLE_IN_FUNCTION:
+		return debugger.BreakpointBindNextExecutableInFunction, nil
+	default:
+		return 0, invalidDebuggerResponse("unknown breakpoint binding mode %d", value)
+	}
 }
 
 func convertDebugValue(value *wirev1.DebugValue) (debugger.Value, error) {

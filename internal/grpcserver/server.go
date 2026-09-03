@@ -1,6 +1,8 @@
 package grpcserver
 
 import (
+	"context"
+
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
 	"github.com/MontFerret/wire/internal/core"
 	"google.golang.org/grpc"
@@ -12,11 +14,30 @@ type Server struct {
 	wirev1.UnimplementedExecutionServiceServer
 	wirev1.UnimplementedDebugServiceServer
 
-	host *core.Host
+	info        core.RuntimeInfo
+	connections *core.ConnectionRegistry
+	compiler    *core.Compiler
+	executor    *core.Executor
+	debugger    *core.Debugger
+	lifecycle   *core.Lifecycle
 }
 
-func New(host *core.Host) *Server {
-	return &Server{host: host}
+func New(
+	info core.RuntimeInfo,
+	connections *core.ConnectionRegistry,
+	compiler *core.Compiler,
+	executor *core.Executor,
+	debugger *core.Debugger,
+	lifecycle *core.Lifecycle,
+) *Server {
+	return &Server{
+		info:        info,
+		connections: connections,
+		compiler:    compiler,
+		executor:    executor,
+		debugger:    debugger,
+		lifecycle:   lifecycle,
+	}
 }
 
 func (s *Server) Register(registrar grpc.ServiceRegistrar) {
@@ -26,11 +47,16 @@ func (s *Server) Register(registrar grpc.ServiceRegistrar) {
 	wirev1.RegisterDebugServiceServer(registrar, s)
 }
 
-func (s *Server) connection(id *wirev1.ConnectionId) (*core.Connection, error) {
-	connection, err := s.host.Connection(core.ConnectionID(id.GetValue()))
+func (s *Server) operationContext(
+	parent context.Context,
+	id *wirev1.ConnectionId,
+) (*core.Context, context.CancelFunc, error) {
+	connection, err := s.connections.Get(core.ConnectionID(id.GetValue()))
 	if err != nil {
-		return nil, rpcError(err)
+		return nil, nil, rpcError(err)
 	}
 
-	return connection, nil
+	ctx, cancel := core.NewContext(parent, connection)
+
+	return ctx, cancel, nil
 }

@@ -45,6 +45,12 @@ runtime implementations through the Unified API and Wire to consumers, and do
 not move DAP, LSP, transport, or
 host-configuration semantics into Wire for convenience.
 
+Use `internal/panicboundary` only around calls into externally supplied Unified
+API implementations. Never use it to contain panics from Wire-owned code. A
+contained implementation panic is not a normal API error, and a stateful
+runtime resource whose operation panics must not be reused unless its owner can
+prove that reuse is safe.
+
 ## Generated code
 
 Protobuf definitions and Buf configuration are source. Files under
@@ -80,11 +86,15 @@ These rules are mandatory for handwritten Go code:
 * Prefer one grouped `type ( ... )` declaration for related package-level types.
 * Group structs, interfaces, aliases, and named primitive types when they form a
   cohesive responsibility.
-* Do not split files one type at a time merely because types have methods.
+* Within `internal/core`, keep one principal stateful type and all of its
+  methods in one file. If that file becomes unreasonable, extract a real
+  state-owning collaborator rather than a method-category file.
+* Cohesive value, option, snapshot, and watcher types may remain grouped with
+  their principal type or in their own domain-focused file.
 * Keep related lifecycle or protocol-adaptation types together when proximity
   improves understanding.
-* Split files by responsibility, such as server lifecycle, execution handling,
-  debugger commands, debugger inspection, debugger events, or client lifecycle.
+* Outside `internal/core`, split files by cohesive responsibility when that
+  improves ownership and navigation.
 * Avoid overloaded files that combine unrelated responsibilities.
 * Do not create `helpers.go`, `utils.go`, or similar dumping grounds.
 
@@ -98,8 +108,12 @@ These rules are mandatory for handwritten Go code:
 * Keep methods close to the state and lifecycle they own.
 * Constructors may live beside the types they construct.
 * A type-centered file must not mix in unrelated package-level functions.
+* In `internal/core`, do not split a principal type's methods into lifecycle,
+  command, inspection, event, or other category files.
 * If behavior belongs to a connection, plan, execution, debug session, watcher,
   server, or client lifecycle, prefer a method on that owner.
+* Do not introduce manager or facade types whose methods only forward to the
+  real operation owner. Components must own their use cases directly.
 * Move genuinely package-level behavior into a predictably named,
   responsibility-focused file.
 * Do not create arbitrary collections of small helper functions.
