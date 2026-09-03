@@ -67,6 +67,31 @@ Unified API cannot provide portably. The current API also has no neutral
 diagnostic or error taxonomy; Wire keeps only categories needed to operate the
 remote lifecycle and sanitizes implementation failures.
 
+### External implementation panic boundary
+
+Calls into the host-supplied implementations of `api.Runtime`, `api.Plan`,
+`api.Session`, and `debugger.Session` cross an explicit panic boundary. The
+boundary converts an implementation panic into a typed internal error that
+retains the panic value and stack for diagnostics. Ordinary returned errors pass
+through unchanged, and neither panic values nor stacks cross the sanitized
+protocol boundary.
+
+The panic boundary covers only the external method invocation. Wire validation,
+registries, state transitions, snapshot construction, event publication,
+bookkeeping, and lifecycle orchestration remain outside it. A panic in
+Wire-owned code is a programming defect and follows the existing server or
+detached-cleanup panic policy rather than being mislabeled as an implementation
+failure.
+
+Containment does not make a stateful implementation safe to reuse. A panic from
+an execution session fails that execution and the session is closed exactly
+once. Any debugger operation panic before teardown fails the logical debug
+session, publishes its terminal failure, rejects subsequent runtime commands,
+and starts idempotent debugger cleanup. A constructor panic fails only the
+attempted resource; it does not disable the borrowed runtime or invalidate its
+parent plan. Cleanup panics are retained as cleanup errors, while teardown
+continues across unrelated resources.
+
 ## Protocol contract
 
 The versioned protobuf API, currently `ferret.wire.v1`, is canonical. Generated

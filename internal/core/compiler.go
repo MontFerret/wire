@@ -2,8 +2,10 @@ package core
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/MontFerret/api"
+	"github.com/MontFerret/wire/internal/panicboundary"
 	"github.com/google/uuid"
 )
 
@@ -53,12 +55,13 @@ func (c *Compiler) Compile(ctx *Context, input CompileInput) (PlanSnapshot, erro
 		}
 	}()
 
-	compiled, err, panicked := c.compileAPIPlan(ctx, input)
-	if panicked {
-		return PlanSnapshot{}, internalError(err)
-	}
-
+	compiled, err := c.compileAPIPlan(ctx, input)
 	if err != nil {
+		var panicErr *panicboundary.Error
+		if errors.As(err, &panicErr) {
+			return PlanSnapshot{}, internalError(fmt.Errorf("compile runtime plan: %w", err))
+		}
+
 		compileErr := compilationError("compilation failed", err)
 		if !isNil(compiled) {
 			return PlanSnapshot{}, errors.Join(compileErr, closeAPIPlan(compiled))
@@ -101,19 +104,19 @@ func (c *Compiler) Compile(ctx *Context, input CompileInput) (PlanSnapshot, erro
 	return created.snapshot(), nil
 }
 
-func (c *Compiler) compileAPIPlan(ctx *Context, input CompileInput) (api.Plan, error, bool) {
+func (c *Compiler) compileAPIPlan(ctx *Context, input CompileInput) (api.Plan, error) {
 	var options []api.PlanOption
 	if input.OptimizationLevel != nil {
 		options = append(options, api.WithOptimizationLevel(*input.OptimizationLevel))
 	}
 
 	if input.Debuggable {
-		return callAPI("runtime compilation panicked", func() (api.Plan, error) {
+		return panicboundary.Call(func() (api.Plan, error) {
 			return c.runtime.CompileDebug(ctx, input.Source, options...)
 		})
 	}
 
-	return callAPI("runtime compilation panicked", func() (api.Plan, error) {
+	return panicboundary.Call(func() (api.Plan, error) {
 		return c.runtime.Compile(ctx, input.Source, options...)
 	})
 }

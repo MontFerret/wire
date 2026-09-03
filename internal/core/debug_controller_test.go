@@ -11,6 +11,7 @@ import (
 
 	"github.com/MontFerret/api/debugger"
 	"github.com/MontFerret/api/source"
+	"github.com/MontFerret/wire/internal/panicboundary"
 )
 
 type controllerDebugger struct {
@@ -230,6 +231,26 @@ func TestDebugControllerContainsRuntimePanicsAtEachBoundary(t *testing.T) {
 
 			return err
 		}},
+		{name: "continue", call: func(controller *DebugController) error {
+			_, err := controller.Continue(context.Background())
+
+			return err
+		}},
+		{name: "next", call: func(controller *DebugController) error {
+			_, err := controller.Next(context.Background())
+
+			return err
+		}},
+		{name: "step", call: func(controller *DebugController) error {
+			_, err := controller.Step(context.Background())
+
+			return err
+		}},
+		{name: "out", call: func(controller *DebugController) error {
+			_, err := controller.Out(context.Background())
+
+			return err
+		}},
 		{name: "pause", call: func(controller *DebugController) error {
 			return controller.Pause()
 		}},
@@ -238,10 +259,28 @@ func TestDebugControllerContainsRuntimePanicsAtEachBoundary(t *testing.T) {
 
 			return err
 		}},
+		{name: "frame-locals", call: func(controller *DebugController) error {
+			_, err := controller.FrameLocals(0)
+
+			return err
+		}},
+		{name: "variables", call: func(controller *DebugController) error {
+			_, err := controller.Variables(1)
+
+			return err
+		}},
+		{name: "evaluate-frame", call: func(controller *DebugController) error {
+			_, err := controller.EvaluateFrame(context.Background(), 0, "value")
+
+			return err
+		}},
 		{name: "set-breakpoint", call: func(controller *DebugController) error {
 			_, err := controller.SetBreakpoint(source.Location{}, debugger.BreakpointOptions{})
 
 			return err
+		}},
+		{name: "delete-breakpoint", call: func(controller *DebugController) error {
+			return controller.DeleteBreakpoint(1)
 		}},
 		{name: "close", call: func(controller *DebugController) error {
 			return controller.Close()
@@ -252,8 +291,17 @@ func TestDebugControllerContainsRuntimePanicsAtEachBoundary(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			runtime := &controllerDebugger{panicOn: test.name}
 			err := test.call(newDebugController(runtime))
-			if err == nil || strings.Contains(err.Error(), "secret") {
+			if err == nil || strings.Contains(err.Error(), "runtime secret") {
 				t.Fatalf("runtime panic was not sanitized: %v", err)
+			}
+
+			var panicErr *panicboundary.Error
+			if !errors.As(err, &panicErr) {
+				t.Fatalf("runtime panic was not retained as a typed cause: %v", err)
+			}
+
+			if panicErr.Value != "runtime secret" || len(panicErr.Stack) == 0 {
+				t.Fatalf("runtime panic diagnostics were not retained: %#v", panicErr)
 			}
 		})
 	}

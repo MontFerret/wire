@@ -8,6 +8,7 @@ import (
 	"github.com/MontFerret/api/debugger"
 	"github.com/MontFerret/api/source"
 	"github.com/MontFerret/wire/internal/lifecycle"
+	"github.com/MontFerret/wire/internal/panicboundary"
 )
 
 type (
@@ -97,6 +98,10 @@ func (d *DebugSession) Pause(ctx context.Context) (DebugSnapshot, error) {
 	d.stateMu.Unlock()
 
 	if err := d.controller.Pause(); err != nil {
+		if panicErr := d.poisonAfterRuntimePanic("pause runtime debugger", err); panicErr != nil {
+			return DebugSnapshot{}, panicErr
+		}
+
 		return DebugSnapshot{}, invalidState("pause failed", err)
 	}
 
@@ -153,6 +158,10 @@ func (d *DebugSession) SetBreakpointAt(
 
 	value, err := d.controller.SetBreakpoint(location, options)
 	if err != nil {
+		if panicErr := d.poisonAfterRuntimePanic("set runtime breakpoint", err); panicErr != nil {
+			return debugger.Breakpoint{}, panicErr
+		}
+
 		return debugger.Breakpoint{}, invalidState("set breakpoint failed", err)
 	}
 
@@ -190,6 +199,10 @@ func (d *DebugSession) DeleteBreakpoint(ctx context.Context, breakpointID debugg
 	}
 
 	if err := d.controller.DeleteBreakpoint(value.ID); err != nil {
+		if panicErr := d.poisonAfterRuntimePanic("delete runtime breakpoint", err); panicErr != nil {
+			return panicErr
+		}
+
 		return invalidState("delete breakpoint failed", err)
 	}
 
@@ -228,6 +241,10 @@ func (d *DebugSession) Frames(ctx context.Context) ([]debugger.Frame, error) {
 
 	values, err := d.controller.Frames()
 	if err != nil {
+		if panicErr := d.poisonAfterRuntimePanic("read runtime debugger frames", err); panicErr != nil {
+			return nil, panicErr
+		}
+
 		return nil, invalidState("frames failed", err)
 	}
 
@@ -248,6 +265,10 @@ func (d *DebugSession) FrameLocals(ctx context.Context, frame int) ([]debugger.V
 
 	values, err := d.controller.FrameLocals(frame)
 	if err != nil {
+		if panicErr := d.poisonAfterRuntimePanic("read runtime debugger frame locals", err); panicErr != nil {
+			return nil, panicErr
+		}
+
 		return nil, invalidState("frame locals failed", err)
 	}
 
@@ -271,6 +292,10 @@ func (d *DebugSession) Variables(
 
 	values, err := d.controller.Variables(reference)
 	if err != nil {
+		if panicErr := d.poisonAfterRuntimePanic("read runtime debugger variables", err); panicErr != nil {
+			return nil, panicErr
+		}
+
 		return nil, invalidState("variables failed", err)
 	}
 
@@ -302,6 +327,10 @@ func (d *DebugSession) EvaluateFrame(
 
 	value, err := d.controller.EvaluateFrame(evaluateCtx, frame, expression)
 	if err != nil {
+		if panicErr := d.poisonAfterRuntimePanic("evaluate with runtime debugger", err); panicErr != nil {
+			return debugger.Value{}, panicErr
+		}
+
 		return debugger.Value{}, invalidState("evaluation failed", err)
 	}
 
@@ -495,6 +524,28 @@ func (d *DebugSession) operationContext(ctx context.Context) (context.Context, c
 		stop()
 		cancel(context.Canceled)
 	}
+}
+
+// poisonAfterRuntimePanic applies the aggregate policy for a debugger
+// implementation panic. The caller holds operationMu, so the failed transition
+// is serialized with commands and breakpoint bookkeeping.
+func (d *DebugSession) poisonAfterRuntimePanic(operation string, err error) error {
+	var panicErr *panicboundary.Error
+	if !errors.As(err, &panicErr) {
+		return nil
+	}
+
+	d.stateMu.Lock()
+	if !d.state.status.terminal() {
+		d.state.status = DebugFailed
+		d.state.failure = failureFromError(ErrorInternal)
+		d.publishLocked(DebugEventFailed, true)
+	}
+	d.stateMu.Unlock()
+
+	d.beginClose()
+
+	return runtimePanicError(operation, err)
 }
 
 func (d *DebugSession) snapshot() DebugSnapshot {

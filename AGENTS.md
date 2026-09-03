@@ -45,6 +45,12 @@ runtime implementations through the Unified API and Wire to consumers, and do
 not move DAP, LSP, transport, or
 host-configuration semantics into Wire for convenience.
 
+Use `internal/panicboundary` only around calls into externally supplied Unified
+API implementations. Never use it to contain panics from Wire-owned code. A
+contained implementation panic is not a normal API error, and a stateful
+runtime resource whose operation panics must not be reused unless its owner can
+prove that reuse is safe.
+
 ## Generated code
 
 Protobuf definitions and Buf configuration are source. Files under

@@ -12,6 +12,7 @@ import (
 	"github.com/MontFerret/api"
 	"github.com/MontFerret/api/debugger"
 	"github.com/MontFerret/api/source"
+	"github.com/MontFerret/wire/internal/panicboundary"
 )
 
 func TestPendingCompileCountsAgainstLimitAndConnectionCloseWaits(t *testing.T) {
@@ -296,6 +297,55 @@ func TestPlanClosePanicIsSanitizedAndDoesNotRetainResource(t *testing.T) {
 	_, _, closeCalls := plan.snapshot()
 	if closeCalls != 1 {
 		t.Fatalf("panicking plan close attempted %d times", closeCalls)
+	}
+}
+
+func TestConnectionCleanupContinuesAfterRuntimeClosePanic(t *testing.T) {
+	first := &spyPlan{close: func() error { panic("first close secret") }}
+	second := &spyPlan{}
+	plans := []api.Plan{first, second}
+	runtime := &spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
+		plan := plans[0]
+		plans = plans[1:]
+
+		return plan, nil
+	}}
+	host, err := newTestHost(runtime, testLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	connection, err := host.OpenConnection()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	firstSnapshot, err := connection.Compile(context.Background(), CompileInput{Source: api.Source{Content: "RETURN 1"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	secondSnapshot, err := connection.Compile(context.Background(), CompileInput{Source: api.Source{Content: "RETURN 2"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = host.CloseConnection(testContext(t), connection.ID())
+	var panicErr *panicboundary.Error
+	if !hasCategory(err, ErrorInternal) || !errors.As(err, &panicErr) || strings.Contains(err.Error(), "secret") {
+		t.Fatalf("cleanup panic was not retained and sanitized: %v", err)
+	}
+
+	_, _, firstCloses := first.snapshot()
+	_, _, secondCloses := second.snapshot()
+	if firstCloses != 1 || secondCloses != 1 {
+		t.Fatalf("cleanup did not continue across panic: first=%d second=%d", firstCloses, secondCloses)
+	}
+
+	for _, id := range []PlanID{firstSnapshot.ID, secondSnapshot.ID} {
+		if _, getErr := host.plans.get(connection.ID(), id); !hasCategory(getErr, ErrorPlanNotFound) {
+			t.Fatalf("plan %s remained after connection cleanup: %v", id, getErr)
+		}
 	}
 }
 

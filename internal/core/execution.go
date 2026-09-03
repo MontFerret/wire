@@ -7,6 +7,7 @@ import (
 
 	"github.com/MontFerret/api"
 	"github.com/MontFerret/wire/internal/lifecycle"
+	"github.com/MontFerret/wire/internal/panicboundary"
 )
 
 type (
@@ -70,7 +71,9 @@ func (e *Execution) run() {
 		options = append(options, api.WithOutputContentType(e.contentType))
 	}
 
-	session, err, _ := openAPISession(e.ctx, e.plan, options)
+	session, err := panicboundary.Call(func() (api.Session, error) {
+		return e.plan.NewSession(e.ctx, options...)
+	})
 	if err != nil {
 		if !isNil(session) {
 			err = errors.Join(err, closeAPISession(session))
@@ -87,17 +90,20 @@ func (e *Execution) run() {
 		return
 	}
 
-	output, runErr, panicked := runAPISession(e.ctx, session)
+	output, runErr := panicboundary.Call(func() (api.Output, error) {
+		return session.Run(e.ctx)
+	})
 	closeErr := closeAPISession(session)
 	err = errors.Join(runErr, closeErr)
 
-	var result *Output
-	if !panicked {
-		result = &Output{ContentType: output.ContentType, Content: append([]byte(nil), output.Content...)}
+	result := &Output{ContentType: output.ContentType, Content: append([]byte(nil), output.Content...)}
+	var panicErr *panicboundary.Error
+	if errors.As(runErr, &panicErr) {
+		result = nil
 	}
 
 	category := ErrorInternal
-	if runErr != nil && !panicked {
+	if runErr != nil && panicErr == nil {
 		category = ErrorExecution
 	}
 

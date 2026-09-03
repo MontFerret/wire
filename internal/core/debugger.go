@@ -3,8 +3,11 @@ package core
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/MontFerret/api"
+	"github.com/MontFerret/api/debugger"
+	"github.com/MontFerret/wire/internal/panicboundary"
 	"github.com/google/uuid"
 )
 
@@ -58,9 +61,14 @@ func (d *Debugger) Create(ctx *Context, input OpenDebugInput) (DebugSnapshot, er
 		options = append(options, api.WithOutputContentType(input.OutputContentType))
 	}
 
-	runtimeDebugger, err, panicked := openAPIDebugSession(ctx, plan.plan, options)
-	if panicked {
-		return DebugSnapshot{}, internalError(err)
+	runtimeDebugger, err := panicboundary.Call(func() (debugger.Session, error) {
+		return plan.plan.NewDebugSession(ctx, options...)
+	})
+	if err != nil {
+		var panicErr *panicboundary.Error
+		if errors.As(err, &panicErr) {
+			return DebugSnapshot{}, internalError(fmt.Errorf("create runtime debug session: %w", err))
+		}
 	}
 
 	var controller *DebugController

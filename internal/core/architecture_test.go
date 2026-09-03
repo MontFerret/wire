@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"errors"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/MontFerret/api"
 	"github.com/MontFerret/api/debugger"
+	"github.com/MontFerret/wire/internal/panicboundary"
 	"github.com/google/uuid"
 )
 
@@ -43,6 +45,36 @@ func TestConnectionContainsOnlyLifetimeState(t *testing.T) {
 		if _, exists := methods.MethodByName(name); exists {
 			t.Fatalf("Connection retained forbidden method %q", name)
 		}
+	}
+}
+
+func TestWireOwnedCommitPanicPropagatesWithoutBoundary(t *testing.T) {
+	registry := NewPlanRegistry(1)
+	plan := &Plan{id: "plan", owner: "owner"}
+	if err := registry.reserve(plan.owner); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := registry.commit(plan); err != nil {
+		t.Fatal(err)
+	}
+
+	sentinel := errors.New("Wire defect")
+	recovered := func() (value any) {
+		defer func() { value = recover() }()
+
+		_ = registry.commitChild(plan.owner, plan.id, plan, func() error {
+			panic(sentinel)
+		})
+
+		return nil
+	}()
+	if recovered != sentinel {
+		t.Fatalf("Wire-owned panic was changed: %#v", recovered)
+	}
+
+	if _, contained := recovered.(*panicboundary.Error); contained {
+		t.Fatalf("Wire-owned panic was contained by panicboundary: %#v", recovered)
 	}
 }
 
