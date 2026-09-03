@@ -132,10 +132,11 @@ terminal snapshots return `*client.Failure`; remote cancellation returns
 `client.ErrExecutionCancelled`. Cancellation of the caller's waiting context
 instead returns that context's error.
 
-Convenience cleanup is synchronous and uses a cancellation-detached context,
-so resources created by `Run` are still released after the request context is
-cancelled. Execution and cleanup errors are joined rather than replacing one
-another.
+Convenience cleanup is synchronous and uses a cancellation-detached context
+with a fresh 30-second deadline for each release, so resources created by
+`Run` are still released after the request context is cancelled without
+allowing a stalled cleanup call to block forever. Execution and cleanup errors
+are joined rather than replacing one another.
 
 ## Snapshots and events
 

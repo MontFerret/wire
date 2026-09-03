@@ -139,7 +139,7 @@ func (c *Client) Run(ctx context.Context, src api.Source, parameters Parameters,
 	}
 
 	output, runErr := plan.Run(ctx, parameters, options.Execute)
-	closeErr := plan.Close(context.WithoutCancel(ctx))
+	closeErr := boundedCleanup(ctx, convenienceCleanupTimeout, plan.Close)
 
 	return output, errors.Join(runErr, closeErr)
 }

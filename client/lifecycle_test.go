@@ -18,6 +18,46 @@ import (
 	"google.golang.org/grpc/test/bufconn"
 )
 
+func TestBoundedCleanup(t *testing.T) {
+	type contextKey struct{}
+
+	parent, cancelParent := context.WithCancel(context.WithValue(context.Background(), contextKey{}, "retained"))
+	cancelParent()
+	cleanupErr := errors.New("cleanup failed")
+
+	err := boundedCleanup(parent, 25*time.Millisecond, func(ctx context.Context) error {
+		if err := ctx.Err(); err != nil {
+			t.Fatalf("cleanup context inherited cancellation: %v", err)
+		}
+
+		if value := ctx.Value(contextKey{}); value != "retained" {
+			t.Fatalf("cleanup context lost value: %v", value)
+		}
+
+		deadline, ok := ctx.Deadline()
+		if !ok {
+			t.Fatal("cleanup context has no deadline")
+		}
+
+		remaining := time.Until(deadline)
+		if remaining <= 0 || remaining > 25*time.Millisecond {
+			t.Fatalf("unexpected cleanup deadline: %v", remaining)
+		}
+
+		select {
+		case <-ctx.Done():
+			return cleanupErr
+		case <-time.After(time.Second):
+			t.Fatal("cleanup context did not expire")
+
+			return nil
+		}
+	})
+	if !errors.Is(err, context.DeadlineExceeded) || !errors.Is(err, cleanupErr) {
+		t.Fatalf("cleanup returned %v", err)
+	}
+}
+
 type lifecycleServer struct {
 	wirev1.UnimplementedRuntimeServiceServer
 	wirev1.UnimplementedExecutionServiceServer

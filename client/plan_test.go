@@ -55,6 +55,12 @@ func TestPlanRunOwnsOnlyItsExecution(t *testing.T) {
 			t.Fatalf("Plan.Run cleanup: execution=%d plan=%d", releaseExecutionCalls, releasePlanCalls)
 		}
 
+		executionDeadline, planDeadline := server.releaseDeadlineSnapshot()
+		assertCleanupDeadline(t, "execution", executionDeadline)
+		if !planDeadline.IsZero() {
+			t.Fatalf("Plan.Run released the caller-owned plan with deadline %v", planDeadline)
+		}
+
 		extra, err := plan.Execute(testClientContext(t), nil, ExecuteOptions{})
 		if err != nil {
 			t.Fatalf("Plan.Run closed the caller-owned plan: %v", err)

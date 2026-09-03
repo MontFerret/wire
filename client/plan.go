@@ -91,7 +91,7 @@ func (p *Plan) Run(ctx context.Context, parameters Parameters, options ExecuteOp
 	}
 
 	output, waitErr := execution.Wait(ctx)
-	closeErr := execution.Close(context.WithoutCancel(ctx))
+	closeErr := boundedCleanup(ctx, convenienceCleanupTimeout, execution.Close)
 
 	return output, errors.Join(waitErr, closeErr)
 }
