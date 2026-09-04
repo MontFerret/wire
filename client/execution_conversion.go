@@ -1,50 +1,61 @@
 package client
 
-import wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
+import (
+	"fmt"
 
-func convertOutput(value *wirev1.Output) *Output {
+	"github.com/MontFerret/api"
+	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
+	wireruntime "github.com/MontFerret/wire/pkg/runtime"
+)
+
+func convertOutput(value *wirev1.Output) *api.Output {
 	if value == nil {
 		return nil
 	}
 
-	return &Output{ContentType: value.GetContentType(), Content: append([]byte(nil), value.GetContent()...)}
+	return &api.Output{ContentType: value.GetContentType(), Content: append([]byte(nil), value.GetContent()...)}
 }
 
-func convertExecutionSnapshot(value *wirev1.Execution) (ExecutionSnapshot, error) {
-	failure, err := convertFailure(value.GetFailure())
+func convertExecutionSnapshot(value *wirev1.Execution) (wireruntime.Snapshot, error) {
+	state, err := convertExecutionState(value.GetState())
 	if err != nil {
-		return ExecutionSnapshot{}, err
+		return wireruntime.Snapshot{}, err
 	}
 
-	return ExecutionSnapshot{
-		State:   convertExecutionState(value.GetState()),
+	terminalFailure, err := convertFailure(value.GetFailure())
+	if err != nil {
+		return wireruntime.Snapshot{}, err
+	}
+
+	return wireruntime.Snapshot{
+		State:   state,
 		Output:  convertOutput(value.GetOutput()),
-		Failure: failure,
+		Failure: terminalFailure,
 	}, nil
 }
 
-func convertExecutionState(value wirev1.ExecutionState) ExecutionState {
+func convertExecutionState(value wirev1.ExecutionState) (wireruntime.State, error) {
 	switch value {
 	case wirev1.ExecutionState_EXECUTION_STATE_RUNNING:
-		return ExecutionRunning
+		return wireruntime.StateRunning, nil
 	case wirev1.ExecutionState_EXECUTION_STATE_COMPLETED:
-		return ExecutionCompleted
+		return wireruntime.StateCompleted, nil
 	case wirev1.ExecutionState_EXECUTION_STATE_FAILED:
-		return ExecutionFailed
+		return wireruntime.StateFailed, nil
 	case wirev1.ExecutionState_EXECUTION_STATE_CANCELLED:
-		return ExecutionCancelled
+		return wireruntime.StateCancelled, nil
 	default:
-		return 0
+		return 0, fmt.Errorf("Wire server returned an invalid execution state: %d", value)
 	}
 }
 
-func convertExecutionEvent(value *wirev1.WatchExecutionResponse) (ExecutionEvent, error) {
+func convertExecutionEvent(value *wirev1.WatchExecutionResponse) (wireruntime.Event, error) {
 	snapshot, err := convertExecutionSnapshot(value.GetExecution())
 	if err != nil {
-		return ExecutionEvent{}, err
+		return wireruntime.Event{}, err
 	}
 
-	return ExecutionEvent{
+	return wireruntime.Event{
 		Sequence: value.GetSequence(),
 		Snapshot: snapshot,
 	}, nil

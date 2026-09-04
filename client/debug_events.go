@@ -5,65 +5,17 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/MontFerret/api/debugger"
-	"github.com/MontFerret/api/source"
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
+	"github.com/MontFerret/wire/pkg/debugger"
 )
 
 type (
-	// DebugState describes the lifecycle state in a DebugSessionSnapshot.
-	DebugState uint8
-
-	// DebugEventKind identifies an ordered debug state transition. Started and
-	// continued events are distinct even though both carry a running snapshot.
-	DebugEventKind uint8
-
-	// DebugSessionSnapshot is the state published for one remote debug event.
-	DebugSessionSnapshot struct {
-		State            DebugState
-		StopReason       debugger.Reason
-		Location         *source.Range
-		HitBreakpointIDs []debugger.BreakpointID
-		Depth            int
-		Output           *Output
-		Failure          *Failure
-	}
-
-	// DebugEvent carries an ordered debug-session snapshot.
-	DebugEvent struct {
-		Sequence uint64
-		Kind     DebugEventKind
-		Snapshot DebugSessionSnapshot
-	}
-
 	// DebugEvents receives published debug snapshots until the terminal event or
 	// stream cancellation.
 	DebugEvents struct {
 		stream wirev1.DebugService_WatchDebugClient
 		cancel context.CancelFunc
 	}
-)
-
-// Debug session lifecycle states.
-const (
-	DebugCreated DebugState = iota + 1
-	DebugRunning
-	DebugStopped
-	DebugCompleted
-	DebugFailed
-	DebugTerminated
-)
-
-// Debug event kinds. Every session starts with a created event and has one
-// ordered terminal event.
-const (
-	DebugEventStarted DebugEventKind = iota + 1
-	DebugEventContinued
-	DebugEventStopped
-	DebugEventCompleted
-	DebugEventFailed
-	DebugEventTerminated
-	DebugEventCreated
 )
 
 // Watch opens an ordered event stream tied to both ctx and the Client's
@@ -88,43 +40,33 @@ func (d *DebugSession) Watch(ctx context.Context) (*DebugEvents, error) {
 
 // Recv blocks for the next ordered debug event. It releases the local stream
 // when a terminal event or error is observed.
-func (events *DebugEvents) Recv() (DebugEvent, error) {
+func (events *DebugEvents) Recv() (debugger.Event, error) {
 	if events == nil || events.stream == nil {
-		return DebugEvent{}, errors.New("debug event receiver is nil")
+		return debugger.Event{}, errors.New("debug event receiver is nil")
 	}
 
 	value, err := events.stream.Recv()
 	if err != nil {
 		events.cancel()
 
-		return DebugEvent{}, decodeError(err)
+		return debugger.Event{}, decodeError(err)
 	}
 
 	if value.GetSession() == nil || value.GetKind() == wirev1.DebugEventKind_DEBUG_EVENT_KIND_UNSPECIFIED {
 		events.cancel()
 
-		return DebugEvent{}, fmt.Errorf("Wire server returned an empty debug event")
+		return debugger.Event{}, fmt.Errorf("Wire server returned an empty debug event")
 	}
 
 	event, err := convertDebugEvent(value)
 	if err != nil {
 		events.cancel()
 
-		return DebugEvent{}, err
+		return debugger.Event{}, err
 	}
 	if event.Snapshot.State.Terminal() {
 		events.cancel()
 	}
 
 	return event, nil
-}
-
-// Terminal reports whether the debug session has reached a final state.
-func (state DebugState) Terminal() bool {
-	switch state {
-	case DebugCompleted, DebugFailed, DebugTerminated:
-		return true
-	default:
-		return false
-	}
 }

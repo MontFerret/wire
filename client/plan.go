@@ -6,7 +6,6 @@ import (
 
 	"github.com/MontFerret/api"
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
-	"github.com/MontFerret/wire/internal/lifecycle"
 )
 
 type (
@@ -21,7 +20,7 @@ type (
 		id         string
 		parameters []string
 		debuggable bool
-		close      *lifecycle.Close
+		close      *closeState
 	}
 )
 
@@ -63,7 +62,7 @@ func (c *Client) Compile(ctx context.Context, src api.Source, options CompileOpt
 		id:         value.GetId().GetValue(),
 		parameters: append([]string(nil), value.GetParameters()...),
 		debuggable: options.Debuggable,
-		close:      &lifecycle.Close{},
+		close:      &closeState{},
 	}, nil
 }
 
@@ -84,10 +83,10 @@ func (p *Plan) Debuggable() bool {
 // Run executes the plan once, waits for encoded output, and releases the
 // execution it creates. Execution and release errors are joined. The caller
 // retains ownership of the Plan.
-func (p *Plan) Run(ctx context.Context, parameters Parameters, options ExecuteOptions) (Output, error) {
+func (p *Plan) Run(ctx context.Context, parameters Parameters, options ExecuteOptions) (api.Output, error) {
 	execution, err := p.Execute(ctx, parameters, options)
 	if err != nil {
-		return Output{}, err
+		return api.Output{}, err
 	}
 
 	output, waitErr := execution.Wait(ctx)

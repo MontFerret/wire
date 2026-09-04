@@ -88,6 +88,13 @@ rejects those values on both client encoding and server decoding.
 Execution and debugger completion preserve Unified API encoded output exactly:
 `content_type` plus bytes. Wire never interprets the bytes as runtime values.
 
+The handwritten Go adapters project these messages onto the public semantic
+packages `pkg/runtime`, `pkg/debugger`, and `pkg/failure`. These values are
+shared by client and server and deliberately omit protocol resource IDs. The
+adapters copy mutable output, diagnostic, range, and breakpoint data at
+ownership and delivery boundaries and validate every state, event-kind, and
+failure-category enum explicitly in both directions.
+
 Only typed `diagnostics.Diagnostics` values cross the boundary. Wire never
 parses runtime error strings. Each diagnostic preserves kind, message, source
 name and content, ordered annotations, primary markers, ranges, hint, and note.

@@ -88,7 +88,8 @@ operation instead of `Compile`; the `Plan` retains that choice locally so
 Plan resource.
 
 The metadata facade maps `APIIdentity` and `WireVersion` from the handshake's
-protocol name and version and maps optional host runtime identity directly.
+protocol name and version and maps optional host runtime identity directly to
+`*runtime.Identity` from `pkg/runtime`.
 Legacy Ferret-version and capability fields remain empty rather than
 fabricating values not carried by the protocol.
 
@@ -133,8 +134,9 @@ The ownership boundary is explicit:
 | `Execution.Wait` | Nothing | Nothing |
 
 `Execution.Wait` opens a fresh watch, ignores non-terminal snapshots, and
-returns when the execution completes, fails, or is remotely cancelled. Failed
-terminal snapshots return `*client.Failure`; remote cancellation returns
+returns when the execution completes, fails, or is remotely cancelled. The
+method, along with `Client.Run` and `Plan.Run`, returns `api.Output`. Failed
+terminal snapshots return `*failure.Failure`; remote cancellation returns
 `client.ErrExecutionCancelled`. Cancellation of the caller's waiting context
 instead returns that context's error.
 
@@ -147,24 +149,27 @@ are joined rather than replacing one another.
 ## Snapshots and events
 
 Handles represent identity, ownership, and operations; they are not mutable
-state snapshots. Execution and debug state crosses the facade through
-`ExecutionSnapshot` and `DebugSessionSnapshot` values on ordered watch events.
-These snapshots preserve Unified API encoded output and use
-`debugger.Reason`, `source.Range`, and `debugger.BreakpointID` for structured
-debugger data without exposing generated protobuf messages.
+state snapshots. Execution state crosses the facade as `runtime.Event` and
+`runtime.Snapshot` from `pkg/runtime`; debug state crosses as `debugger.Event`
+and `debugger.Snapshot` from Wire's `pkg/debugger`. These snapshots preserve
+Unified API `api.Output` and use API `debugger.Reason`, `source.Range`, and
+`debugger.BreakpointID` values without exposing generated protobuf messages.
+The client allocates fresh output bytes, diagnostics, ranges, and breakpoint-ID
+slices while decoding each protobuf response.
 
 Execution and debugger command methods return errors only. Their state changes
 are observed through `Execution.Watch` or `DebugSession.Watch`. A watch sends
 the server's latest published event first, then ordered changes through one
 terminal event. A newly created debug session replays sequence 1 with
-`DebugEventCreated` and a created snapshot; the client does not need a Get RPC.
+`debugger.EventCreated` and a created snapshot; the client does not need a Get
+RPC.
 
-`ExecutionEvent` contains a sequence and snapshot. `ExecutionSnapshot.State` is
-the single execution lifecycle discriminator, and `ExecutionState.Terminal`
-identifies completed, failed, and cancelled states. Debug events retain a
-separate `DebugEventKind` because starting and continuing are distinct
-transitions that both publish a running snapshot. `DebugState.Terminal`
-centralizes completed, failed, and terminated state handling.
+`runtime.Event` contains a sequence and execution snapshot.
+`runtime.State.Terminal` identifies completed, failed, and cancelled states.
+Debug events retain a separate `debugger.EventKind` because starting and
+continuing are distinct transitions that both publish a running snapshot.
+`debugger.State.Terminal` centralizes completed, failed, and terminated state
+handling.
 
 Watch streams are tied to both the operation context and the logical Client
 lifecycle. A watch opened before resource closure remains able to receive the
@@ -197,17 +202,18 @@ termination and resource release.
 
 ## Errors
 
-Immediate Wire failures are exposed as `*client.Error` with a stable
-`ErrorCategory`, sanitized gRPC message, and canonical
+Immediate Wire failures are exposed as `*client.Error` with a
+`failure.Category`, sanitized gRPC message, and canonical
 `diagnostics.Diagnostics` when the runtime returned that typed collection.
-Terminal `*client.Failure` values carry the same canonical diagnostics. Wire
+Terminal `*failure.Failure` values carry the same canonical diagnostics. Wire
 never parses error strings to construct them. Invalid requests, cancellation,
-and resource exhaustion use their native gRPC codes without a duplicate Wire
-category. The error unwraps its transport cause, so callers that need the gRPC
-status can use `status.Code(err)` without making transport codes part of the
-client-domain type. Protocol resource identifiers remain private.
+deadlines, unavailable transports, and resource exhaustion use their native
+gRPC codes without a duplicate Wire category; `client.Error.Category` is zero
+unless an `ErrorDetail` was transmitted. The error unwraps its transport cause,
+so callers can use `status.Code(err)` without making transport codes part of
+the semantic category. Protocol resource identifiers remain private.
 
-Terminal execution and debug failures use `*client.Failure`, while local
+Terminal execution and debug failures use `*failure.Failure`, while local
 lifecycle and waiting conditions remain distinguishable through
 `client.ErrClosed`, `client.ErrExecutionCancelled`, and context errors.
 Convenience APIs join operation and cleanup errors so `errors.Is` and
@@ -221,7 +227,7 @@ The client package is limited to:
 - typed plan, execution, debugger, and event operations;
 - private connection and resource-ID propagation;
 - explicit parameter conversion;
-- immutable domain snapshots and structured error mapping;
+- transport-neutral snapshots with defensive conversion and structured error mapping;
 - hiding protobuf and gRPC ceremony without hiding protocol concepts.
 
 Parameter conversion deliberately accepts only the portable Wire subset:

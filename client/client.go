@@ -8,6 +8,7 @@ import (
 
 	"github.com/MontFerret/api"
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
+	"github.com/MontFerret/wire/pkg/failure"
 	"google.golang.org/grpc"
 )
 
@@ -132,10 +133,10 @@ func (c *Client) RuntimeInfo() RuntimeInfo {
 // Run compiles and executes source once, returning the runtime's encoded output.
 // It releases the Plan and Execution resources it creates before returning and
 // joins operation and release errors.
-func (c *Client) Run(ctx context.Context, src api.Source, parameters Parameters, options RunOptions) (Output, error) {
+func (c *Client) Run(ctx context.Context, src api.Source, parameters Parameters, options RunOptions) (api.Output, error) {
 	plan, err := c.Compile(ctx, src, options.Compile)
 	if err != nil {
-		return Output{}, err
+		return api.Output{}, err
 	}
 
 	output, runErr := plan.Run(ctx, parameters, options.Execute)
@@ -271,7 +272,7 @@ func (c *Client) settleClose(ctx context.Context) {
 	result = decodeError(err)
 
 	var wireErr *Error
-	if errors.As(result, &wireErr) && wireErr.Category == ErrorConnectionNotFound {
+	if errors.As(result, &wireErr) && wireErr.Category == failure.CategoryConnectionNotFound {
 		result = nil
 	}
 

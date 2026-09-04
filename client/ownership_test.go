@@ -14,6 +14,8 @@ import (
 	"github.com/MontFerret/api/debugger"
 	"github.com/MontFerret/api/source"
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
+	wiredebugger "github.com/MontFerret/wire/pkg/debugger"
+	wireruntime "github.com/MontFerret/wire/pkg/runtime"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
@@ -341,7 +343,7 @@ func TestHandleOperationsUseBoundOwnerResources(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if event, err := executionEvents.Recv(); err != nil || event.Snapshot.State != ExecutionRunning {
+	if event, err := executionEvents.Recv(); err != nil || event.Snapshot.State != wireruntime.StateRunning {
 		t.Fatalf("unexpected execution event: %#v, %v", event, err)
 	}
 
@@ -393,7 +395,7 @@ func TestHandleOperationsUseBoundOwnerResources(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if event, err := debugEvents.Recv(); err != nil || event.Snapshot.State != DebugStopped ||
+	if event, err := debugEvents.Recv(); err != nil || event.Snapshot.State != wiredebugger.StateStopped ||
 		event.Snapshot.StopReason != debugger.ReasonBreakpoint || event.Snapshot.Location == nil ||
 		event.Snapshot.Location.SourceName != "query.fql" || len(event.Snapshot.HitBreakpointIDs) != 1 || event.Snapshot.HitBreakpointIDs[0] != 1 {
 		t.Fatalf("unexpected debug event: %#v, %v", event, err)

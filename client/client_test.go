@@ -13,6 +13,7 @@ import (
 
 	"github.com/MontFerret/api"
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
+	"github.com/MontFerret/wire/pkg/failure"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -360,8 +361,8 @@ func TestClientRunOwnsCreatedResources(t *testing.T) {
 		client := openTestClient(t, startClientTestServer(t, server))
 
 		output, err := client.Run(testClientContext(t), api.Source{Content: "RETURN 1"}, nil, RunOptions{})
-		var failure *Failure
-		if string(output.Content) != "partial" || !errors.As(err, &failure) || failure.Message != "execution failed" ||
+		var terminalFailure *failure.Failure
+		if string(output.Content) != "partial" || !errors.As(err, &terminalFailure) || terminalFailure.Message != "execution failed" ||
 			!strings.Contains(err.Error(), "execution cleanup failed") || !strings.Contains(err.Error(), "plan cleanup failed") {
 			t.Fatalf("Client.Run did not preserve all errors: %#v, %v", output, err)
 		}

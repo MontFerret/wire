@@ -5,7 +5,6 @@ import (
 	"errors"
 
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
-	"github.com/MontFerret/wire/internal/lifecycle"
 )
 
 type (
@@ -19,7 +18,7 @@ type (
 		client *Client
 		plan   *Plan
 		id     string
-		close  *lifecycle.Close
+		close  *closeState
 	}
 )
 
@@ -50,7 +49,7 @@ func (p *Plan) NewDebugSession(ctx context.Context, parameters Parameters, optio
 		return nil, errors.New("Wire server returned an invalid debug session")
 	}
 
-	return &DebugSession{client: p.client, plan: p, id: value.GetId().GetValue(), close: &lifecycle.Close{}}, nil
+	return &DebugSession{client: p.client, plan: p, id: value.GetId().GetValue(), close: &closeState{}}, nil
 }
 
 // Start begins a newly created debug session. Watch publishes the running and

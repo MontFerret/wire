@@ -12,7 +12,7 @@ host application                         client application
   owns and secures net.Listener             owns transport lifetime
              |                                         |
              v                                         v
-       wire.Server  <-------- ferret.wire.v1 ------ client.Client
+     server.Server  <-------- ferret.wire.v1 ------ client.Client
         borrows runtime                           owns Connect stream
              |
        logical Connection
@@ -50,15 +50,15 @@ See [Wire Protocol](docs/protocol.md) for every RPC/message/enum, lifecycle and 
 The host chooses and configures both the runtime implementation and endpoint. This function accepts caller-owned values and does not close either one:
 
 ```go
-func serveRuntime(ctx context.Context, runtime api.Runtime, listener net.Listener) error {
-    server, err := wire.NewServer(runtime, wire.WithRuntimeIdentity(wire.RuntimeIdentity{
+func serveRuntime(ctx context.Context, hostRuntime api.Runtime, listener net.Listener) error {
+    wireServer, err := server.NewServer(hostRuntime, server.WithRuntimeIdentity(wireruntime.Identity{
         Name: "my-app", Version: "1.0.0", InstanceID: "worker-1",
     }))
     if err != nil {
         return err
     }
 
-    return server.Serve(ctx, listener)
+    return wireServer.Serve(ctx, listener)
 }
 ```
 
@@ -143,7 +143,7 @@ for {
     if err != nil {
         log.Fatal(err)
     }
-    if event.Snapshot.State == client.ExecutionCompleted {
+    if event.Snapshot.State == wireruntime.StateCompleted {
         fmt.Printf("%s: %s\n", event.Snapshot.Output.ContentType, event.Snapshot.Output.Content)
         break
     }
@@ -153,12 +153,18 @@ for {
 }
 ```
 
-Wire failures expose stable client error categories through `*client.Error`.
-When the runtime returns typed `diagnostics.Diagnostics`, `*client.Error` and
-asynchronous `*client.Failure` preserve that canonical collection, including
-source content and ordered annotations. The underlying gRPC status remains
-available through error unwrapping and `status.Code(err)`; remote connection
-and resource IDs are not part of the high-level client error model.
+The public Go API is split by ownership: `server` hosts a borrowed `api.Runtime`,
+`client` owns remote handles, and `pkg/runtime`, `pkg/debugger`, and
+`pkg/failure` contain the semantic values shared by both sides. The module root
+intentionally has no Go compatibility package.
+
+Wire failures expose `failure.Category` through `*client.Error`. When the
+runtime returns typed `diagnostics.Diagnostics`, `*client.Error` and
+asynchronous `*failure.Failure` preserve that canonical collection, including
+source content and ordered annotations. Bare cancellation, deadline,
+invalid-request, unavailable, and resource-exhaustion statuses remain
+category-free and are classified with `status.Code(err)`. Remote connection and
+resource IDs are not part of the high-level client error model.
 
 ## Security and trust model
 

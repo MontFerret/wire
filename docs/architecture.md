@@ -7,10 +7,12 @@ particular runtime implementation.
 
 ## Boundaries and ownership
 
-The dependency direction is:
+The package dependency direction is:
 
 ```text
-consumers → protobuf/gRPC → Wire components and lifecycle → Unified API → runtime implementation
+consumer → client ────────────────┐
+             ↕ protobuf/gRPC      ├→ pkg/runtime, pkg/debugger, pkg/failure
+host → server → server/internal ──┘→ Unified API → runtime implementation
 ```
 
 | Concern | Owner |
@@ -18,9 +20,10 @@ consumers → protobuf/gRPC → Wire components and lifecycle → Unified API �
 | FQL, runtime, output encoding, and debugger semantics | Unified API and runtime implementation |
 | Runtime construction, configuration, policies, and application state | Host application |
 | Versioned RPC contract | Protobuf definitions |
-| RPC adaptation | `internal/grpcserver` |
-| Logical connections and resources | `internal/core` |
-| Public server lifecycle | Top-level `wire` package |
+| Shared execution, debugger, identity, and failure semantics | `pkg/runtime`, `pkg/debugger`, and `pkg/failure` |
+| RPC adaptation | `server/internal/grpcserver` |
+| Logical connections and resources | `server/internal/core` |
+| Public server lifecycle | `server` package |
 | Go client facade | `client` |
 | Physical transport, listener, authentication, and TLS | Host and Wire server layer |
 | DAP translation, LSP, and language intelligence | ferretd and compiler tooling |
@@ -50,9 +53,9 @@ by `api/debugger`.
 The host supplies both the configured runtime and listener:
 
 ```go
-runtime := createApplicationRuntime()
-server, err := wire.NewServer(runtime)
-err = server.Serve(ctx, listener)
+hostRuntime := createApplicationRuntime()
+wireServer, err := server.NewServer(hostRuntime)
+err = wireServer.Serve(ctx, listener)
 ```
 
 Wire borrows both. It does not close the runtime, construct or secure a
@@ -111,12 +114,16 @@ server-issued. They are scoped to one logical connection and cannot be inferred
 or transferred to another connection. The handwritten Go client keeps these
 IDs private; see [Client Handles](client.md).
 
-Core debugger state and client inspection values use the canonical
-`api/debugger` and `api/source` types. Protobuf messages remain transport
-representations and are converted explicitly at the gRPC server and client
-boundaries. Both directions validate coordinates, IDs, references, and enum
-values before conversion; invalid runtime values become sanitized internal
-failures, while malformed server responses become local client errors.
+Execution and debugger snapshots use the canonical types in `pkg/runtime` and
+`pkg/debugger`; terminal failures use `pkg/failure`. Those shared packages
+contain no connection, plan, execution, or debug-session identity and do not
+depend on client or server implementation packages. Debugger values use the
+canonical `api/debugger` and `api/source` types. Protobuf messages remain
+transport representations and are converted explicitly at the gRPC server and
+client boundaries. Both directions validate coordinates, IDs, references, and
+enum values before conversion; invalid runtime values become sanitized
+internal failures, while malformed server responses become local client
+errors.
 
 Only errors typed as `diagnostics.Diagnostics` are converted. Wire does not
 parse error strings or expose arbitrary causes. Immediate diagnostics are a
@@ -202,7 +209,7 @@ semantic event construction.
 DebugSession
 ├── debugSessionState
 ├── breakpointSet
-├── eventStream[DebugEvent]
+├── eventStream[debugger.Event]
 └── DebugController
     └── debugger.Session
 ```
