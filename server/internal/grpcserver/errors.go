@@ -46,7 +46,7 @@ func rpcError(err error) error {
 	case core.ErrorKindInvalidRequest, core.ErrorKindCompilation:
 		code = codes.InvalidArgument
 	case core.ErrorKindPlanNotFound, core.ErrorKindExecutionNotFound, core.ErrorKindDebugSessionNotFound,
-		core.ErrorKindConnectionNotFound, core.ErrorKindBreakpointNotFound:
+		core.ErrorKindConnectionNotFound, core.ErrorKindBreakpointNotFound, core.ErrorKindSessionNotFound:
 		code = codes.NotFound
 	case core.ErrorKindInvalidState:
 		code = codes.FailedPrecondition
@@ -141,6 +141,8 @@ func errorCategory(value core.ErrorKind) wirev1.ErrorCategory {
 		return wirev1.ErrorCategory_ERROR_CATEGORY_BREAKPOINT_NOT_FOUND
 	case core.ErrorKindInternal:
 		return wirev1.ErrorCategory_ERROR_CATEGORY_INTERNAL_RUNTIME_FAILURE
+	case core.ErrorKindSessionNotFound:
+		return wirev1.ErrorCategory_ERROR_CATEGORY_SESSION_NOT_FOUND
 	default:
 		return wirev1.ErrorCategory_ERROR_CATEGORY_UNSPECIFIED
 	}

@@ -16,12 +16,14 @@ type (
 		OutputContentType string
 	}
 
-	// Execution is one remote execution owned by its Plan.
+	// Execution is one asynchronous remote operation owned by a Client, Plan, or
+	// durable Session.
 	Execution struct {
-		client *Client
-		plan   *Plan
-		id     string
-		close  *closeState
+		client  *Client
+		plan    *Plan
+		session *sessionHandle
+		id      string
+		close   *closeState
 	}
 
 	// ExecutionEvents receives the current execution snapshot followed by ordered
@@ -31,6 +33,34 @@ type (
 		cancel context.CancelFunc
 	}
 )
+
+func (c *Client) runRuntime(
+	ctx context.Context,
+	src api.Source,
+	parameters Parameters,
+	options ExecuteOptions,
+) (*Execution, error) {
+	if err := c.checkOpen(); err != nil {
+		return nil, err
+	}
+
+	converted, err := encodeParameters(parameters)
+	if err != nil {
+		return nil, err
+	}
+
+	response, err := c.executionClient.RunRuntime(ctx, &wirev1.RunRuntimeRequest{
+		ConnectionId:      c.connectionProto(),
+		Source:            &wirev1.Source{Name: src.Name, Content: src.Content},
+		Parameters:        converted,
+		OutputContentType: options.OutputContentType,
+	})
+	if err != nil {
+		return nil, decodeError(err)
+	}
+
+	return newExecutionHandle(c, nil, nil, response.GetExecution())
+}
 
 // Execute publishes a remote execution of this plan. Output remains the Unified API
 // encoded content-type and byte contract.
@@ -59,7 +89,26 @@ func (p *Plan) Execute(ctx context.Context, parameters Parameters, options Execu
 		return nil, errors.New("Wire server returned an invalid execution")
 	}
 
-	return &Execution{client: p.client, plan: p, id: value.GetId().GetValue(), close: &closeState{}}, nil
+	return newExecutionHandle(p.client, p, nil, value)
+}
+
+func newExecutionHandle(
+	client *Client,
+	plan *Plan,
+	session *sessionHandle,
+	value *wirev1.Execution,
+) (*Execution, error) {
+	if value == nil || value.GetId().GetValue() == "" {
+		return nil, errors.New("Wire server returned an invalid execution")
+	}
+
+	return &Execution{
+		client:  client,
+		plan:    plan,
+		session: session,
+		id:      value.GetId().GetValue(),
+		close:   &closeState{},
+	}, nil
 }
 
 // Cancel requests execution cancellation. The ordered terminal cancellation
@@ -150,7 +199,7 @@ func (e *Execution) Wait(ctx context.Context) (api.Output, error) {
 // Close commits cancellation and remote execution cleanup. Concurrent and
 // repeated calls observe one retained release result.
 func (e *Execution) Close(ctx context.Context) error {
-	if e == nil || e.client == nil || e.plan == nil || e.id == "" || e.close == nil {
+	if e == nil || e.client == nil || e.id == "" || e.close == nil {
 		return ErrClosed
 	}
 
@@ -196,15 +245,31 @@ func (events *ExecutionEvents) Recv() (execution.Event, error) {
 }
 
 func (e *Execution) checkOpen() error {
-	if e == nil || e.client == nil || e.plan == nil || e.id == "" || e.close == nil || e.close.Started() {
+	if e == nil || e.client == nil || e.id == "" || e.close == nil || e.close.Started() {
 		return ErrClosed
+	}
+
+	if e.session != nil {
+		return e.session.checkOpen()
+	}
+
+	if e.plan == nil {
+		return e.client.checkOpen()
 	}
 
 	return e.plan.checkOpen()
 }
 
 func (e *Execution) release(ctx context.Context) error {
-	if closing, err := e.plan.ancestorCloseResult(ctx); closing {
+	if e.session != nil {
+		if closing, err := e.session.ancestorCloseResult(ctx); closing {
+			return err
+		}
+	} else if e.plan != nil {
+		if closing, err := e.plan.ancestorCloseResult(ctx); closing {
+			return err
+		}
+	} else if closing, err := e.client.closeResult(ctx); closing {
 		return err
 	}
 

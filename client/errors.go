@@ -137,6 +137,8 @@ func convertErrorCategory(value wirev1.ErrorCategory, zeroAllowed bool) (failure
 		return failure.CategoryBreakpointNotFound, nil
 	case wirev1.ErrorCategory_ERROR_CATEGORY_INTERNAL_RUNTIME_FAILURE:
 		return failure.CategoryInternalRuntime, nil
+	case wirev1.ErrorCategory_ERROR_CATEGORY_SESSION_NOT_FOUND:
+		return failure.CategorySessionNotFound, nil
 	}
 
 	return 0, fmt.Errorf("Wire server returned an invalid error category: %d", value)

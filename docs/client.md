@@ -9,16 +9,31 @@ clients. It owns one logical Wire connection while borrowing the caller's
 Remote resources are exposed as opaque, typed handles:
 
 ```text
-Client
+Runtime (implements api.Runtime)
+└── private Universal API adapters
+    ├── api.Plan
+    │   ├── api.Session
+    │   └── debugger.Session
+    └── temporary Execution handles
+
+Client (lower-level Wire facade)
 └── Plan
     ├── Execution
     └── DebugSession
 ```
 
+`NewRuntime(ctx, conn)` is the Universal API-first entry point. `Runtime` owns
+one logical `Client`, while the returned Plan, normal Session, and debugger
+adapters remain private implementation types behind their Universal API
+interfaces. `Runtime.Run` calls the hosted `api.Runtime.Run` directly. A normal
+Session is created remotely once and each sequential `Run` uses a hidden
+Execution that is watched and released before returning. Closing any adapter
+uses the 30-second detached cleanup bound; closing Runtime never closes `conn`.
+
 `Client` compiles plans. A `Plan` executes its compiled program and creates
 debug sessions. Execution and debugger operations live on their respective
-handles. The protocol still carries connection, plan, execution, and
-debug-session IDs, but the facade retains and propagates them privately.
+handles. The protocol still carries connection, plan, normal-session,
+execution, and debug-session IDs, but the facade retains and propagates them privately.
 Callers cannot manually combine a handle with another client's connection.
 Breakpoint IDs and debug value references remain visible because callers pass
 them back to debugger operations; they do not expose connection or handle
@@ -29,6 +44,7 @@ Debugger inspection uses the canonical Unified API types directly:
 
 ```go
 SetBreakpoint(context.Context, source.Location) (debugger.Breakpoint, error)
+SetBreakpointAt(context.Context, source.Location, debugger.BreakpointOptions) (debugger.Breakpoint, error)
 DeleteBreakpoint(context.Context, debugger.BreakpointID) error
 Frames(context.Context) ([]debugger.Frame, error)
 FrameLocals(context.Context, int) ([]debugger.Variable, error)
@@ -48,10 +64,9 @@ depth, stop reason, hit breakpoint IDs, output, and failure.
 `source.Location.SourceName` is a semantic source identifier and is never
 interpreted as a filesystem path by the client.
 
-The protocol accepts explicit breakpoint binding options. The temporary client
-facade continues to call `SetBreakpoint` with no explicit option, so the server
-uses the Unified API default binding behavior. Exposing the option through a
-redesigned client API is deferred.
+The protocol and lower-level facade accept explicit breakpoint binding options
+through `SetBreakpointAt`. `SetBreakpoint` remains the default-binding
+convenience.
 
 Compilation and one-shot execution accept `api.Source` directly. Its `Name`
 and `Content` map to the protocol `Source` message.
@@ -82,10 +97,10 @@ output, err := execution.Wait(ctx)
 ```
 
 Plan metadata is immutable. `Parameters` returns a defensive copy.
-`CompileOptions.Debuggable` temporarily chooses the protocol's `CompileDebug`
-operation instead of `Compile`; the `Plan` retains that choice locally so
-`Debuggable` remains compatible without adding debug capability to the remote
-Plan resource.
+`CompileOptions.Debuggable` chooses the protocol's `CompileDebug` operation
+instead of `Compile`. `CompileOptions.OptimizationLevel` is optional: nil
+preserves the hosted runtime default, while non-nil values transport all
+Universal API optimization levels.
 
 The metadata facade maps `APIIdentity` and `WireVersion` from the handshake's
 protocol name and version and maps optional host runtime identity directly to
@@ -146,6 +161,12 @@ with a fresh 30-second deadline for each release, so resources created by
 allowing a stalled cleanup call to block forever. Execution and cleanup errors
 are joined rather than replacing one another.
 
+Universal API resource-allocation RPCs use the same bounded detached context.
+This prevents a cancellation race from discarding the only opaque handle after
+the server has published a resource. The original caller context is checked
+after allocation; a resource that raced cancellation is cancelled and released
+before the adapter returns the caller-visible cancellation.
+
 ## Snapshots and events
 
 Handles represent identity, ownership, and operations; they are not mutable
@@ -178,7 +199,8 @@ ancestor starts closing.
 
 ## Closing resources
 
-`Plan`, `Execution`, and `DebugSession` expose `Close(context.Context) error`.
+The lower-level `Plan`, `Execution`, and `DebugSession` expose
+`Close(context.Context) error`.
 Close maps to the corresponding protocol release operation; it is never driven
 by finalizers or garbage collection.
 
@@ -224,6 +246,7 @@ Convenience APIs join operation and cleanup errors so `errors.Is` and
 The client package is limited to:
 
 - logical Connect lifecycle;
+- a complete remote `api.Runtime` adapter;
 - typed plan, execution, debugger, and event operations;
 - private connection and resource-ID propagation;
 - explicit parameter conversion;
@@ -234,9 +257,8 @@ Parameter conversion deliberately accepts only the portable Wire subset:
 null, booleans, signed integers, finite doubles, strings, bytes, `[]any`, and
 `map[string]any`. Exact signed `int64` and floating-point values remain distinct;
 NaN and infinities are rejected even when nested. Duration, datetime, regexp,
-and custom values are rejected locally. A broad client redesign, including a
-smaller metadata surface and explicit compile and breakpoint options, is
-deferred.
+and custom values are rejected locally. Further lower-level client redesign is
+separate from the Universal API adapter.
 
 Closing the Client never closes the caller-owned gRPC connection. The facade
 does not construct runtimes or transports. Its convenience execution methods

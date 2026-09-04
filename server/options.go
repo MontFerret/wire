@@ -14,6 +14,7 @@ type (
 	ServerLimits struct {
 		MaxConnections                int
 		MaxPlansPerConnection         int
+		MaxSessionsPerConnection      int
 		MaxExecutionsPerConnection    int
 		MaxDebugSessionsPerConnection int
 		MaxWatchersPerResource        int
@@ -59,6 +60,7 @@ func DefaultServerLimits() ServerLimits {
 	return ServerLimits{
 		MaxConnections:                64,
 		MaxPlansPerConnection:         128,
+		MaxSessionsPerConnection:      128,
 		MaxExecutionsPerConnection:    128,
 		MaxDebugSessionsPerConnection: 32,
 		MaxWatchersPerResource:        8,
@@ -89,6 +91,7 @@ func (limits ServerLimits) validate() error {
 	}{
 		{name: "max connections", value: limits.MaxConnections},
 		{name: "max plans per connection", value: limits.MaxPlansPerConnection},
+		{name: "max sessions per connection", value: limits.MaxSessionsPerConnection},
 		{name: "max executions per connection", value: limits.MaxExecutionsPerConnection},
 		{name: "max debug sessions per connection", value: limits.MaxDebugSessionsPerConnection},
 		{name: "max watchers per resource", value: limits.MaxWatchersPerResource},

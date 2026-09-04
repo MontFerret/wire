@@ -8,6 +8,7 @@ inputs:
       - proto/ferret/wire/v1/source.proto
       - proto/ferret/wire/v1/value.proto
       - proto/ferret/wire/v1/plan.proto
+      - proto/ferret/wire/v1/session.proto
       - proto/ferret/wire/v1/execution.proto
       - proto/ferret/wire/v1/debug.proto
 

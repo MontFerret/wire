@@ -46,9 +46,10 @@ type Output struct {
 The contract is exactly content type plus encoded bytes. Wire does not expose,
 reconstruct, or maintain a parallel representation of implementation-specific
 runtime values. It does not add Wire-specific runtime options, private raw-value
-codecs, runtime-value type switches, or execution paths that bypass `api.Plan`
-and `api.Session`. Debugger values are the separate structured boundary defined
-by `api/debugger`.
+codecs, runtime-value type switches, or locally reconstructed runtime behavior.
+Plan executions use `api.Plan` and `api.Session`; the direct-runtime operation
+calls the borrowed `api.Runtime.Run` exactly once. Debugger values are the
+separate structured boundary defined by `api/debugger`.
 
 The host supplies both the configured runtime and listener:
 
@@ -88,8 +89,10 @@ detached-cleanup panic policy rather than being mislabeled as an implementation
 failure.
 
 Containment does not make a stateful implementation safe to reuse. A panic from
-an execution session fails that execution and the session is closed exactly
-once. Any debugger operation panic before teardown fails the logical debug
+a temporary execution session fails that execution and the session is closed
+exactly once. A panic from a durable normal Session fails the active Execution
+and poisons the Session against subsequent runs until release closes it. Any
+debugger operation panic before teardown fails the logical debug
 session, publishes its terminal failure, rejects subsequent runtime commands,
 and starts idempotent debugger cleanup. A constructor panic fails only the
 attempted resource; it does not disable the borrowed runtime or invalidate its
@@ -109,14 +112,14 @@ and do not mirror DAP or LSP for downstream convenience. An incompatible
 redesign requires a new protocol version and a Buf breaking check against the
 intended base branch.
 
-Connection, plan, execution, and debug-session IDs are opaque and
+Connection, plan, normal-session, execution, and debug-session IDs are opaque and
 server-issued. They are scoped to one logical connection and cannot be inferred
 or transferred to another connection. The handwritten Go client keeps these
 IDs private; see [Client Handles](client.md).
 
 Execution and debugger snapshots use the canonical types in `pkg/execution` and
 `pkg/debugger`; terminal failures use `pkg/failure`. Those shared packages
-contain no connection, plan, execution, or debug-session identity and do not
+contain no connection, plan, normal-session, execution, or debug-session identity and do not
 depend on client or server implementation packages. Debugger values use the
 canonical `api/debugger` and `api/source` types. Protobuf messages remain
 transport representations and are converted explicitly at the gRPC server and
@@ -156,34 +159,39 @@ A Wire connection is the logical ownership scope established by the long-lived
 
 ```text
 Wire connection
+├── direct runtime executions
 └── plans
-    ├── executions
+    ├── direct executions
+    ├── normal sessions
+    │   └── one active execution
     └── debug sessions
 ```
 
 Internally, `Connection` owns only its opaque ID, cancellation context, open or
 closing state, and admission of in-flight operations. Server-scoped
-`ConnectionRegistry`, `PlanRegistry`, `ExecutionRegistry`, and
-`DebugSessionRegistry` instances own storage, indexes, and capacity accounting.
-Every plan, execution, and debug session records its owning connection ID;
-children also record their parent plan ID. An ID lookup always includes the
-requesting connection, so knowledge of another connection's ID never grants
-access.
+`ConnectionRegistry`, `PlanRegistry`, `SessionRegistry`, `ExecutionRegistry`,
+and `DebugSessionRegistry` instances own storage, indexes, and capacity
+accounting. Every resource records its owning connection ID. Plan children also
+record the Plan ID, and normal-session executions record their Session ID. An
+ID lookup always includes the requesting connection, so knowledge of another
+connection's ID never grants access.
 
 The server-scoped `Compiler`, `Executor`, and `Debugger` components own resource
-creation. Only `Compiler` depends on `api.Runtime`; execution and debugging use
-the `api.Plan` obtained from `PlanRegistry`. `Lifecycle` owns cleanup spanning
+creation. `Compiler` uses `api.Runtime` for compilation and `Executor` uses it
+only for the explicit direct-runtime path; Plan execution and debugging use the
+`api.Plan` obtained from `PlanRegistry`. `Lifecycle` owns cleanup spanning
 resource types. Individual resources retain their own state machines, runtime
 handles, watches, and local close invariants. A per-operation Wire `Context`
 combines the unary or stream context with the resolved logical connection.
 
 ```text
 Compiler ──► api.Runtime
-Compiler ──► PlanRegistry ◄── Executor
+Compiler ──► PlanRegistry ◄── Executor ──► api.Runtime.Run
                             ◄── Debugger
+Executor ──► SessionRegistry
 Executor ──► ExecutionRegistry
 Debugger ──► DebugSessionRegistry
-Lifecycle ──► all four registries
+Lifecycle ──► all five resource registries
 
 ConnectionRegistry ──► Connection ◄── operation Context
 ```
@@ -217,9 +225,11 @@ DebugSession
 Creation uses reserve, create, and commit phases. Pending capacity is reserved
 before calling the Unified API, registry locks are released for runtime calls,
 and publication is committed only while the connection and parent plan still
-accept children. Plan release gates new children, waits for in-flight child
-constructors, releases executions and debug sessions, and only then closes the
-Unified API plan.
+accept children. A normal Session calls `api.Plan.NewSession` once, owns that
+hosted session until release, and admits one Execution at a time. Plan release
+gates new children, waits for in-flight child constructors, releases direct
+executions, normal sessions and their executions, and debug sessions, and only
+then closes the Unified API plan.
 
 Each registry owns its collection lock, each resource owns its state lock, and
 the event stream owns the lock protecting subscriptions and publication.
@@ -228,16 +238,17 @@ plus a dedicated operation mutex that serializes stopped-state commands,
 inspection, breakpoint bookkeeping, pause requests, and command completion.
 The breakpoint set is accessed only under that operation mutex and therefore
 has no redundant lock. No debug-session state lock is held while invoking the
-Unified API. The only nested registry publication order is plan registry, plan,
-then the child registry. Connection shutdown first closes operation admission
+Unified API. The nested normal-run publication order is Plan registry, Plan,
+Session registry, Session, then Execution registry. Connection shutdown first
+closes operation admission
 and waits for admitted creation to settle. Release paths never hold registry
 locks while waiting for constructors, children, or Unified API cleanup.
 
 When the Connect stream terminates, cleanup rejects new operations and cancels
 in-flight creation, waits for creation to settle, cancels and releases
-executions, closes debug sessions, releases plans, and terminates owned state
-and goroutines. Parent and connection traversal uses registry owner and plan
-indexes rather than nested resource collections.
+executions, closes normal and debug sessions, releases plans, and terminates
+owned state and goroutines. Parent and connection traversal uses registry owner,
+plan, and session indexes rather than nested resource collections.
 
 Release is committed teardown. Concurrent callers observing the same in-flight
 release wait for its retained result. After teardown finishes, the resource ID
@@ -266,7 +277,8 @@ until the stream handler exits, including after lag or a terminal snapshot.
 Detached cleanup has a named owner, is panic-safe, and terminates
 deterministically.
 
-Execution construction publishes running state. Debug-session construction
+Direct Plan execution, normal Session run, and direct Runtime run construction
+publish running state. Debug-session construction
 publishes created state before the resource is returned, so every fresh debug
 watch has a snapshot without adding a Get RPC. Start, continue, and the three
 canonical step operations publish running before invoking the debugger; their
@@ -283,6 +295,7 @@ local IPC. Requests and lifecycle identifiers are untrusted.
 | --- | ---: |
 | Logical connections | 64 |
 | Plans per connection | 128 |
+| Normal sessions per connection | 128 |
 | Executions per connection | 128 |
 | Debug sessions per connection | 32 |
 | Watch streams per execution or debug session | 8 |

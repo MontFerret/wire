@@ -12,6 +12,7 @@ type ExecutionRegistry struct {
 	closing     map[ExecutionID]*Execution
 	byOwner     map[ConnectionID]map[ExecutionID]*Execution
 	byPlan      map[PlanID]map[ExecutionID]*Execution
+	bySession   map[SessionID]map[ExecutionID]*Execution
 }
 
 func NewExecutionRegistry(maxExecutionsPerConnection, maxWatchers int) *ExecutionRegistry {
@@ -23,6 +24,7 @@ func NewExecutionRegistry(maxExecutionsPerConnection, maxWatchers int) *Executio
 		closing:     make(map[ExecutionID]*Execution),
 		byOwner:     make(map[ConnectionID]map[ExecutionID]*Execution),
 		byPlan:      make(map[PlanID]map[ExecutionID]*Execution),
+		bySession:   make(map[SessionID]map[ExecutionID]*Execution),
 	}
 }
 
@@ -69,13 +71,25 @@ func (r *ExecutionRegistry) commit(execution *Execution) error {
 	}
 
 	owned[execution.id] = execution
-	children := r.byPlan[execution.planID]
-	if children == nil {
-		children = make(map[ExecutionID]*Execution)
-		r.byPlan[execution.planID] = children
+	if execution.planID != "" {
+		children := r.byPlan[execution.planID]
+		if children == nil {
+			children = make(map[ExecutionID]*Execution)
+			r.byPlan[execution.planID] = children
+		}
+
+		children[execution.id] = execution
 	}
 
-	children[execution.id] = execution
+	if execution.sessionID != "" {
+		children := r.bySession[execution.sessionID]
+		if children == nil {
+			children = make(map[ExecutionID]*Execution)
+			r.bySession[execution.sessionID] = children
+		}
+
+		children[execution.id] = execution
+	}
 
 	return nil
 }
@@ -136,10 +150,20 @@ func (r *ExecutionRegistry) remove(execution *Execution) {
 			delete(r.byOwner, execution.owner)
 		}
 
-		delete(r.byPlan[execution.planID], execution.id)
+		if execution.planID != "" {
+			delete(r.byPlan[execution.planID], execution.id)
 
-		if len(r.byPlan[execution.planID]) == 0 {
-			delete(r.byPlan, execution.planID)
+			if len(r.byPlan[execution.planID]) == 0 {
+				delete(r.byPlan, execution.planID)
+			}
+		}
+
+		if execution.sessionID != "" {
+			delete(r.bySession[execution.sessionID], execution.id)
+
+			if len(r.bySession[execution.sessionID]) == 0 {
+				delete(r.bySession, execution.sessionID)
+			}
 		}
 	}
 	r.mu.Unlock()
@@ -160,6 +184,19 @@ func (r *ExecutionRegistry) listByPlan(owner ConnectionID, planID PlanID) []Exec
 	r.mu.RLock()
 	ids := make([]ExecutionID, 0, len(r.byPlan[planID]))
 	for id, execution := range r.byPlan[planID] {
+		if execution.owner == owner {
+			ids = append(ids, id)
+		}
+	}
+	r.mu.RUnlock()
+
+	return ids
+}
+
+func (r *ExecutionRegistry) listBySession(owner ConnectionID, sessionID SessionID) []ExecutionID {
+	r.mu.RLock()
+	ids := make([]ExecutionID, 0, len(r.bySession[sessionID]))
+	for id, execution := range r.bySession[sessionID] {
 		if execution.owner == owner {
 			ids = append(ids, id)
 		}

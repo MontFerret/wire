@@ -17,6 +17,7 @@ type (
 	Client struct {
 		runtimeClient   wirev1.RuntimeServiceClient
 		planClient      wirev1.PlanServiceClient
+		sessionClient   wirev1.SessionServiceClient
 		executionClient wirev1.ExecutionServiceClient
 		debugClient     wirev1.DebugServiceClient
 
@@ -100,6 +101,7 @@ func New(ctx context.Context, connection grpc.ClientConnInterface) (*Client, err
 	client := &Client{
 		runtimeClient:   runtimeClient,
 		planClient:      wirev1.NewPlanServiceClient(connection),
+		sessionClient:   wirev1.NewSessionServiceClient(connection),
 		executionClient: wirev1.NewExecutionServiceClient(connection),
 		debugClient:     wirev1.NewDebugServiceClient(connection),
 		connectionID:    response.GetConnectionId().GetValue(),

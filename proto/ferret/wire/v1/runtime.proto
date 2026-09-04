@@ -79,6 +79,7 @@ enum ErrorCategory {
   ERROR_CATEGORY_INTERNAL_RUNTIME_FAILURE = 10;
   ERROR_CATEGORY_WATCHER_LAGGED = 11;
   ERROR_CATEGORY_BREAKPOINT_NOT_FOUND = 15;
+  ERROR_CATEGORY_SESSION_NOT_FOUND = 16;
 }
 
 // ErrorDetail adds the Wire category that cannot be recovered from a gRPC code.

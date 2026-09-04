@@ -89,6 +89,8 @@ func failureCategory(value wirefailure.Category) (wirev1.ErrorCategory, error) {
 		return wirev1.ErrorCategory_ERROR_CATEGORY_WATCHER_LAGGED, nil
 	case wirefailure.CategoryBreakpointNotFound:
 		return wirev1.ErrorCategory_ERROR_CATEGORY_BREAKPOINT_NOT_FOUND, nil
+	case wirefailure.CategorySessionNotFound:
+		return wirev1.ErrorCategory_ERROR_CATEGORY_SESSION_NOT_FOUND, nil
 	}
 
 	return 0, runtimeConversionError("runtime returned an invalid failure category")

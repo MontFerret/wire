@@ -11,6 +11,7 @@ import (
 type (
 	ConnectionID   string
 	PlanID         string
+	SessionID      string
 	ExecutionID    string
 	DebugSessionID string
 
@@ -44,6 +45,7 @@ const (
 	ErrorKindWatcherLagged
 	ErrorKindResourceExhausted
 	ErrorKindBreakpointNotFound
+	ErrorKindSessionNotFound
 )
 
 func (e *DomainError) Error() string {

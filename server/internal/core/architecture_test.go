@@ -39,8 +39,11 @@ func TestConnectionContainsOnlyLifetimeState(t *testing.T) {
 	for _, name := range []string{
 		"Compile",
 		"Execute",
+		"CreateSession",
+		"RunSession",
 		"OpenDebugSession",
 		"ReleasePlan",
+		"ReleaseSession",
 		"ReleaseExecution",
 		"ReleaseDebugSession",
 	} {
@@ -173,6 +176,10 @@ func TestPrincipalReceiversAndDebuggerHandleStayWithTheirOwners(t *testing.T) {
 			if ok && function.Recv != nil && len(function.Recv.List) == 1 {
 				receiver := receiverTypeName(function.Recv.List[0].Type)
 				switch receiver {
+				case "Session":
+					if base != "session.go" {
+						t.Errorf("Session method %s is in %s", function.Name.Name, base)
+					}
 				case "DebugSession":
 					if base != "debug_session.go" {
 						t.Errorf("DebugSession method %s is in %s", function.Name.Name, base)

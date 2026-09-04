@@ -741,6 +741,7 @@ func testLimits() fixtureLimits {
 	return fixtureLimits{
 		MaxConnections:                4,
 		MaxPlansPerConnection:         4,
+		MaxSessionsPerConnection:      4,
 		MaxExecutionsPerConnection:    4,
 		MaxDebugSessionsPerConnection: 4,
 		MaxWatchersPerResource:        4,

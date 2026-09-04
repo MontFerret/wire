@@ -10,6 +10,7 @@ func TestDefaultServerLimits(t *testing.T) {
 	limits := server.DefaultServerLimits()
 	if limits.MaxConnections != 64 ||
 		limits.MaxPlansPerConnection != 128 ||
+		limits.MaxSessionsPerConnection != 128 ||
 		limits.MaxExecutionsPerConnection != 128 ||
 		limits.MaxDebugSessionsPerConnection != 32 ||
 		limits.MaxWatchersPerResource != 8 ||
@@ -26,6 +27,7 @@ func TestServerLimitsRequireEveryValueToBePositive(t *testing.T) {
 	tests := map[string]func(*server.ServerLimits){
 		"connections":       func(limits *server.ServerLimits) { limits.MaxConnections = 0 },
 		"plans":             func(limits *server.ServerLimits) { limits.MaxPlansPerConnection = 0 },
+		"sessions":          func(limits *server.ServerLimits) { limits.MaxSessionsPerConnection = 0 },
 		"executions":        func(limits *server.ServerLimits) { limits.MaxExecutionsPerConnection = 0 },
 		"debug sessions":    func(limits *server.ServerLimits) { limits.MaxDebugSessionsPerConnection = 0 },
 		"watchers":          func(limits *server.ServerLimits) { limits.MaxWatchersPerResource = 0 },

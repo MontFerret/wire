@@ -12,6 +12,7 @@ type (
 	testHost struct {
 		connections *ConnectionRegistry
 		plans       *PlanRegistry
+		normal      *SessionRegistry
 		executions  *ExecutionRegistry
 		sessions    *DebugSessionRegistry
 		compiler    *Compiler
@@ -46,6 +47,7 @@ type (
 	fixtureLimits struct {
 		MaxConnections                int
 		MaxPlansPerConnection         int
+		MaxSessionsPerConnection      int
 		MaxExecutionsPerConnection    int
 		MaxDebugSessionsPerConnection int
 		MaxWatchersPerResource        int
@@ -56,6 +58,7 @@ type (
 func newTestHost(runtime api.Runtime, limits fixtureLimits) (*testHost, error) {
 	connections := NewConnectionRegistry(limits.MaxConnections)
 	plans := NewPlanRegistry(limits.MaxPlansPerConnection)
+	normal := NewSessionRegistry(limits.MaxSessionsPerConnection)
 	executions := NewExecutionRegistry(limits.MaxExecutionsPerConnection, limits.MaxWatchersPerResource)
 	sessions := NewDebugSessionRegistry(
 		limits.MaxDebugSessionsPerConnection,
@@ -70,12 +73,13 @@ func newTestHost(runtime api.Runtime, limits fixtureLimits) (*testHost, error) {
 	return &testHost{
 		connections: connections,
 		plans:       plans,
+		normal:      normal,
 		executions:  executions,
 		sessions:    sessions,
 		compiler:    compiler,
-		executor:    NewExecutor(plans, executions),
+		executor:    NewExecutor(runtime, plans, normal, executions),
 		debugger:    NewDebugger(plans, sessions),
-		lifecycle:   NewLifecycle(connections, plans, executions, sessions),
+		lifecycle:   NewLifecycle(connections, plans, normal, executions, sessions),
 	}, nil
 }
 
@@ -139,6 +143,34 @@ func (e *testEnvironment) Execute(ctx context.Context, input ExecuteInput) (Exec
 	defer cancel()
 
 	return e.host.executor.Execute(operation, input)
+}
+
+func (e *testEnvironment) CreateSession(ctx context.Context, input CreateSessionInput) (SessionSnapshot, error) {
+	operation, cancel := e.operation(ctx)
+	defer cancel()
+
+	return e.host.executor.CreateSession(operation, input)
+}
+
+func (e *testEnvironment) RunSession(ctx context.Context, id SessionID) (ExecutionRecord, error) {
+	operation, cancel := e.operation(ctx)
+	defer cancel()
+
+	return e.host.executor.RunSession(operation, id)
+}
+
+func (e *testEnvironment) RunRuntime(ctx context.Context, input RunRuntimeInput) (ExecutionRecord, error) {
+	operation, cancel := e.operation(ctx)
+	defer cancel()
+
+	return e.host.executor.RunRuntime(operation, input)
+}
+
+func (e *testEnvironment) ReleaseSession(ctx context.Context, id SessionID) error {
+	operation, cancel := e.operation(ctx)
+	defer cancel()
+
+	return e.host.lifecycle.ReleaseSession(operation, id)
 }
 
 func (e *testEnvironment) CancelExecution(id ExecutionID) (ExecutionRecord, error) {

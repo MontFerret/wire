@@ -56,12 +56,13 @@ type (
 	}
 
 	integrationEnv struct {
-		server   *server.Server
-		listener *bufconn.Listener
-		conn     *grpc.ClientConn
-		client   *client.Client
-		serveErr chan error
-		shutdown bool
+		server          *server.Server
+		listener        *bufconn.Listener
+		conn            *grpc.ClientConn
+		client          *client.Client
+		serveErr        chan error
+		shutdown        bool
+		transportClosed bool
 	}
 )
 
@@ -530,8 +531,10 @@ func newIntegrationEnv(t *testing.T, runtime api.Runtime, options ...server.Serv
 		if err := server.Shutdown(ctx); err != nil {
 			t.Errorf("server cleanup failed: %v", err)
 		}
-		if err := conn.Close(); err != nil {
-			t.Errorf("transport cleanup failed: %v", err)
+		if !env.transportClosed {
+			if err := conn.Close(); err != nil {
+				t.Errorf("transport cleanup failed: %v", err)
+			}
 		}
 		select {
 		case err := <-serveErr:

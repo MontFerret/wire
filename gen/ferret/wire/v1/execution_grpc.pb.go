@@ -20,6 +20,8 @@ const _ = grpc.SupportPackageIsVersion9
 
 const (
 	ExecutionService_Execute_FullMethodName          = "/ferret.wire.v1.ExecutionService/Execute"
+	ExecutionService_RunSession_FullMethodName       = "/ferret.wire.v1.ExecutionService/RunSession"
+	ExecutionService_RunRuntime_FullMethodName       = "/ferret.wire.v1.ExecutionService/RunRuntime"
 	ExecutionService_CancelExecution_FullMethodName  = "/ferret.wire.v1.ExecutionService/CancelExecution"
 	ExecutionService_ReleaseExecution_FullMethodName = "/ferret.wire.v1.ExecutionService/ReleaseExecution"
 	ExecutionService_WatchExecution_FullMethodName   = "/ferret.wire.v1.ExecutionService/WatchExecution"
@@ -29,10 +31,14 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
-// ExecutionService owns asynchronous sessions created from reusable plans.
+// ExecutionService owns asynchronous runtime and session invocations.
 type ExecutionServiceClient interface {
 	// Execute publishes an asynchronous execution of an existing reusable plan.
 	Execute(ctx context.Context, in *ExecuteRequest, opts ...grpc.CallOption) (*ExecuteResponse, error)
+	// RunSession publishes one execution of an existing reusable Session.
+	RunSession(ctx context.Context, in *RunSessionRequest, opts ...grpc.CallOption) (*RunSessionResponse, error)
+	// RunRuntime publishes a one-shot invocation of the hosted api.Runtime.Run.
+	RunRuntime(ctx context.Context, in *RunRuntimeRequest, opts ...grpc.CallOption) (*RunRuntimeResponse, error)
 	// CancelExecution requests cancellation without releasing the execution.
 	CancelExecution(ctx context.Context, in *CancelExecutionRequest, opts ...grpc.CallOption) (*CancelExecutionResponse, error)
 	// ReleaseExecution commits cancellation and cleanup. The execution ID then becomes stale.
@@ -54,6 +60,26 @@ func (c *executionServiceClient) Execute(ctx context.Context, in *ExecuteRequest
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ExecuteResponse)
 	err := c.cc.Invoke(ctx, ExecutionService_Execute_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *executionServiceClient) RunSession(ctx context.Context, in *RunSessionRequest, opts ...grpc.CallOption) (*RunSessionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RunSessionResponse)
+	err := c.cc.Invoke(ctx, ExecutionService_RunSession_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *executionServiceClient) RunRuntime(ctx context.Context, in *RunRuntimeRequest, opts ...grpc.CallOption) (*RunRuntimeResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RunRuntimeResponse)
+	err := c.cc.Invoke(ctx, ExecutionService_RunRuntime_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -103,10 +129,14 @@ type ExecutionService_WatchExecutionClient = grpc.ServerStreamingClient[WatchExe
 // All implementations must embed UnimplementedExecutionServiceServer
 // for forward compatibility.
 //
-// ExecutionService owns asynchronous sessions created from reusable plans.
+// ExecutionService owns asynchronous runtime and session invocations.
 type ExecutionServiceServer interface {
 	// Execute publishes an asynchronous execution of an existing reusable plan.
 	Execute(context.Context, *ExecuteRequest) (*ExecuteResponse, error)
+	// RunSession publishes one execution of an existing reusable Session.
+	RunSession(context.Context, *RunSessionRequest) (*RunSessionResponse, error)
+	// RunRuntime publishes a one-shot invocation of the hosted api.Runtime.Run.
+	RunRuntime(context.Context, *RunRuntimeRequest) (*RunRuntimeResponse, error)
 	// CancelExecution requests cancellation without releasing the execution.
 	CancelExecution(context.Context, *CancelExecutionRequest) (*CancelExecutionResponse, error)
 	// ReleaseExecution commits cancellation and cleanup. The execution ID then becomes stale.
@@ -126,6 +156,12 @@ type UnimplementedExecutionServiceServer struct{}
 
 func (UnimplementedExecutionServiceServer) Execute(context.Context, *ExecuteRequest) (*ExecuteResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Execute not implemented")
+}
+func (UnimplementedExecutionServiceServer) RunSession(context.Context, *RunSessionRequest) (*RunSessionResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RunSession not implemented")
+}
+func (UnimplementedExecutionServiceServer) RunRuntime(context.Context, *RunRuntimeRequest) (*RunRuntimeResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RunRuntime not implemented")
 }
 func (UnimplementedExecutionServiceServer) CancelExecution(context.Context, *CancelExecutionRequest) (*CancelExecutionResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CancelExecution not implemented")
@@ -171,6 +207,42 @@ func _ExecutionService_Execute_Handler(srv interface{}, ctx context.Context, dec
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ExecutionServiceServer).Execute(ctx, req.(*ExecuteRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ExecutionService_RunSession_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RunSessionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ExecutionServiceServer).RunSession(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ExecutionService_RunSession_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ExecutionServiceServer).RunSession(ctx, req.(*RunSessionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ExecutionService_RunRuntime_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RunRuntimeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ExecutionServiceServer).RunRuntime(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ExecutionService_RunRuntime_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ExecutionServiceServer).RunRuntime(ctx, req.(*RunRuntimeRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -232,6 +304,14 @@ var ExecutionService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Execute",
 			Handler:    _ExecutionService_Execute_Handler,
+		},
+		{
+			MethodName: "RunSession",
+			Handler:    _ExecutionService_RunSession_Handler,
+		},
+		{
+			MethodName: "RunRuntime",
+			Handler:    _ExecutionService_RunRuntime_Handler,
 		},
 		{
 			MethodName: "CancelExecution",

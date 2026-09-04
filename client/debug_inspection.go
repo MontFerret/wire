@@ -13,6 +13,18 @@ import (
 // SetBreakpoint adds one runtime breakpoint. Line must be positive; column zero
 // means unspecified.
 func (d *DebugSession) SetBreakpoint(ctx context.Context, location source.Location) (debugger.Breakpoint, error) {
+	return d.SetBreakpointAt(ctx, location, debugger.BreakpointOptions{
+		BindingMode: debugger.BreakpointBindNextExecutableInSource,
+	})
+}
+
+// SetBreakpointAt adds one runtime breakpoint using the requested canonical
+// Unified API binding mode.
+func (d *DebugSession) SetBreakpointAt(
+	ctx context.Context,
+	location source.Location,
+	options debugger.BreakpointOptions,
+) (debugger.Breakpoint, error) {
 	if err := d.checkOpen(); err != nil {
 		return debugger.Breakpoint{}, err
 	}
@@ -25,6 +37,11 @@ func (d *DebugSession) SetBreakpoint(ctx context.Context, location source.Locati
 		return debugger.Breakpoint{}, errors.New("breakpoint has an invalid line or column")
 	}
 
+	bindingMode, err := breakpointBindingModeToProto(options.BindingMode)
+	if err != nil {
+		return debugger.Breakpoint{}, err
+	}
+
 	response, err := d.client.debugClient.SetBreakpoint(ctx, &wirev1.SetBreakpointRequest{
 		ConnectionId:   d.client.connectionProto(),
 		DebugSessionId: &wirev1.DebugSessionId{Value: d.id},
@@ -34,6 +51,7 @@ func (d *DebugSession) SetBreakpoint(ctx context.Context, location source.Locati
 				Line: int64(location.Line), Column: int64(location.Column),
 			},
 		},
+		Options: &wirev1.BreakpointOptions{BindingMode: bindingMode},
 	})
 	if err != nil {
 		return debugger.Breakpoint{}, decodeError(err)
@@ -44,6 +62,19 @@ func (d *DebugSession) SetBreakpoint(ctx context.Context, location source.Locati
 	}
 
 	return convertBreakpoint(response.GetBreakpoint())
+}
+
+func breakpointBindingModeToProto(value debugger.BreakpointBindingMode) (wirev1.BreakpointBindingMode, error) {
+	switch value {
+	case debugger.BreakpointBindNextExecutableInSource:
+		return wirev1.BreakpointBindingMode_BREAKPOINT_BINDING_MODE_NEXT_EXECUTABLE_IN_SOURCE, nil
+	case debugger.BreakpointBindExact:
+		return wirev1.BreakpointBindingMode_BREAKPOINT_BINDING_MODE_EXACT, nil
+	case debugger.BreakpointBindNextExecutableInFunction:
+		return wirev1.BreakpointBindingMode_BREAKPOINT_BINDING_MODE_NEXT_EXECUTABLE_IN_FUNCTION, nil
+	default:
+		return 0, errors.New("invalid breakpoint binding mode")
+	}
 }
 
 // DeleteBreakpoint removes one server-issued breakpoint from a created or

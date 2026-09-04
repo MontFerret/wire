@@ -117,6 +117,7 @@ func TestErrorCategoryConversionMapsEveryProtocolDetail(t *testing.T) {
 		{protocol: wirev1.ErrorCategory_ERROR_CATEGORY_INTERNAL_RUNTIME_FAILURE, want: failure.CategoryInternalRuntime},
 		{protocol: wirev1.ErrorCategory_ERROR_CATEGORY_WATCHER_LAGGED, want: failure.CategoryWatcherLagged},
 		{protocol: wirev1.ErrorCategory_ERROR_CATEGORY_BREAKPOINT_NOT_FOUND, want: failure.CategoryBreakpointNotFound},
+		{protocol: wirev1.ErrorCategory_ERROR_CATEGORY_SESSION_NOT_FOUND, want: failure.CategorySessionNotFound},
 	}
 
 	for _, test := range tests {

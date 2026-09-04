@@ -51,6 +51,7 @@ func NewServer(runtime api.Runtime, options ...ServerOption) (*Server, error) {
 	}
 	connections := core.NewConnectionRegistry(configured.limits.MaxConnections)
 	plans := core.NewPlanRegistry(configured.limits.MaxPlansPerConnection)
+	sessions := core.NewSessionRegistry(configured.limits.MaxSessionsPerConnection)
 	executions := core.NewExecutionRegistry(
 		configured.limits.MaxExecutionsPerConnection,
 		configured.limits.MaxWatchersPerResource,
@@ -66,9 +67,9 @@ func NewServer(runtime api.Runtime, options ...ServerOption) (*Server, error) {
 		return nil, err
 	}
 
-	executor := core.NewExecutor(plans, executions)
+	executor := core.NewExecutor(runtime, plans, sessions, executions)
 	debugger := core.NewDebugger(plans, debugSessions)
-	lifecycleManager := core.NewLifecycle(connections, plans, executions, debugSessions)
+	lifecycleManager := core.NewLifecycle(connections, plans, sessions, executions, debugSessions)
 	grpcServer := grpc.NewServer(
 		grpc.MaxRecvMsgSize(configured.limits.MaxInboundMessageBytes),
 		grpc.MaxSendMsgSize(configured.limits.MaxOutboundMessageBytes),

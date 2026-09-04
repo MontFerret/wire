@@ -18,7 +18,9 @@ type (
 		id          ExecutionID
 		owner       ConnectionID
 		planID      PlanID
+		sessionID   SessionID
 		plan        api.Plan
+		operation   func(context.Context) (api.Output, error)
 		ctx         context.Context
 		cancel      context.CancelCauseFunc
 		parameters  map[string]any
@@ -34,6 +36,12 @@ type (
 
 	ExecuteInput struct {
 		PlanID            PlanID
+		Parameters        map[string]any
+		OutputContentType string
+	}
+
+	RunRuntimeInput struct {
+		Source            api.Source
 		Parameters        map[string]any
 		OutputContentType string
 	}
@@ -67,14 +75,42 @@ func newExecution(
 	return execution
 }
 
+func newOperationExecution(
+	id ExecutionID,
+	owner ConnectionID,
+	planID PlanID,
+	sessionID SessionID,
+	ctx context.Context,
+	cancel context.CancelCauseFunc,
+	operation func(context.Context) (api.Output, error),
+	maxWatchers int,
+) *Execution {
+	execution := &Execution{
+		id:        id,
+		owner:     owner,
+		planID:    planID,
+		sessionID: sessionID,
+		operation: operation,
+		ctx:       ctx,
+		cancel:    cancel,
+		state:     wireexecution.StateRunning,
+		events:    newEventStream(maxWatchers, cloneExecutionEvent, sequenceExecutionEvent),
+		done:      make(chan struct{}),
+	}
+	execution.publishLocked(false)
+
+	return execution
+}
+
 func (e *Execution) run() {
-	options := []api.SessionOption{api.WithParams(cloneParameters(e.parameters))}
-	if e.contentType != "" {
-		options = append(options, api.WithOutputContentType(e.contentType))
+	if e.operation != nil {
+		e.runOperation()
+
+		return
 	}
 
 	session, err := panicboundary.Call(func() (api.Session, error) {
-		return e.plan.NewSession(e.ctx, options...)
+		return e.plan.NewSession(e.ctx, apiSessionOptions(e.parameters, e.contentType)...)
 	})
 	if err != nil {
 		if !isNil(session) {
@@ -110,6 +146,20 @@ func (e *Execution) run() {
 	}
 
 	e.finish(result, err, category)
+}
+
+func (e *Execution) runOperation() {
+	output, runErr := e.operation(e.ctx)
+	result := &api.Output{ContentType: output.ContentType, Content: append([]byte(nil), output.Content...)}
+	category := failure.CategoryExecution
+
+	var domain *DomainError
+	if errors.As(runErr, &domain) && domain.Kind == ErrorKindInternal {
+		category = failure.CategoryInternalRuntime
+		result = nil
+	}
+
+	e.finish(result, runErr, category)
 }
 
 func (e *Execution) finish(output *api.Output, err error, category failure.Category) {

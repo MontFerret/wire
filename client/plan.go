@@ -11,7 +11,8 @@ import (
 type (
 	// CompileOptions controls runtime plan construction.
 	CompileOptions struct {
-		Debuggable bool
+		Debuggable        bool
+		OptimizationLevel *api.OptimizationLevel
 	}
 
 	// Plan is a compiled remote runtime plan owned by one Client.
@@ -30,11 +31,17 @@ func (c *Client) Compile(ctx context.Context, src api.Source, options CompileOpt
 		return nil, err
 	}
 
+	convertedOptions, err := encodeCompileOptions(options.OptimizationLevel)
+	if err != nil {
+		return nil, err
+	}
+
 	var value *wirev1.Plan
 	if options.Debuggable {
 		response, err := c.planClient.CompileDebug(ctx, &wirev1.CompileDebugRequest{
 			ConnectionId: c.connectionProto(),
 			Source:       &wirev1.Source{Content: src.Content, Name: src.Name},
+			Options:      convertedOptions,
 		})
 		if err != nil {
 			return nil, decodeError(err)
@@ -45,6 +52,7 @@ func (c *Client) Compile(ctx context.Context, src api.Source, options CompileOpt
 		response, err := c.planClient.Compile(ctx, &wirev1.CompileRequest{
 			ConnectionId: c.connectionProto(),
 			Source:       &wirev1.Source{Content: src.Content, Name: src.Name},
+			Options:      convertedOptions,
 		})
 		if err != nil {
 			return nil, decodeError(err)
@@ -64,6 +72,28 @@ func (c *Client) Compile(ctx context.Context, src api.Source, options CompileOpt
 		debuggable: options.Debuggable,
 		close:      &closeState{},
 	}, nil
+}
+
+func encodeCompileOptions(level *api.OptimizationLevel) (*wirev1.CompileOptions, error) {
+	if level == nil {
+		return nil, nil
+	}
+
+	var converted wirev1.OptimizationLevel
+	switch *level {
+	case api.OptimizationNone:
+		converted = wirev1.OptimizationLevel_OPTIMIZATION_LEVEL_NONE
+	case api.OptimizationBasic:
+		converted = wirev1.OptimizationLevel_OPTIMIZATION_LEVEL_BASIC
+	case api.OptimizationFull:
+		converted = wirev1.OptimizationLevel_OPTIMIZATION_LEVEL_FULL
+	case api.OptimizationAggressive:
+		converted = wirev1.OptimizationLevel_OPTIMIZATION_LEVEL_AGGRESSIVE
+	default:
+		return nil, errors.New("invalid optimization level")
+	}
+
+	return &wirev1.CompileOptions{OptimizationLevel: converted}, nil
 }
 
 // Parameters returns a copy of the FQL parameters declared by this plan.

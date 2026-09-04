@@ -12,7 +12,10 @@ import (
 type (
 	spyRuntime struct {
 		mu                  sync.Mutex
+		run                 func(context.Context, api.Source, sessionOptions) (api.Output, error)
 		compile             func(context.Context, api.Source, bool) (api.Plan, error)
+		runSources          []api.Source
+		runOptions          []sessionOptions
 		compileSources      []api.Source
 		compileDebug        []bool
 		compileOptimization []*api.OptimizationLevel
@@ -67,8 +70,22 @@ type (
 	}
 )
 
-func (r *spyRuntime) Run(context.Context, api.Source, ...api.SessionOption) (api.Output, error) {
-	return api.Output{}, nil
+func (r *spyRuntime) Run(ctx context.Context, src api.Source, options ...api.SessionOption) (api.Output, error) {
+	configured, err := applySessionOptions(options)
+	if err != nil {
+		return api.Output{}, err
+	}
+
+	r.mu.Lock()
+	r.runSources = append(r.runSources, src)
+	r.runOptions = append(r.runOptions, configured.clone())
+	run := r.run
+	r.mu.Unlock()
+	if run == nil {
+		return api.Output{}, nil
+	}
+
+	return run(ctx, src, configured)
 }
 
 func (r *spyRuntime) Compile(ctx context.Context, src api.Source, options ...api.PlanOption) (api.Plan, error) {

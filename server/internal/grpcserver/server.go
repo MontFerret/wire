@@ -11,6 +11,7 @@ import (
 type Server struct {
 	wirev1.UnimplementedRuntimeServiceServer
 	wirev1.UnimplementedPlanServiceServer
+	wirev1.UnimplementedSessionServiceServer
 	wirev1.UnimplementedExecutionServiceServer
 	wirev1.UnimplementedDebugServiceServer
 
@@ -43,6 +44,7 @@ func New(
 func (s *Server) Register(registrar grpc.ServiceRegistrar) {
 	wirev1.RegisterRuntimeServiceServer(registrar, s)
 	wirev1.RegisterPlanServiceServer(registrar, s)
+	wirev1.RegisterSessionServiceServer(registrar, s)
 	wirev1.RegisterExecutionServiceServer(registrar, s)
 	wirev1.RegisterDebugServiceServer(registrar, s)
 }
