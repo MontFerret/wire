@@ -7,6 +7,7 @@ import "ferret/wire/v1/source.proto";
 
 option go_package = "github.com/MontFerret/wire/gen/ferret/wire/v1;wirev1";
 
+// PlanService creates reusable plans owned by one logical connection.
 service PlanService {
   // Compile creates a reusable connection-owned runtime plan from source.
   rpc Compile(CompileRequest) returns (CompileResponse);
@@ -18,6 +19,7 @@ service PlanService {
 }
 
 message PlanId {
+  // value is opaque and valid only within the owning logical connection.
   string value = 1;
 }
 
@@ -42,6 +44,7 @@ message Plan {
   reserved "debuggable";
 
   PlanId id = 1;
+  // parameters preserves the order reported by the hosted Unified API plan.
   repeated string parameters = 2;
 }
 
@@ -55,6 +58,7 @@ message CompileResponse {
   reserved 2;
   reserved "diagnostics";
 
+  // plan is present on success. Portable compile diagnostics use gRPC status details.
   Plan plan = 1;
 }
 
@@ -65,6 +69,7 @@ message CompileDebugRequest {
 }
 
 message CompileDebugResponse {
+  // plan is present on success. It may create multiple independent debug sessions.
   Plan plan = 1;
 }
 

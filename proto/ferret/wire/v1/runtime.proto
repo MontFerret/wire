@@ -2,8 +2,11 @@ syntax = "proto3";
 
 package ferret.wire.v1;
 
+import "ferret/wire/v1/source.proto";
+
 option go_package = "github.com/MontFerret/wire/gen/ferret/wire/v1;wirev1";
 
+// RuntimeService owns logical Wire connections independently of the physical transport.
 service RuntimeService {
   // Servers apply finite host-configured limits to messages and logical resources.
   // Connect creates the logical ownership scope for all resources created with
@@ -16,22 +19,29 @@ service RuntimeService {
 
 // ConnectionId is an opaque, server-issued logical connection identifier.
 message ConnectionId {
+  // value is opaque, non-empty, and scoped to the server that issued it.
   string value = 1;
 }
 
 // ProtocolInfo identifies the versioned Wire transport contract.
 message ProtocolInfo {
+  // name identifies the Wire protocol independently of the hosted runtime.
   string name = 1;
+  // version identifies the protobuf contract version.
   string version = 2;
 }
 
-// RuntimeIdentity is optional host-supplied runtime implementation metadata.
+// RuntimeIdentity is optional host-supplied identity for the hosted runtime implementation.
 message RuntimeIdentity {
+  // name is required whenever RuntimeIdentity is present.
   string name = 1;
+  // version is optional and defined by the host.
   string version = 2;
+  // instance_id optionally distinguishes one hosted runtime instance.
   string instance_id = 3;
 }
 
+// ConnectResponse is sent exactly once; the stream then remains open as the connection lifetime signal.
 message ConnectResponse {
   reserved 1, 2;
   reserved "opened", "closing";
@@ -41,6 +51,7 @@ message ConnectResponse {
   RuntimeIdentity runtime_identity = 5;
 }
 
+// ConnectRequest has no transport- or client-identity fields.
 message ConnectRequest {
   reserved 1;
   reserved "client_identity";
@@ -55,8 +66,8 @@ message CloseConnectionResponse {}
 enum ErrorCategory {
   ERROR_CATEGORY_UNSPECIFIED = 0;
 
-  reserved 1, 9, 12, 14;
-  reserved "ERROR_CATEGORY_INVALID_REQUEST", "ERROR_CATEGORY_UNSUPPORTED_CAPABILITY", "ERROR_CATEGORY_CANCELLED", "ERROR_CATEGORY_RESOURCE_EXHAUSTED";
+  reserved 1, 9, 12, 13, 14;
+  reserved "ERROR_CATEGORY_INVALID_REQUEST", "ERROR_CATEGORY_UNSUPPORTED_CAPABILITY", "ERROR_CATEGORY_CANCELLED", "ERROR_CATEGORY_VALUE_REFERENCE_NOT_FOUND", "ERROR_CATEGORY_RESOURCE_EXHAUSTED";
 
   ERROR_CATEGORY_COMPILATION_FAILURE = 2;
   ERROR_CATEGORY_EXECUTION_FAILURE = 3;
@@ -67,7 +78,6 @@ enum ErrorCategory {
   ERROR_CATEGORY_INVALID_STATE = 8;
   ERROR_CATEGORY_INTERNAL_RUNTIME_FAILURE = 10;
   ERROR_CATEGORY_WATCHER_LAGGED = 11;
-  ERROR_CATEGORY_VALUE_REFERENCE_NOT_FOUND = 13;
   ERROR_CATEGORY_BREAKPOINT_NOT_FOUND = 15;
 }
 
@@ -77,6 +87,38 @@ message ErrorDetail {
   reserved "message", "resource", "resource_id", "diagnostics";
 
   ErrorCategory category = 1;
+}
+
+// DiagnosticAnnotation preserves one ordered source range reported by the Unified API.
+message DiagnosticAnnotation {
+  Range range = 1;
+  // message may be empty when the range needs no separate label.
+  string message = 2;
+  // primary distinguishes the principal range from related ranges.
+  bool primary = 3;
+}
+
+// Diagnostic is the portable Unified API diagnostic contract.
+message Diagnostic {
+  reserved 5, 6;
+  reserved "source_identity", "spans";
+
+  // kind is an open producer-defined category, not a closed Wire enum.
+  string kind = 1;
+  string message = 2;
+  string hint = 3;
+  string note = 4;
+  // source preserves the complete semantic source name and content reported by the runtime.
+  Source source = 7;
+  // annotations preserve the producer's order and primary markers.
+  repeated DiagnosticAnnotation annotations = 8;
+}
+
+// DiagnosticSet transports one ordered diagnostics.Diagnostics collection.
+// Unary failures attach it as a separate gRPC status detail beside ErrorDetail;
+// Wire never reconstructs it by parsing an error message.
+message DiagnosticSet {
+  repeated Diagnostic diagnostics = 1;
 }
 
 // Output is the Unified API encoded output contract. Wire does not expose runtime values.
@@ -94,5 +136,8 @@ message Failure {
   reserved "diagnostics";
 
   ErrorCategory category = 1;
+  // message is sanitized and never contains an arbitrary runtime error string.
   string message = 2;
+  // diagnostic_set is present only when the runtime returned portable Unified API diagnostics.
+  DiagnosticSet diagnostic_set = 4;
 }

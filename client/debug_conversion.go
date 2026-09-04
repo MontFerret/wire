@@ -6,68 +6,74 @@ import (
 	"github.com/MontFerret/api/debugger"
 	"github.com/MontFerret/api/source"
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
+	wiredebugger "github.com/MontFerret/wire/pkg/debugger"
 )
 
-func convertDebugSessionSnapshot(value *wirev1.DebugSession) (DebugSessionSnapshot, error) {
+func convertDebugSessionSnapshot(value *wirev1.DebugSession) (wiredebugger.Snapshot, error) {
 	if value == nil {
-		return DebugSessionSnapshot{}, invalidDebuggerResponse("debug session is missing")
+		return wiredebugger.Snapshot{}, invalidDebuggerResponse("debug session is missing")
 	}
 
 	state, err := convertDebugState(value.GetState())
 	if err != nil {
-		return DebugSessionSnapshot{}, err
+		return wiredebugger.Snapshot{}, err
 	}
 
 	stopReason, err := convertDebugStopReason(value.GetStopReason())
 	if err != nil {
-		return DebugSessionSnapshot{}, err
+		return wiredebugger.Snapshot{}, err
 	}
 
 	location, err := convertSourceRange(value.GetLocation())
 	if err != nil {
-		return DebugSessionSnapshot{}, err
+		return wiredebugger.Snapshot{}, err
 	}
 
 	depth, err := debuggerIntFromProto(value.GetDepth(), "debug depth", true)
 	if err != nil {
-		return DebugSessionSnapshot{}, err
+		return wiredebugger.Snapshot{}, err
 	}
 
 	hitIDs := make([]debugger.BreakpointID, len(value.GetHitBreakpointIds()))
 	for i, id := range value.GetHitBreakpointIds() {
 		converted, err := debuggerIDFromProto[debugger.BreakpointID](id, "hit breakpoint ID", false)
 		if err != nil {
-			return DebugSessionSnapshot{}, err
+			return wiredebugger.Snapshot{}, err
 		}
 
 		hitIDs[i] = converted
 	}
 
-	return DebugSessionSnapshot{
+	failure, err := convertFailure(value.GetFailure())
+	if err != nil {
+		return wiredebugger.Snapshot{}, err
+	}
+
+	return wiredebugger.Snapshot{
 		State:            state,
 		StopReason:       stopReason,
 		Location:         location,
 		HitBreakpointIDs: hitIDs,
 		Depth:            depth,
 		Output:           convertOutput(value.GetOutput()),
-		Failure:          convertFailure(value.GetFailure()),
+		Failure:          failure,
 	}, nil
 }
 
-func convertDebugState(value wirev1.DebugState) (DebugState, error) {
+func convertDebugState(value wirev1.DebugState) (wiredebugger.State, error) {
 	switch value {
 	case wirev1.DebugState_DEBUG_STATE_CREATED:
-		return DebugCreated, nil
+		return wiredebugger.StateCreated, nil
 	case wirev1.DebugState_DEBUG_STATE_RUNNING:
-		return DebugRunning, nil
+		return wiredebugger.StateRunning, nil
 	case wirev1.DebugState_DEBUG_STATE_STOPPED:
-		return DebugStopped, nil
+		return wiredebugger.StateStopped, nil
 	case wirev1.DebugState_DEBUG_STATE_COMPLETED:
-		return DebugCompleted, nil
+		return wiredebugger.StateCompleted, nil
 	case wirev1.DebugState_DEBUG_STATE_FAILED:
-		return DebugFailed, nil
+		return wiredebugger.StateFailed, nil
 	case wirev1.DebugState_DEBUG_STATE_TERMINATED:
-		return DebugTerminated, nil
+		return wiredebugger.StateTerminated, nil
 	default:
 		return 0, invalidDebuggerResponse("unknown debug state %d", value)
 	}
@@ -92,34 +98,36 @@ func convertDebugStopReason(value wirev1.DebugStopReason) (debugger.Reason, erro
 	}
 }
 
-func convertDebugEvent(value *wirev1.WatchDebugResponse) (DebugEvent, error) {
+func convertDebugEvent(value *wirev1.WatchDebugResponse) (wiredebugger.Event, error) {
 	kind, err := convertDebugEventKind(value.GetKind())
 	if err != nil {
-		return DebugEvent{}, err
+		return wiredebugger.Event{}, err
 	}
 
 	snapshot, err := convertDebugSessionSnapshot(value.GetSession())
 	if err != nil {
-		return DebugEvent{}, err
+		return wiredebugger.Event{}, err
 	}
 
-	return DebugEvent{Sequence: value.GetSequence(), Kind: kind, Snapshot: snapshot}, nil
+	return wiredebugger.Event{Sequence: value.GetSequence(), Kind: kind, Snapshot: snapshot}, nil
 }
 
-func convertDebugEventKind(value wirev1.DebugEventKind) (DebugEventKind, error) {
+func convertDebugEventKind(value wirev1.DebugEventKind) (wiredebugger.EventKind, error) {
 	switch value {
 	case wirev1.DebugEventKind_DEBUG_EVENT_KIND_STARTED:
-		return DebugEventStarted, nil
+		return wiredebugger.EventStarted, nil
 	case wirev1.DebugEventKind_DEBUG_EVENT_KIND_CONTINUED:
-		return DebugEventContinued, nil
+		return wiredebugger.EventContinued, nil
 	case wirev1.DebugEventKind_DEBUG_EVENT_KIND_STOPPED:
-		return DebugEventStopped, nil
+		return wiredebugger.EventStopped, nil
 	case wirev1.DebugEventKind_DEBUG_EVENT_KIND_COMPLETED:
-		return DebugEventCompleted, nil
+		return wiredebugger.EventCompleted, nil
 	case wirev1.DebugEventKind_DEBUG_EVENT_KIND_FAILED:
-		return DebugEventFailed, nil
+		return wiredebugger.EventFailed, nil
 	case wirev1.DebugEventKind_DEBUG_EVENT_KIND_TERMINATED:
-		return DebugEventTerminated, nil
+		return wiredebugger.EventTerminated, nil
+	case wirev1.DebugEventKind_DEBUG_EVENT_KIND_CREATED:
+		return wiredebugger.EventCreated, nil
 	default:
 		return 0, invalidDebuggerResponse("unknown debug event kind %d", value)
 	}
@@ -130,8 +138,8 @@ func convertSourceLocation(value *wirev1.Location) (*source.Location, error) {
 		return nil, nil
 	}
 
-	if value.GetFile() == "" {
-		return nil, invalidDebuggerResponse("source location file is missing")
+	if value.GetSourceName() == "" {
+		return nil, invalidDebuggerResponse("source location source name is missing")
 	}
 
 	position := value.GetPosition()
@@ -150,8 +158,8 @@ func convertSourceLocation(value *wirev1.Location) (*source.Location, error) {
 	}
 
 	return &source.Location{
-		Position: source.Position{Line: line, Column: column},
-		File:     value.GetFile(),
+		Position:   source.Position{Line: line, Column: column},
+		SourceName: value.GetSourceName(),
 	}, nil
 }
 

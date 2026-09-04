@@ -27,6 +27,8 @@ const (
 // PlanServiceClient is the client API for PlanService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+//
+// PlanService creates reusable plans owned by one logical connection.
 type PlanServiceClient interface {
 	// Compile creates a reusable connection-owned runtime plan from source.
 	Compile(ctx context.Context, in *CompileRequest, opts ...grpc.CallOption) (*CompileResponse, error)
@@ -78,6 +80,8 @@ func (c *planServiceClient) ReleasePlan(ctx context.Context, in *ReleasePlanRequ
 // PlanServiceServer is the server API for PlanService service.
 // All implementations must embed UnimplementedPlanServiceServer
 // for forward compatibility.
+//
+// PlanService creates reusable plans owned by one logical connection.
 type PlanServiceServer interface {
 	// Compile creates a reusable connection-owned runtime plan from source.
 	Compile(context.Context, *CompileRequest) (*CompileResponse, error)

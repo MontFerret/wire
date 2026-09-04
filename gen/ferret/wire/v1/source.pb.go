@@ -24,9 +24,11 @@ const (
 // Source contains the semantic source name and content accepted by the Unified API.
 // Source is Unified API source input. Name may be empty and content is required.
 type Source struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Content       string                 `protobuf:"bytes,1,opt,name=content,proto3" json:"content,omitempty"`
-	Name          string                 `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// content is the complete source text and must not be empty for compilation.
+	Content string `protobuf:"bytes,1,opt,name=content,proto3" json:"content,omitempty"`
+	// name is a semantic source identifier and need not be a filesystem path.
+	Name          string `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -77,9 +79,11 @@ func (x *Source) GetName() string {
 
 // Position uses positive lines and non-negative columns.
 type Position struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Line          int64                  `protobuf:"varint,1,opt,name=line,proto3" json:"line,omitempty"`
-	Column        int64                  `protobuf:"varint,2,opt,name=column,proto3" json:"column,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// line is one-based.
+	Line int64 `protobuf:"varint,1,opt,name=line,proto3" json:"line,omitempty"`
+	// column is zero-based.
+	Column        int64 `protobuf:"varint,2,opt,name=column,proto3" json:"column,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -130,9 +134,11 @@ func (x *Position) GetColumn() int64 {
 
 // Span preserves non-negative runtime offsets without assigning their units.
 type Span struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Start         int64                  `protobuf:"varint,1,opt,name=start,proto3" json:"start,omitempty"`
-	End           int64                  `protobuf:"varint,2,opt,name=end,proto3" json:"end,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// start is a non-negative producer-defined offset.
+	Start int64 `protobuf:"varint,1,opt,name=start,proto3" json:"start,omitempty"`
+	// end is a non-negative producer-defined offset not preceding start.
+	End           int64 `protobuf:"varint,2,opt,name=end,proto3" json:"end,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -181,11 +187,12 @@ func (x *Span) GetEnd() int64 {
 	return 0
 }
 
-// Location identifies one source position in a named file.
+// Location identifies one position in a semantically named source.
 type Location struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	File          string                 `protobuf:"bytes,1,opt,name=file,proto3" json:"file,omitempty"`
-	Position      *Position              `protobuf:"bytes,2,opt,name=position,proto3" json:"position,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// source_name matches Source.name and need not be a filesystem path.
+	SourceName    string    `protobuf:"bytes,1,opt,name=source_name,json=sourceName,proto3" json:"source_name,omitempty"`
+	Position      *Position `protobuf:"bytes,2,opt,name=position,proto3" json:"position,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -220,9 +227,9 @@ func (*Location) Descriptor() ([]byte, []int) {
 	return file_ferret_wire_v1_source_proto_rawDescGZIP(), []int{3}
 }
 
-func (x *Location) GetFile() string {
+func (x *Location) GetSourceName() string {
 	if x != nil {
-		return x.File
+		return x.SourceName
 	}
 	return ""
 }
@@ -236,9 +243,10 @@ func (x *Location) GetPosition() *Position {
 
 // Range combines a location with its runtime-defined span.
 type Range struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Location      *Location              `protobuf:"bytes,1,opt,name=location,proto3" json:"location,omitempty"`
-	Span          *Span                  `protobuf:"bytes,2,opt,name=span,proto3" json:"span,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// location and span are both present for a portable annotated range.
+	Location      *Location `protobuf:"bytes,1,opt,name=location,proto3" json:"location,omitempty"`
+	Span          *Span     `protobuf:"bytes,2,opt,name=span,proto3" json:"span,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -300,10 +308,11 @@ const file_ferret_wire_v1_source_proto_rawDesc = "" +
 	"\x06column\x18\x02 \x01(\x03R\x06column\".\n" +
 	"\x04Span\x12\x14\n" +
 	"\x05start\x18\x01 \x01(\x03R\x05start\x12\x10\n" +
-	"\x03end\x18\x02 \x01(\x03R\x03end\"T\n" +
-	"\bLocation\x12\x12\n" +
-	"\x04file\x18\x01 \x01(\tR\x04file\x124\n" +
-	"\bposition\x18\x02 \x01(\v2\x18.ferret.wire.v1.PositionR\bposition\"g\n" +
+	"\x03end\x18\x02 \x01(\x03R\x03end\"g\n" +
+	"\bLocation\x12\x1f\n" +
+	"\vsource_name\x18\x01 \x01(\tR\n" +
+	"sourceName\x124\n" +
+	"\bposition\x18\x02 \x01(\v2\x18.ferret.wire.v1.PositionR\bpositionR\x04file\"g\n" +
 	"\x05Range\x124\n" +
 	"\blocation\x18\x01 \x01(\v2\x18.ferret.wire.v1.LocationR\blocation\x12(\n" +
 	"\x04span\x18\x02 \x01(\v2\x14.ferret.wire.v1.SpanR\x04spanB6Z4github.com/MontFerret/wire/gen/ferret/wire/v1;wirev1b\x06proto3"

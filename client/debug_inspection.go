@@ -17,8 +17,8 @@ func (d *DebugSession) SetBreakpoint(ctx context.Context, location source.Locati
 		return debugger.Breakpoint{}, err
 	}
 
-	if location.File == "" {
-		return debugger.Breakpoint{}, errors.New("breakpoint file is required")
+	if location.SourceName == "" {
+		return debugger.Breakpoint{}, errors.New("breakpoint source name is required")
 	}
 
 	if location.Line <= 0 || location.Column < 0 {
@@ -29,7 +29,7 @@ func (d *DebugSession) SetBreakpoint(ctx context.Context, location source.Locati
 		ConnectionId:   d.client.connectionProto(),
 		DebugSessionId: &wirev1.DebugSessionId{Value: d.id},
 		Location: &wirev1.Location{
-			File: location.File,
+			SourceName: location.SourceName,
 			Position: &wirev1.Position{
 				Line: int64(location.Line), Column: int64(location.Column),
 			},
@@ -256,8 +256,8 @@ func convertFrame(value *wirev1.Frame, index int) (debugger.Frame, error) {
 
 func convertBreakpointBindingMode(value wirev1.BreakpointBindingMode) (debugger.BreakpointBindingMode, error) {
 	switch value {
-	case wirev1.BreakpointBindingMode_BREAKPOINT_BINDING_MODE_NEXT_EXECUTABLE_IN_FILE:
-		return debugger.BreakpointBindNextExecutableInFile, nil
+	case wirev1.BreakpointBindingMode_BREAKPOINT_BINDING_MODE_NEXT_EXECUTABLE_IN_SOURCE:
+		return debugger.BreakpointBindNextExecutableInSource, nil
 	case wirev1.BreakpointBindingMode_BREAKPOINT_BINDING_MODE_EXACT:
 		return debugger.BreakpointBindExact, nil
 	case wirev1.BreakpointBindingMode_BREAKPOINT_BINDING_MODE_NEXT_EXECUTABLE_IN_FUNCTION:

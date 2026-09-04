@@ -1,16 +1,11 @@
 package client
 
-import wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
+import (
+	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
+	"github.com/MontFerret/wire/pkg/execution"
+)
 
 type (
-	// RuntimeIdentity describes the optional host application identity published
-	// by the server.
-	RuntimeIdentity struct {
-		Name       string
-		Version    string
-		InstanceID string
-	}
-
 	// Capabilities reports the operation families supported by the server.
 	Capabilities struct {
 		Execution    bool
@@ -23,7 +18,7 @@ type (
 		APIIdentity     string
 		WireVersion     string
 		FerretVersion   string
-		RuntimeIdentity *RuntimeIdentity
+		RuntimeIdentity *execution.Identity
 		Capabilities    Capabilities
 	}
 )
@@ -35,7 +30,7 @@ func convertRuntimeInfo(protocol *wirev1.ProtocolInfo, identity *wirev1.RuntimeI
 	}
 
 	if identity != nil {
-		result.RuntimeIdentity = &RuntimeIdentity{
+		result.RuntimeIdentity = &execution.Identity{
 			Name:       identity.GetName(),
 			Version:    identity.GetVersion(),
 			InstanceID: identity.GetInstanceId(),

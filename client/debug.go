@@ -5,7 +5,6 @@ import (
 	"errors"
 
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
-	"github.com/MontFerret/wire/internal/lifecycle"
 )
 
 type (
@@ -19,7 +18,7 @@ type (
 		client *Client
 		plan   *Plan
 		id     string
-		close  *lifecycle.Close
+		close  *closeState
 	}
 )
 
@@ -50,7 +49,7 @@ func (p *Plan) NewDebugSession(ctx context.Context, parameters Parameters, optio
 		return nil, errors.New("Wire server returned an invalid debug session")
 	}
 
-	return &DebugSession{client: p.client, plan: p, id: value.GetId().GetValue(), close: &lifecycle.Close{}}, nil
+	return &DebugSession{client: p.client, plan: p, id: value.GetId().GetValue(), close: &closeState{}}, nil
 }
 
 // Start begins a newly created debug session. Watch publishes the running and
@@ -93,40 +92,40 @@ func (d *DebugSession) Pause(ctx context.Context) error {
 	return decodeError(err)
 }
 
-// Next resumes until the next statement without entering a called function.
-func (d *DebugSession) Next(ctx context.Context) error {
+// StepOver resumes until the next statement without entering a called function.
+func (d *DebugSession) StepOver(ctx context.Context) error {
 	if err := d.checkOpen(); err != nil {
 		return err
 	}
 
-	_, err := d.client.debugClient.Next(ctx, &wirev1.NextRequest{
+	_, err := d.client.debugClient.StepOver(ctx, &wirev1.StepOverRequest{
 		ConnectionId: d.client.connectionProto(), DebugSessionId: &wirev1.DebugSessionId{Value: d.id},
 	})
 
 	return decodeError(err)
 }
 
-// Step resumes until the next statement, entering a called function when
+// StepIn resumes until the next statement, entering a called function when
 // applicable.
-func (d *DebugSession) Step(ctx context.Context) error {
+func (d *DebugSession) StepIn(ctx context.Context) error {
 	if err := d.checkOpen(); err != nil {
 		return err
 	}
 
-	_, err := d.client.debugClient.Step(ctx, &wirev1.StepRequest{
+	_, err := d.client.debugClient.StepIn(ctx, &wirev1.StepInRequest{
 		ConnectionId: d.client.connectionProto(), DebugSessionId: &wirev1.DebugSessionId{Value: d.id},
 	})
 
 	return decodeError(err)
 }
 
-// Out resumes until execution leaves the current frame.
-func (d *DebugSession) Out(ctx context.Context) error {
+// StepOut resumes until execution leaves the current frame.
+func (d *DebugSession) StepOut(ctx context.Context) error {
 	if err := d.checkOpen(); err != nil {
 		return err
 	}
 
-	_, err := d.client.debugClient.Out(ctx, &wirev1.OutRequest{
+	_, err := d.client.debugClient.StepOut(ctx, &wirev1.StepOutRequest{
 		ConnectionId: d.client.connectionProto(), DebugSessionId: &wirev1.DebugSessionId{Value: d.id},
 	})
 

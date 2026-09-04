@@ -2,52 +2,25 @@ package client
 
 import (
 	"errors"
+	"fmt"
 
+	"github.com/MontFerret/api/diagnostics"
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
-	"google.golang.org/grpc/codes"
+	"github.com/MontFerret/wire/pkg/failure"
 	"google.golang.org/grpc/status"
 )
 
 type (
-	// Failure is a sanitized terminal execution or debug failure. It implements
-	// error so terminal failures remain available through errors.As.
-	Failure struct {
-		Category    ErrorCategory
-		Message     string
-		Diagnostics []Diagnostic
-	}
-
-	// ErrorCategory is the stable Wire failure category independent of transport
-	// status codes.
-	ErrorCategory uint8
-
-	// Error is a structured Wire failure. Internal transport causes remain
-	// available through Unwrap without exposing protocol resource identifiers.
+	// Error is a decoded Wire RPC failure. Category is set only when the server
+	// transmitted an ErrorDetail; transport-native statuses leave it zero.
+	// Internal transport causes remain available through Unwrap without exposing
+	// protocol resource identifiers.
 	Error struct {
-		Category    ErrorCategory
+		Category    failure.Category
 		Message     string
-		Diagnostics []Diagnostic
+		Diagnostics diagnostics.Diagnostics
 		cause       error
 	}
-)
-
-// Structured Wire error categories.
-const (
-	ErrorInvalidRequest ErrorCategory = iota + 1
-	ErrorCompilation
-	ErrorExecution
-	ErrorPlanNotFound
-	ErrorExecutionNotFound
-	ErrorDebugSessionNotFound
-	ErrorConnectionNotFound
-	ErrorInvalidState
-	ErrorUnsupported
-	ErrorInternal
-	ErrorWatcherLagged
-	ErrorCancelled
-	ErrorValueReferenceNotFound
-	ErrorResourceExhausted
-	ErrorBreakpointNotFound
 )
 
 var (
@@ -59,15 +32,6 @@ var (
 	// terminal state. It is distinct from cancellation of a Wait caller's context.
 	ErrExecutionCancelled = errors.New("remote execution was cancelled")
 )
-
-// Error returns the sanitized terminal failure message.
-func (f *Failure) Error() string {
-	if f == nil {
-		return ""
-	}
-
-	return f.Message
-}
 
 // Error returns the sanitized Wire error message.
 func (e *Error) Error() string {
@@ -101,80 +65,79 @@ func decodeError(err error) error {
 		return err
 	}
 
-	code := grpcStatus.Code()
 	result := &Error{Message: grpcStatus.Message(), cause: err}
 
 	for _, raw := range grpcStatus.Details() {
-		detail, ok := raw.(*wirev1.ErrorDetail)
-		if !ok || detail.GetCategory() == wirev1.ErrorCategory_ERROR_CATEGORY_UNSPECIFIED {
-			continue
+		switch detail := raw.(type) {
+		case *wirev1.ErrorDetail:
+			category, conversionErr := convertErrorCategory(detail.GetCategory(), true)
+			if conversionErr != nil {
+				return conversionErr
+			}
+
+			result.Category = category
+		case *wirev1.DiagnosticSet:
+			converted, conversionErr := convertDiagnosticSet(detail)
+			if conversionErr != nil {
+				return conversionErr
+			}
+
+			result.Diagnostics = converted
 		}
-
-		result.Category = clientErrorCategory(detail.GetCategory())
-
-		break
-	}
-
-	if result.Category == 0 {
-		result.Category = clientErrorCategoryFromCode(code)
 	}
 
 	return result
 }
 
-func convertFailure(value *wirev1.Failure) *Failure {
+func convertFailure(value *wirev1.Failure) (*failure.Failure, error) {
 	if value == nil {
-		return nil
+		return nil, nil
 	}
 
-	return &Failure{
-		Category: clientErrorCategory(value.GetCategory()),
-		Message:  value.GetMessage(),
+	convertedDiagnostics, err := convertDiagnosticSet(value.GetDiagnosticSet())
+	if err != nil {
+		return nil, err
 	}
+
+	category, err := convertErrorCategory(value.GetCategory(), false)
+	if err != nil {
+		return nil, err
+	}
+
+	return &failure.Failure{
+		Category:    category,
+		Message:     value.GetMessage(),
+		Diagnostics: convertedDiagnostics,
+	}, nil
 }
 
-func clientErrorCategory(value wirev1.ErrorCategory) ErrorCategory {
+func convertErrorCategory(value wirev1.ErrorCategory, zeroAllowed bool) (failure.Category, error) {
 	switch value {
+	case wirev1.ErrorCategory_ERROR_CATEGORY_UNSPECIFIED:
+		if zeroAllowed {
+			return 0, nil
+		}
 	case wirev1.ErrorCategory_ERROR_CATEGORY_COMPILATION_FAILURE:
-		return ErrorCompilation
+		return failure.CategoryCompilation, nil
 	case wirev1.ErrorCategory_ERROR_CATEGORY_EXECUTION_FAILURE:
-		return ErrorExecution
+		return failure.CategoryExecution, nil
 	case wirev1.ErrorCategory_ERROR_CATEGORY_PLAN_NOT_FOUND:
-		return ErrorPlanNotFound
+		return failure.CategoryPlanNotFound, nil
 	case wirev1.ErrorCategory_ERROR_CATEGORY_EXECUTION_NOT_FOUND:
-		return ErrorExecutionNotFound
+		return failure.CategoryExecutionNotFound, nil
 	case wirev1.ErrorCategory_ERROR_CATEGORY_DEBUG_SESSION_NOT_FOUND:
-		return ErrorDebugSessionNotFound
+		return failure.CategoryDebugSessionNotFound, nil
 	case wirev1.ErrorCategory_ERROR_CATEGORY_CONNECTION_NOT_FOUND:
-		return ErrorConnectionNotFound
+		return failure.CategoryConnectionNotFound, nil
 	case wirev1.ErrorCategory_ERROR_CATEGORY_INVALID_STATE:
-		return ErrorInvalidState
+		return failure.CategoryInvalidState, nil
 	case wirev1.ErrorCategory_ERROR_CATEGORY_WATCHER_LAGGED:
-		return ErrorWatcherLagged
-	case wirev1.ErrorCategory_ERROR_CATEGORY_VALUE_REFERENCE_NOT_FOUND:
-		return ErrorValueReferenceNotFound
+		return failure.CategoryWatcherLagged, nil
 	case wirev1.ErrorCategory_ERROR_CATEGORY_BREAKPOINT_NOT_FOUND:
-		return ErrorBreakpointNotFound
-	default:
-		return ErrorInternal
+		return failure.CategoryBreakpointNotFound, nil
+	case wirev1.ErrorCategory_ERROR_CATEGORY_INTERNAL_RUNTIME_FAILURE:
+		return failure.CategoryInternalRuntime, nil
 	}
-}
 
-func clientErrorCategoryFromCode(code codes.Code) ErrorCategory {
-	switch code {
-	case codes.InvalidArgument:
-		return ErrorInvalidRequest
-	case codes.NotFound:
-		return ErrorInternal
-	case codes.FailedPrecondition:
-		return ErrorInvalidState
-	case codes.Unimplemented:
-		return ErrorUnsupported
-	case codes.ResourceExhausted:
-		return ErrorResourceExhausted
-	case codes.Canceled, codes.DeadlineExceeded:
-		return ErrorCancelled
-	default:
-		return ErrorInternal
-	}
+	return 0, fmt.Errorf("Wire server returned an invalid error category: %d", value)
 }

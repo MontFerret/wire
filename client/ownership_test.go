@@ -14,6 +14,8 @@ import (
 	"github.com/MontFerret/api/debugger"
 	"github.com/MontFerret/api/source"
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
+	wiredebugger "github.com/MontFerret/wire/pkg/debugger"
+	"github.com/MontFerret/wire/pkg/execution"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
@@ -184,22 +186,22 @@ func (s *handleServer) Pause(_ context.Context, request *wirev1.PauseRequest) (*
 	return &wirev1.PauseResponse{}, nil
 }
 
-func (s *handleServer) Next(_ context.Context, request *wirev1.NextRequest) (*wirev1.NextResponse, error) {
-	s.record("next", request.GetConnectionId().GetValue(), request.GetDebugSessionId().GetValue())
+func (s *handleServer) StepOver(_ context.Context, request *wirev1.StepOverRequest) (*wirev1.StepOverResponse, error) {
+	s.record("step-over", request.GetConnectionId().GetValue(), request.GetDebugSessionId().GetValue())
 
-	return &wirev1.NextResponse{}, nil
+	return &wirev1.StepOverResponse{}, nil
 }
 
-func (s *handleServer) Step(_ context.Context, request *wirev1.StepRequest) (*wirev1.StepResponse, error) {
-	s.record("step", request.GetConnectionId().GetValue(), request.GetDebugSessionId().GetValue())
+func (s *handleServer) StepIn(_ context.Context, request *wirev1.StepInRequest) (*wirev1.StepInResponse, error) {
+	s.record("step-in", request.GetConnectionId().GetValue(), request.GetDebugSessionId().GetValue())
 
-	return &wirev1.StepResponse{}, nil
+	return &wirev1.StepInResponse{}, nil
 }
 
-func (s *handleServer) Out(_ context.Context, request *wirev1.OutRequest) (*wirev1.OutResponse, error) {
-	s.record("out", request.GetConnectionId().GetValue(), request.GetDebugSessionId().GetValue())
+func (s *handleServer) StepOut(_ context.Context, request *wirev1.StepOutRequest) (*wirev1.StepOutResponse, error) {
+	s.record("step-out", request.GetConnectionId().GetValue(), request.GetDebugSessionId().GetValue())
 
-	return &wirev1.OutResponse{}, nil
+	return &wirev1.StepOutResponse{}, nil
 }
 
 func (s *handleServer) Terminate(_ context.Context, request *wirev1.TerminateRequest) (*wirev1.TerminateResponse, error) {
@@ -218,7 +220,7 @@ func (s *handleServer) SetBreakpoint(_ context.Context, request *wirev1.SetBreak
 			Location: request.GetLocation(),
 			Span:     &wirev1.Span{},
 		},
-		BindingMode: wirev1.BreakpointBindingMode_BREAKPOINT_BINDING_MODE_NEXT_EXECUTABLE_IN_FILE,
+		BindingMode: wirev1.BreakpointBindingMode_BREAKPOINT_BINDING_MODE_NEXT_EXECUTABLE_IN_SOURCE,
 		Bound:       true,
 	}}, nil
 }
@@ -341,7 +343,7 @@ func TestHandleOperationsUseBoundOwnerResources(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if event, err := executionEvents.Recv(); err != nil || event.Snapshot.State != ExecutionRunning {
+	if event, err := executionEvents.Recv(); err != nil || event.Snapshot.State != execution.StateRunning {
 		t.Fatalf("unexpected execution event: %#v, %v", event, err)
 	}
 
@@ -351,7 +353,7 @@ func TestHandleOperationsUseBoundOwnerResources(t *testing.T) {
 	}
 	for name, command := range map[string]func(context.Context) error{
 		"start": debug.Start, "continue": debug.Continue, "pause": debug.Pause,
-		"next": debug.Next, "step": debug.Step, "out": debug.Out, "stop": debug.Stop,
+		"step-over": debug.StepOver, "step-in": debug.StepIn, "step-out": debug.StepOut, "stop": debug.Stop,
 	} {
 		if err := command(testClientContext(t)); err != nil {
 			t.Fatalf("%s failed: %v", name, err)
@@ -359,14 +361,14 @@ func TestHandleOperationsUseBoundOwnerResources(t *testing.T) {
 	}
 
 	breakpoint, err := debug.SetBreakpoint(testClientContext(t), source.Location{
-		Position: source.Position{Line: 1},
-		File:     "query.fql",
+		Position:   source.Position{Line: 1},
+		SourceName: "query.fql",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if breakpoint.ID != 1 || !breakpoint.Bound || breakpoint.RequestedLocation.File != "query.fql" ||
-		breakpoint.Location.File != "query.fql" || breakpoint.Location.Span != (source.Span{}) ||
+	if breakpoint.ID != 1 || !breakpoint.Bound || breakpoint.RequestedLocation.SourceName != "query.fql" ||
+		breakpoint.Location.SourceName != "query.fql" || breakpoint.Location.Span != (source.Span{}) ||
 		breakpoint.PointID != 0 || breakpoint.FunctionID != 0 {
 		t.Fatalf("unexpected Unified API breakpoint: %#v", breakpoint)
 	}
@@ -374,7 +376,7 @@ func TestHandleOperationsUseBoundOwnerResources(t *testing.T) {
 		t.Fatal(err)
 	}
 	frames, err := debug.Frames(testClientContext(t))
-	if err != nil || len(frames) != 1 || frames[0].Name != "main" || frames[0].FunctionID != 0 || frames[0].Location.File != "query.fql" {
+	if err != nil || len(frames) != 1 || frames[0].Name != "main" || frames[0].FunctionID != 0 || frames[0].Location.SourceName != "query.fql" {
 		t.Fatalf("unexpected Unified API frames: %#v, %v", frames, err)
 	}
 	locals, err := debug.FrameLocals(testClientContext(t), 0)
@@ -393,9 +395,9 @@ func TestHandleOperationsUseBoundOwnerResources(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if event, err := debugEvents.Recv(); err != nil || event.Snapshot.State != DebugStopped ||
+	if event, err := debugEvents.Recv(); err != nil || event.Snapshot.State != wiredebugger.StateStopped ||
 		event.Snapshot.StopReason != debugger.ReasonBreakpoint || event.Snapshot.Location == nil ||
-		event.Snapshot.Location.File != "query.fql" || len(event.Snapshot.HitBreakpointIDs) != 1 || event.Snapshot.HitBreakpointIDs[0] != 1 {
+		event.Snapshot.Location.SourceName != "query.fql" || len(event.Snapshot.HitBreakpointIDs) != 1 || event.Snapshot.HitBreakpointIDs[0] != 1 {
 		t.Fatalf("unexpected debug event: %#v, %v", event, err)
 	}
 
@@ -430,7 +432,7 @@ func TestHandleOperationsUseBoundOwnerResources(t *testing.T) {
 		call("new-debug", "connection-1", "plan-connection-1"),
 	}
 	debugID := "debug-connection-1"
-	for _, name := range []string{"start", "continue", "pause", "next", "step", "out", "stop", "set-breakpoint", "delete-breakpoint", "frames", "frame-locals", "variables", "evaluate", "watch-debug", "release-debug"} {
+	for _, name := range []string{"start", "continue", "pause", "step-over", "step-in", "step-out", "stop", "set-breakpoint", "delete-breakpoint", "frames", "frame-locals", "variables", "evaluate", "watch-debug", "release-debug"} {
 		want = append(want, call(name, "connection-1", debugID))
 	}
 	want = append(want,

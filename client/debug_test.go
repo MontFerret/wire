@@ -8,6 +8,7 @@ import (
 	"github.com/MontFerret/api/debugger"
 	"github.com/MontFerret/api/source"
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
+	wiredebugger "github.com/MontFerret/wire/pkg/debugger"
 	"google.golang.org/grpc"
 )
 
@@ -34,22 +35,74 @@ func (s *debugResponseStream) Recv() (*wirev1.WatchDebugResponse, error) {
 
 func TestDebugStateTerminal(t *testing.T) {
 	tests := []struct {
-		state    DebugState
+		state    wiredebugger.State
 		terminal bool
 	}{
 		{state: 0},
-		{state: DebugCreated},
-		{state: DebugRunning},
-		{state: DebugStopped},
-		{state: DebugCompleted, terminal: true},
-		{state: DebugFailed, terminal: true},
-		{state: DebugTerminated, terminal: true},
+		{state: wiredebugger.StateCreated},
+		{state: wiredebugger.StateRunning},
+		{state: wiredebugger.StateStopped},
+		{state: wiredebugger.StateCompleted, terminal: true},
+		{state: wiredebugger.StateFailed, terminal: true},
+		{state: wiredebugger.StateTerminated, terminal: true},
 	}
 
 	for _, test := range tests {
 		if got := test.state.Terminal(); got != test.terminal {
 			t.Errorf("DebugState(%d).Terminal() = %v, want %v", test.state, got, test.terminal)
 		}
+	}
+}
+
+func TestDebugStateAndEventKindConversionsMapEveryProtocolValue(t *testing.T) {
+	states := []struct {
+		protocol wirev1.DebugState
+		want     wiredebugger.State
+	}{
+		{protocol: wirev1.DebugState_DEBUG_STATE_CREATED, want: wiredebugger.StateCreated},
+		{protocol: wirev1.DebugState_DEBUG_STATE_RUNNING, want: wiredebugger.StateRunning},
+		{protocol: wirev1.DebugState_DEBUG_STATE_STOPPED, want: wiredebugger.StateStopped},
+		{protocol: wirev1.DebugState_DEBUG_STATE_COMPLETED, want: wiredebugger.StateCompleted},
+		{protocol: wirev1.DebugState_DEBUG_STATE_FAILED, want: wiredebugger.StateFailed},
+		{protocol: wirev1.DebugState_DEBUG_STATE_TERMINATED, want: wiredebugger.StateTerminated},
+	}
+	for _, test := range states {
+		got, err := convertDebugState(test.protocol)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != test.want {
+			t.Errorf("convertDebugState(%v) = %v, want %v", test.protocol, got, test.want)
+		}
+	}
+
+	kinds := []struct {
+		protocol wirev1.DebugEventKind
+		want     wiredebugger.EventKind
+	}{
+		{protocol: wirev1.DebugEventKind_DEBUG_EVENT_KIND_STARTED, want: wiredebugger.EventStarted},
+		{protocol: wirev1.DebugEventKind_DEBUG_EVENT_KIND_CONTINUED, want: wiredebugger.EventContinued},
+		{protocol: wirev1.DebugEventKind_DEBUG_EVENT_KIND_STOPPED, want: wiredebugger.EventStopped},
+		{protocol: wirev1.DebugEventKind_DEBUG_EVENT_KIND_COMPLETED, want: wiredebugger.EventCompleted},
+		{protocol: wirev1.DebugEventKind_DEBUG_EVENT_KIND_FAILED, want: wiredebugger.EventFailed},
+		{protocol: wirev1.DebugEventKind_DEBUG_EVENT_KIND_TERMINATED, want: wiredebugger.EventTerminated},
+		{protocol: wirev1.DebugEventKind_DEBUG_EVENT_KIND_CREATED, want: wiredebugger.EventCreated},
+	}
+	for _, test := range kinds {
+		got, err := convertDebugEventKind(test.protocol)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != test.want {
+			t.Errorf("convertDebugEventKind(%v) = %v, want %v", test.protocol, got, test.want)
+		}
+	}
+
+	if _, err := convertDebugState(wirev1.DebugState(99)); err == nil {
+		t.Fatal("unknown debug state was accepted")
+	}
+	if _, err := convertDebugEventKind(wirev1.DebugEventKind(99)); err == nil {
+		t.Fatal("unknown debug event kind was accepted")
 	}
 }
 
@@ -75,9 +128,24 @@ func TestDebugEventsDistinguishStartedFromContinued(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if started.Kind != DebugEventStarted || continued.Kind != DebugEventContinued ||
-		started.Snapshot.State != DebugRunning || continued.Snapshot.State != DebugRunning {
+	if started.Kind != wiredebugger.EventStarted || continued.Kind != wiredebugger.EventContinued ||
+		started.Snapshot.State != wiredebugger.StateRunning || continued.Snapshot.State != wiredebugger.StateRunning {
 		t.Fatalf("debug transitions lost their distinct kinds: %#v, %#v", started, continued)
+	}
+}
+
+func TestDebugEventsExposeCreatedSnapshot(t *testing.T) {
+	event, err := convertDebugEvent(&wirev1.WatchDebugResponse{
+		Sequence: 1,
+		Kind:     wirev1.DebugEventKind_DEBUG_EVENT_KIND_CREATED,
+		Session:  &wirev1.DebugSession{State: wirev1.DebugState_DEBUG_STATE_CREATED},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if event.Sequence != 1 || event.Kind != wiredebugger.EventCreated || event.Snapshot.State != wiredebugger.StateCreated {
+		t.Fatalf("created snapshot changed: %#v", event)
 	}
 }
 
@@ -121,10 +189,16 @@ func TestDebugConversionsUseUnifiedAPITypesAndPreserveTransportFields(t *testing
 		t.Fatal(err)
 	}
 	if snapshot.StopReason != debugger.ReasonBreakpoint || snapshot.Location == nil ||
-		snapshot.Location.Location != (source.Location{Position: source.Position{Line: 4, Column: 2}, File: "debug.fql"}) ||
+		snapshot.Location.Location != (source.Location{Position: source.Position{Line: 4, Column: 2}, SourceName: "debug.fql"}) ||
 		snapshot.Location.Span != (source.Span{Start: 12, End: 18}) || snapshot.Depth != 3 ||
 		len(snapshot.HitBreakpointIDs) != 1 || snapshot.HitBreakpointIDs[0] != 7 {
 		t.Fatalf("unexpected Unified API snapshot: %#v", snapshot)
+	}
+
+	value.Location.Location.SourceName = "changed.fql"
+	value.HitBreakpointIds[0] = 99
+	if snapshot.Location.Location.SourceName != "debug.fql" || snapshot.HitBreakpointIDs[0] != 7 {
+		t.Fatalf("debug snapshot retained protobuf storage: %#v", snapshot)
 	}
 
 	breakpoint, err := convertBreakpoint(&wirev1.Breakpoint{
@@ -307,7 +381,7 @@ func TestDebugEventsCancelWatchOnMalformedServerValue(t *testing.T) {
 }
 
 func debugTestLocation(file string, line int64, column int64) *wirev1.Location {
-	return &wirev1.Location{File: file, Position: &wirev1.Position{Line: line, Column: column}}
+	return &wirev1.Location{SourceName: file, Position: &wirev1.Position{Line: line, Column: column}}
 }
 
 func debugTestRange(file string, line int64, column int64, start int64, end int64) *wirev1.Range {

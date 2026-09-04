@@ -9,16 +9,27 @@ import "ferret/wire/v1/value.proto";
 
 option go_package = "github.com/MontFerret/wire/gen/ferret/wire/v1;wirev1";
 
+// DebugService exposes connection-owned debugger sessions without changing
+// the DebugSession -> DebugController -> Unified API debugger ownership chain.
 service DebugService {
+  // CreateDebugSession creates a CREATED resource from a reusable debug Plan.
   rpc CreateDebugSession(CreateDebugSessionRequest) returns (CreateDebugSessionResponse);
+  // Start begins execution once; later resumes use Continue or a step command.
   rpc Start(StartRequest) returns (StartResponse);
+  // SetBreakpoint is valid only while the session is CREATED or STOPPED.
   rpc SetBreakpoint(SetBreakpointRequest) returns (SetBreakpointResponse);
   rpc DeleteBreakpoint(DeleteBreakpointRequest) returns (DeleteBreakpointResponse);
+  // Continue publishes RUNNING before invoking the hosted debugger.
   rpc Continue(ContinueRequest) returns (ContinueResponse);
+  // Pause requests a stop without owning or releasing the session.
   rpc Pause(PauseRequest) returns (PauseResponse);
-  rpc Next(NextRequest) returns (NextResponse);
-  rpc Step(StepRequest) returns (StepResponse);
-  rpc Out(OutRequest) returns (OutResponse);
+  // StepOver resumes until the next statement without entering a called function.
+  rpc StepOver(StepOverRequest) returns (StepOverResponse);
+  // StepIn resumes until the next statement, entering a called function when applicable.
+  rpc StepIn(StepInRequest) returns (StepInResponse);
+  // StepOut resumes until execution leaves the current frame.
+  rpc StepOut(StepOutRequest) returns (StepOutResponse);
+  // Inspection RPCs require the current STOPPED state.
   rpc Frames(FramesRequest) returns (FramesResponse);
   rpc FrameLocals(FrameLocalsRequest) returns (FrameLocalsResponse);
   rpc Variables(VariablesRequest) returns (VariablesResponse);
@@ -27,11 +38,13 @@ service DebugService {
   rpc Terminate(TerminateRequest) returns (TerminateResponse);
   // ReleaseDebugSession commits termination and cleanup. The session ID then becomes stale.
   rpc ReleaseDebugSession(ReleaseDebugSessionRequest) returns (ReleaseDebugSessionResponse);
-  // WatchDebug sends the latest published state, then ordered changes through one terminal state.
+  // WatchDebug always replays CREATED, RUNNING, STOPPED, or terminal state,
+  // then sends ordered changes. Disconnecting a watcher never cancels debugging.
   rpc WatchDebug(WatchDebugRequest) returns (stream WatchDebugResponse);
 }
 
 message DebugSessionId {
+  // value is opaque and valid only within the owning logical connection.
   string value = 1;
 }
 
@@ -62,11 +75,15 @@ enum DebugEventKind {
   DEBUG_EVENT_KIND_COMPLETED = 4;
   DEBUG_EVENT_KIND_FAILED = 5;
   DEBUG_EVENT_KIND_TERMINATED = 6;
+  // CREATED is numbered after the original event set to preserve existing meanings.
+  DEBUG_EVENT_KIND_CREATED = 7;
 }
 
 enum BreakpointBindingMode {
+  reserved "BREAKPOINT_BINDING_MODE_NEXT_EXECUTABLE_IN_FILE";
+
   BREAKPOINT_BINDING_MODE_UNSPECIFIED = 0;
-  BREAKPOINT_BINDING_MODE_NEXT_EXECUTABLE_IN_FILE = 1;
+  BREAKPOINT_BINDING_MODE_NEXT_EXECUTABLE_IN_SOURCE = 1;
   BREAKPOINT_BINDING_MODE_EXACT = 2;
   BREAKPOINT_BINDING_MODE_NEXT_EXECUTABLE_IN_FUNCTION = 3;
 }
@@ -76,11 +93,17 @@ message DebugSession {
   reserved "plan_id";
 
   DebugSessionId id = 1;
+  // state is the debug-session lifecycle discriminator.
   DebugState state = 3;
+  // stop_reason is meaningful only while state is STOPPED.
   DebugStopReason stop_reason = 4;
+  // hit_breakpoint_ids is populated only for a breakpoint stop.
   repeated uint64 hit_breakpoint_ids = 6;
+  // output is present only for COMPLETED sessions.
   Output output = 7;
+  // failure is present for failed sessions and may accompany a runtime-error stop.
   Failure failure = 8;
+  // location and depth describe the current stopped state.
   Range location = 9;
   int64 depth = 10;
 }
@@ -89,7 +112,9 @@ message Breakpoint {
   reserved 2, 3, 4, 5, 6, 7;
   reserved "file", "requested_line", "requested_column", "line", "column", "verified";
 
+  // id is positive and owned by this debugger session.
   uint64 id = 1;
+  // requested_location is always present; location is present only when bound.
   Location requested_location = 8;
   Range location = 9;
   uint64 point_id = 10;
@@ -101,6 +126,8 @@ message Breakpoint {
 message DebugValue {
   string type = 1;
   string display = 2;
+  // reference is zero for a scalar value. A positive value is expandable only
+  // within this debug session's current stopped state and becomes stale on resume.
   uint64 reference = 3;
 }
 
@@ -129,6 +156,7 @@ message CreateDebugSessionRequest {
 }
 
 message CreateDebugSessionResponse {
+  // session is present in CREATED state and its CREATED event is already published.
   DebugSession session = 1;
 }
 
@@ -165,7 +193,7 @@ message PauseResponse {
   reserved "session";
 }
 
-message NextRequest {
+message StepOverRequest {
   reserved 1;
   reserved "command";
 
@@ -173,12 +201,12 @@ message NextRequest {
   DebugSessionId debug_session_id = 3;
 }
 
-message NextResponse {
+message StepOverResponse {
   reserved 1;
   reserved "session";
 }
 
-message StepRequest {
+message StepInRequest {
   reserved 1;
   reserved "command";
 
@@ -186,12 +214,12 @@ message StepRequest {
   DebugSessionId debug_session_id = 3;
 }
 
-message StepResponse {
+message StepInResponse {
   reserved 1;
   reserved "session";
 }
 
-message OutRequest {
+message StepOutRequest {
   reserved 1;
   reserved "command";
 
@@ -199,7 +227,7 @@ message OutRequest {
   DebugSessionId debug_session_id = 3;
 }
 
-message OutResponse {
+message StepOutResponse {
   reserved 1;
   reserved "session";
 }
@@ -259,6 +287,7 @@ message FrameLocalsResponse {
 message VariablesRequest {
   ConnectionId connection_id = 1;
   DebugSessionId debug_session_id = 2;
+  // reference is positive and valid only in the current stopped state.
   uint64 reference = 3;
 }
 
@@ -288,12 +317,16 @@ message WatchDebugResponse {
   reserved 1, 3, 4, 5, 6, 7, 8, 9;
   reserved "debug_session_id", "output", "started", "continued", "stopped", "completed", "failed", "terminated";
 
+  // sequence is positive and monotonic within one DebugSession event history.
   uint64 sequence = 2;
+  // kind distinguishes CREATED and the two transitions that produce RUNNING snapshots.
   DebugEventKind kind = 10;
+  // session is the latest complete snapshot, including for replayed terminal state.
   DebugSession session = 11;
 }
 
 message WatchDebugRequest {
+  // Both IDs address a non-owning subscription; cancelling it does not terminate the session.
   ConnectionId connection_id = 1;
   DebugSessionId debug_session_id = 2;
 }

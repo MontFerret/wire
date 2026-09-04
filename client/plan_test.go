@@ -6,6 +6,7 @@ import (
 
 	"github.com/MontFerret/api"
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
+	"github.com/MontFerret/wire/pkg/failure"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -90,10 +91,10 @@ func TestPlanRunOwnsOnlyItsExecution(t *testing.T) {
 		}
 
 		output, err := plan.Run(testClientContext(t), nil, ExecuteOptions{})
-		var failure *Failure
+		var terminalFailure *failure.Failure
 		var wireErr *Error
-		if string(output.Content) != "partial" || !errors.As(err, &failure) || !errors.As(err, &wireErr) ||
-			failure.Message != "execution failed" || wireErr.Message != "execution cleanup failed" {
+		if string(output.Content) != "partial" || !errors.As(err, &terminalFailure) || !errors.As(err, &wireErr) ||
+			terminalFailure.Message != "execution failed" || wireErr.Message != "execution cleanup failed" {
 			t.Fatalf("Plan.Run did not preserve joined errors: %#v, %v", output, err)
 		}
 		_, _, releaseExecutionCalls, releasePlanCalls := server.callSnapshot()

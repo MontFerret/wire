@@ -8,26 +8,86 @@ import (
 
 	"github.com/MontFerret/api"
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
+	wireexecution "github.com/MontFerret/wire/pkg/execution"
+	"github.com/MontFerret/wire/pkg/failure"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
 func TestExecutionStateTerminal(t *testing.T) {
 	tests := []struct {
-		state    ExecutionState
+		state    wireexecution.State
 		terminal bool
 	}{
 		{state: 0},
-		{state: ExecutionRunning},
-		{state: ExecutionCompleted, terminal: true},
-		{state: ExecutionFailed, terminal: true},
-		{state: ExecutionCancelled, terminal: true},
+		{state: wireexecution.StateRunning},
+		{state: wireexecution.StateCompleted, terminal: true},
+		{state: wireexecution.StateFailed, terminal: true},
+		{state: wireexecution.StateCancelled, terminal: true},
 	}
 
 	for _, test := range tests {
 		if got := test.state.Terminal(); got != test.terminal {
 			t.Errorf("ExecutionState(%d).Terminal() = %v, want %v", test.state, got, test.terminal)
 		}
+	}
+}
+
+func TestExecutionStateConversionMapsEveryProtocolValue(t *testing.T) {
+	tests := []struct {
+		protocol wirev1.ExecutionState
+		want     wireexecution.State
+	}{
+		{protocol: wirev1.ExecutionState_EXECUTION_STATE_RUNNING, want: wireexecution.StateRunning},
+		{protocol: wirev1.ExecutionState_EXECUTION_STATE_COMPLETED, want: wireexecution.StateCompleted},
+		{protocol: wirev1.ExecutionState_EXECUTION_STATE_FAILED, want: wireexecution.StateFailed},
+		{protocol: wirev1.ExecutionState_EXECUTION_STATE_CANCELLED, want: wireexecution.StateCancelled},
+	}
+
+	for _, test := range tests {
+		got, err := convertExecutionState(test.protocol)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != test.want {
+			t.Errorf("convertExecutionState(%v) = %v, want %v", test.protocol, got, test.want)
+		}
+	}
+
+	if _, err := convertExecutionState(wirev1.ExecutionState(99)); err == nil {
+		t.Fatal("unknown execution state was accepted")
+	}
+}
+
+func TestExecutionConversionDefensivelyCopiesOutputAndFailure(t *testing.T) {
+	protocol := executionSnapshotProto(
+		"execution-1",
+		wirev1.ExecutionState_EXECUTION_STATE_FAILED,
+		&wirev1.Output{ContentType: "text/plain", Content: []byte("partial")},
+		&wirev1.Failure{
+			Category: wirev1.ErrorCategory_ERROR_CATEGORY_EXECUTION_FAILURE,
+			Message:  "runtime operation failed",
+			DiagnosticSet: &wirev1.DiagnosticSet{Diagnostics: []*wirev1.Diagnostic{{
+				Kind:   "TypeError",
+				Source: &wirev1.Source{Name: "query.fql", Content: "RETURN 1"},
+				Annotations: []*wirev1.DiagnosticAnnotation{{
+					Range: debugTestRange("query.fql", 1, 0, 0, 1),
+				}},
+			}},
+			},
+		},
+	)
+	snapshot, err := convertExecutionSnapshot(protocol)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	protocol.Output.Content[0] = 'X'
+	protocol.Failure.DiagnosticSet.Diagnostics[0].Annotations[0].Message = "changed"
+	if string(snapshot.Output.Content) != "partial" || snapshot.Failure == nil ||
+		snapshot.Failure.Category != failure.CategoryExecution ||
+		snapshot.Failure.Diagnostics[0].Annotations[0].Message != "" {
+		t.Fatalf("execution conversion retained protobuf storage: %#v", snapshot)
 	}
 }
 
@@ -82,8 +142,8 @@ func TestExecutionWaitTerminalStates(t *testing.T) {
 
 			switch {
 			case test.failure:
-				var failure *Failure
-				if !errors.As(err, &failure) || failure.Category != ErrorExecution || failure.Message != "remote execution failed" {
+				var terminalFailure *failure.Failure
+				if !errors.As(err, &terminalFailure) || terminalFailure.Category != failure.CategoryExecution || terminalFailure.Message != "remote execution failed" {
 					t.Fatalf("unexpected terminal failure: %#v", err)
 				}
 			case test.cancelled:

@@ -28,13 +28,17 @@ const (
 // ExecutionServiceClient is the client API for ExecutionService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+//
+// ExecutionService owns asynchronous sessions created from reusable plans.
 type ExecutionServiceClient interface {
 	// Execute publishes an asynchronous execution of an existing reusable plan.
 	Execute(ctx context.Context, in *ExecuteRequest, opts ...grpc.CallOption) (*ExecuteResponse, error)
+	// CancelExecution requests cancellation without releasing the execution.
 	CancelExecution(ctx context.Context, in *CancelExecutionRequest, opts ...grpc.CallOption) (*CancelExecutionResponse, error)
 	// ReleaseExecution commits cancellation and cleanup. The execution ID then becomes stale.
 	ReleaseExecution(ctx context.Context, in *ReleaseExecutionRequest, opts ...grpc.CallOption) (*ReleaseExecutionResponse, error)
 	// WatchExecution sends the latest snapshot, then ordered changes through one terminal snapshot.
+	// Disconnecting a watcher never cancels or releases the execution.
 	WatchExecution(ctx context.Context, in *WatchExecutionRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[WatchExecutionResponse], error)
 }
 
@@ -98,13 +102,17 @@ type ExecutionService_WatchExecutionClient = grpc.ServerStreamingClient[WatchExe
 // ExecutionServiceServer is the server API for ExecutionService service.
 // All implementations must embed UnimplementedExecutionServiceServer
 // for forward compatibility.
+//
+// ExecutionService owns asynchronous sessions created from reusable plans.
 type ExecutionServiceServer interface {
 	// Execute publishes an asynchronous execution of an existing reusable plan.
 	Execute(context.Context, *ExecuteRequest) (*ExecuteResponse, error)
+	// CancelExecution requests cancellation without releasing the execution.
 	CancelExecution(context.Context, *CancelExecutionRequest) (*CancelExecutionResponse, error)
 	// ReleaseExecution commits cancellation and cleanup. The execution ID then becomes stale.
 	ReleaseExecution(context.Context, *ReleaseExecutionRequest) (*ReleaseExecutionResponse, error)
 	// WatchExecution sends the latest snapshot, then ordered changes through one terminal snapshot.
+	// Disconnecting a watcher never cancels or releases the execution.
 	WatchExecution(*WatchExecutionRequest, grpc.ServerStreamingServer[WatchExecutionResponse]) error
 	mustEmbedUnimplementedExecutionServiceServer()
 }

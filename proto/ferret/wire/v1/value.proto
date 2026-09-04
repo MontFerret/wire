@@ -14,7 +14,10 @@ message Value {
   oneof value {
     google.protobuf.NullValue null_value = 1;
     bool boolean_value = 2;
+    // integer_value preserves the complete signed 64-bit range exactly and is
+    // represented as a decimal string by protobuf JSON.
     sint64 integer_value = 3;
+    // float_value must be finite; Wire rejects protobuf JSON NaN and infinity spellings.
     double float_value = 4;
     string string_value = 5;
     bytes binary_value = 6;
@@ -32,5 +35,6 @@ message ObjectValue {
 }
 
 message Parameters {
+  // values maps non-empty parameter names to portable values.
   map<string, Value> values = 1;
 }

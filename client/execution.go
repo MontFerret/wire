@@ -5,8 +5,9 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/MontFerret/api"
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
-	"github.com/MontFerret/wire/internal/lifecycle"
+	"github.com/MontFerret/wire/pkg/execution"
 )
 
 type (
@@ -15,34 +16,12 @@ type (
 		OutputContentType string
 	}
 
-	// Output preserves the Unified API encoded content-type and byte abstraction.
-	Output struct {
-		ContentType string
-		Content     []byte
-	}
-
-	// ExecutionState describes the lifecycle state in an ExecutionSnapshot.
-	ExecutionState uint8
-
-	// ExecutionSnapshot is the state published for one remote execution event.
-	ExecutionSnapshot struct {
-		State   ExecutionState
-		Output  *Output
-		Failure *Failure
-	}
-
-	// ExecutionEvent carries an ordered execution snapshot.
-	ExecutionEvent struct {
-		Sequence uint64
-		Snapshot ExecutionSnapshot
-	}
-
 	// Execution is one remote execution owned by its Plan.
 	Execution struct {
 		client *Client
 		plan   *Plan
 		id     string
-		close  *lifecycle.Close
+		close  *closeState
 	}
 
 	// ExecutionEvents receives the current execution snapshot followed by ordered
@@ -51,14 +30,6 @@ type (
 		stream wirev1.ExecutionService_WatchExecutionClient
 		cancel context.CancelFunc
 	}
-)
-
-// Execution lifecycle states.
-const (
-	ExecutionRunning ExecutionState = iota + 1
-	ExecutionCompleted
-	ExecutionFailed
-	ExecutionCancelled
 )
 
 // Execute publishes a remote execution of this plan. Output remains the Unified API
@@ -88,7 +59,7 @@ func (p *Plan) Execute(ctx context.Context, parameters Parameters, options Execu
 		return nil, errors.New("Wire server returned an invalid execution")
 	}
 
-	return &Execution{client: p.client, plan: p, id: value.GetId().GetValue(), close: &lifecycle.Close{}}, nil
+	return &Execution{client: p.client, plan: p, id: value.GetId().GetValue(), close: &closeState{}}, nil
 }
 
 // Cancel requests execution cancellation. The ordered terminal cancellation
@@ -128,48 +99,49 @@ func (e *Execution) Watch(ctx context.Context) (*ExecutionEvents, error) {
 }
 
 // Wait observes execution events until the remote execution reaches a terminal
-// state. A failed execution returns *Failure, while remote cancellation returns
-// ErrExecutionCancelled. Caller cancellation returns the waiting context's
-// error. Wait does not release the execution or retain mutable snapshot state.
-func (e *Execution) Wait(ctx context.Context) (Output, error) {
+// state. A failed execution returns *failure.Failure, while remote cancellation
+// returns ErrExecutionCancelled. Caller cancellation returns the waiting
+// context's error. Wait does not release the execution or retain mutable
+// snapshot state.
+func (e *Execution) Wait(ctx context.Context) (api.Output, error) {
 	events, err := e.Watch(ctx)
 	if err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
-			return Output{}, ctxErr
+			return api.Output{}, ctxErr
 		}
 
-		return Output{}, err
+		return api.Output{}, err
 	}
 
 	for {
 		event, receiveErr := events.Recv()
 		if receiveErr != nil {
 			if ctxErr := ctx.Err(); ctxErr != nil {
-				return Output{}, ctxErr
+				return api.Output{}, ctxErr
 			}
 
-			return Output{}, receiveErr
+			return api.Output{}, receiveErr
 		}
 
 		if !event.Snapshot.State.Terminal() {
 			continue
 		}
 
-		output := event.Snapshot.output()
+		output := executionOutput(event.Snapshot)
 		switch event.Snapshot.State {
-		case ExecutionCompleted:
+		case execution.StateCompleted:
 			if event.Snapshot.Output == nil {
-				return Output{}, errors.New("Wire server returned a completed execution without output")
+				return api.Output{}, errors.New("Wire server returned a completed execution without output")
 			}
 
 			return output, nil
-		case ExecutionFailed:
+		case execution.StateFailed:
 			if event.Snapshot.Failure == nil {
 				return output, errors.New("Wire server returned a failed execution without failure details")
 			}
 
 			return output, event.Snapshot.Failure
-		case ExecutionCancelled:
+		case execution.StateCancelled:
 			return output, ErrExecutionCancelled
 		}
 	}
@@ -191,40 +163,36 @@ func (e *Execution) Close(ctx context.Context) error {
 
 // Recv blocks for the next ordered execution event. It releases the local
 // stream when a terminal event or error is observed.
-func (events *ExecutionEvents) Recv() (ExecutionEvent, error) {
+func (events *ExecutionEvents) Recv() (execution.Event, error) {
 	if events == nil || events.stream == nil {
-		return ExecutionEvent{}, errors.New("execution event receiver is nil")
+		return execution.Event{}, errors.New("execution event receiver is nil")
 	}
 
 	value, err := events.stream.Recv()
 	if err != nil {
 		events.cancel()
 
-		return ExecutionEvent{}, decodeError(err)
+		return execution.Event{}, decodeError(err)
 	}
 
 	if value.GetExecution() == nil {
 		events.cancel()
 
-		return ExecutionEvent{}, fmt.Errorf("Wire server returned an empty execution event")
+		return execution.Event{}, fmt.Errorf("Wire server returned an empty execution event")
 	}
 
-	event := convertExecutionEvent(value)
+	event, err := convertExecutionEvent(value)
+	if err != nil {
+		events.cancel()
+
+		return execution.Event{}, err
+	}
+
 	if event.Snapshot.State.Terminal() {
 		events.cancel()
 	}
 
 	return event, nil
-}
-
-// Terminal reports whether the execution has reached a final state.
-func (state ExecutionState) Terminal() bool {
-	switch state {
-	case ExecutionCompleted, ExecutionFailed, ExecutionCancelled:
-		return true
-	default:
-		return false
-	}
 }
 
 func (e *Execution) checkOpen() error {
@@ -243,12 +211,12 @@ func (e *Execution) release(ctx context.Context) error {
 	return e.client.releaseExecution(ctx, e.id)
 }
 
-func (snapshot ExecutionSnapshot) output() Output {
+func executionOutput(snapshot execution.Snapshot) api.Output {
 	if snapshot.Output == nil {
-		return Output{}
+		return api.Output{}
 	}
 
-	return Output{
+	return api.Output{
 		ContentType: snapshot.Output.ContentType,
 		Content:     append([]byte(nil), snapshot.Output.Content...),
 	}

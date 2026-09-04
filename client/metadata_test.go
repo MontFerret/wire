@@ -1,12 +1,16 @@
 package client
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/MontFerret/wire/pkg/execution"
+)
 
 func TestRuntimeInfoReturnsDefensiveIdentityCopy(t *testing.T) {
 	client := &Client{info: RuntimeInfo{
 		APIIdentity:     "ferret.wire",
 		WireVersion:     "v1",
-		RuntimeIdentity: &RuntimeIdentity{Name: "host", Version: "1.0.0", InstanceID: "instance"},
+		RuntimeIdentity: &execution.Identity{Name: "host", Version: "1.0.0", InstanceID: "instance"},
 	}}
 
 	first := client.RuntimeInfo()

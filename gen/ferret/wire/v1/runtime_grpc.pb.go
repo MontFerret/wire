@@ -26,6 +26,8 @@ const (
 // RuntimeServiceClient is the client API for RuntimeService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+//
+// RuntimeService owns logical Wire connections independently of the physical transport.
 type RuntimeServiceClient interface {
 	// Servers apply finite host-configured limits to messages and logical resources.
 	// Connect creates the logical ownership scope for all resources created with
@@ -76,6 +78,8 @@ func (c *runtimeServiceClient) CloseConnection(ctx context.Context, in *CloseCon
 // RuntimeServiceServer is the server API for RuntimeService service.
 // All implementations must embed UnimplementedRuntimeServiceServer
 // for forward compatibility.
+//
+// RuntimeService owns logical Wire connections independently of the physical transport.
 type RuntimeServiceServer interface {
 	// Servers apply finite host-configured limits to messages and logical resources.
 	// Connect creates the logical ownership scope for all resources created with

@@ -24,18 +24,17 @@ const (
 type ErrorCategory int32
 
 const (
-	ErrorCategory_ERROR_CATEGORY_UNSPECIFIED               ErrorCategory = 0
-	ErrorCategory_ERROR_CATEGORY_COMPILATION_FAILURE       ErrorCategory = 2
-	ErrorCategory_ERROR_CATEGORY_EXECUTION_FAILURE         ErrorCategory = 3
-	ErrorCategory_ERROR_CATEGORY_PLAN_NOT_FOUND            ErrorCategory = 4
-	ErrorCategory_ERROR_CATEGORY_EXECUTION_NOT_FOUND       ErrorCategory = 5
-	ErrorCategory_ERROR_CATEGORY_DEBUG_SESSION_NOT_FOUND   ErrorCategory = 6
-	ErrorCategory_ERROR_CATEGORY_CONNECTION_NOT_FOUND      ErrorCategory = 7
-	ErrorCategory_ERROR_CATEGORY_INVALID_STATE             ErrorCategory = 8
-	ErrorCategory_ERROR_CATEGORY_INTERNAL_RUNTIME_FAILURE  ErrorCategory = 10
-	ErrorCategory_ERROR_CATEGORY_WATCHER_LAGGED            ErrorCategory = 11
-	ErrorCategory_ERROR_CATEGORY_VALUE_REFERENCE_NOT_FOUND ErrorCategory = 13
-	ErrorCategory_ERROR_CATEGORY_BREAKPOINT_NOT_FOUND      ErrorCategory = 15
+	ErrorCategory_ERROR_CATEGORY_UNSPECIFIED              ErrorCategory = 0
+	ErrorCategory_ERROR_CATEGORY_COMPILATION_FAILURE      ErrorCategory = 2
+	ErrorCategory_ERROR_CATEGORY_EXECUTION_FAILURE        ErrorCategory = 3
+	ErrorCategory_ERROR_CATEGORY_PLAN_NOT_FOUND           ErrorCategory = 4
+	ErrorCategory_ERROR_CATEGORY_EXECUTION_NOT_FOUND      ErrorCategory = 5
+	ErrorCategory_ERROR_CATEGORY_DEBUG_SESSION_NOT_FOUND  ErrorCategory = 6
+	ErrorCategory_ERROR_CATEGORY_CONNECTION_NOT_FOUND     ErrorCategory = 7
+	ErrorCategory_ERROR_CATEGORY_INVALID_STATE            ErrorCategory = 8
+	ErrorCategory_ERROR_CATEGORY_INTERNAL_RUNTIME_FAILURE ErrorCategory = 10
+	ErrorCategory_ERROR_CATEGORY_WATCHER_LAGGED           ErrorCategory = 11
+	ErrorCategory_ERROR_CATEGORY_BREAKPOINT_NOT_FOUND     ErrorCategory = 15
 )
 
 // Enum value maps for ErrorCategory.
@@ -51,22 +50,20 @@ var (
 		8:  "ERROR_CATEGORY_INVALID_STATE",
 		10: "ERROR_CATEGORY_INTERNAL_RUNTIME_FAILURE",
 		11: "ERROR_CATEGORY_WATCHER_LAGGED",
-		13: "ERROR_CATEGORY_VALUE_REFERENCE_NOT_FOUND",
 		15: "ERROR_CATEGORY_BREAKPOINT_NOT_FOUND",
 	}
 	ErrorCategory_value = map[string]int32{
-		"ERROR_CATEGORY_UNSPECIFIED":               0,
-		"ERROR_CATEGORY_COMPILATION_FAILURE":       2,
-		"ERROR_CATEGORY_EXECUTION_FAILURE":         3,
-		"ERROR_CATEGORY_PLAN_NOT_FOUND":            4,
-		"ERROR_CATEGORY_EXECUTION_NOT_FOUND":       5,
-		"ERROR_CATEGORY_DEBUG_SESSION_NOT_FOUND":   6,
-		"ERROR_CATEGORY_CONNECTION_NOT_FOUND":      7,
-		"ERROR_CATEGORY_INVALID_STATE":             8,
-		"ERROR_CATEGORY_INTERNAL_RUNTIME_FAILURE":  10,
-		"ERROR_CATEGORY_WATCHER_LAGGED":            11,
-		"ERROR_CATEGORY_VALUE_REFERENCE_NOT_FOUND": 13,
-		"ERROR_CATEGORY_BREAKPOINT_NOT_FOUND":      15,
+		"ERROR_CATEGORY_UNSPECIFIED":              0,
+		"ERROR_CATEGORY_COMPILATION_FAILURE":      2,
+		"ERROR_CATEGORY_EXECUTION_FAILURE":        3,
+		"ERROR_CATEGORY_PLAN_NOT_FOUND":           4,
+		"ERROR_CATEGORY_EXECUTION_NOT_FOUND":      5,
+		"ERROR_CATEGORY_DEBUG_SESSION_NOT_FOUND":  6,
+		"ERROR_CATEGORY_CONNECTION_NOT_FOUND":     7,
+		"ERROR_CATEGORY_INVALID_STATE":            8,
+		"ERROR_CATEGORY_INTERNAL_RUNTIME_FAILURE": 10,
+		"ERROR_CATEGORY_WATCHER_LAGGED":           11,
+		"ERROR_CATEGORY_BREAKPOINT_NOT_FOUND":     15,
 	}
 )
 
@@ -99,8 +96,9 @@ func (ErrorCategory) EnumDescriptor() ([]byte, []int) {
 
 // ConnectionId is an opaque, server-issued logical connection identifier.
 type ConnectionId struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Value         string                 `protobuf:"bytes,1,opt,name=value,proto3" json:"value,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// value is opaque, non-empty, and scoped to the server that issued it.
+	Value         string `protobuf:"bytes,1,opt,name=value,proto3" json:"value,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -144,9 +142,11 @@ func (x *ConnectionId) GetValue() string {
 
 // ProtocolInfo identifies the versioned Wire transport contract.
 type ProtocolInfo struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	Version       string                 `protobuf:"bytes,2,opt,name=version,proto3" json:"version,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// name identifies the Wire protocol independently of the hosted runtime.
+	Name string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	// version identifies the protobuf contract version.
+	Version       string `protobuf:"bytes,2,opt,name=version,proto3" json:"version,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -195,12 +195,15 @@ func (x *ProtocolInfo) GetVersion() string {
 	return ""
 }
 
-// RuntimeIdentity is optional host-supplied runtime implementation metadata.
+// RuntimeIdentity is optional host-supplied identity for the hosted runtime implementation.
 type RuntimeIdentity struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	Version       string                 `protobuf:"bytes,2,opt,name=version,proto3" json:"version,omitempty"`
-	InstanceId    string                 `protobuf:"bytes,3,opt,name=instance_id,json=instanceId,proto3" json:"instance_id,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// name is required whenever RuntimeIdentity is present.
+	Name string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	// version is optional and defined by the host.
+	Version string `protobuf:"bytes,2,opt,name=version,proto3" json:"version,omitempty"`
+	// instance_id optionally distinguishes one hosted runtime instance.
+	InstanceId    string `protobuf:"bytes,3,opt,name=instance_id,json=instanceId,proto3" json:"instance_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -256,6 +259,7 @@ func (x *RuntimeIdentity) GetInstanceId() string {
 	return ""
 }
 
+// ConnectResponse is sent exactly once; the stream then remains open as the connection lifetime signal.
 type ConnectResponse struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	ConnectionId    *ConnectionId          `protobuf:"bytes,3,opt,name=connection_id,json=connectionId,proto3" json:"connection_id,omitempty"`
@@ -316,6 +320,7 @@ func (x *ConnectResponse) GetRuntimeIdentity() *RuntimeIdentity {
 	return nil
 }
 
+// ConnectRequest has no transport- or client-identity fields.
 type ConnectRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -477,6 +482,204 @@ func (x *ErrorDetail) GetCategory() ErrorCategory {
 	return ErrorCategory_ERROR_CATEGORY_UNSPECIFIED
 }
 
+// DiagnosticAnnotation preserves one ordered source range reported by the Unified API.
+type DiagnosticAnnotation struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Range *Range                 `protobuf:"bytes,1,opt,name=range,proto3" json:"range,omitempty"`
+	// message may be empty when the range needs no separate label.
+	Message string `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	// primary distinguishes the principal range from related ranges.
+	Primary       bool `protobuf:"varint,3,opt,name=primary,proto3" json:"primary,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DiagnosticAnnotation) Reset() {
+	*x = DiagnosticAnnotation{}
+	mi := &file_ferret_wire_v1_runtime_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DiagnosticAnnotation) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DiagnosticAnnotation) ProtoMessage() {}
+
+func (x *DiagnosticAnnotation) ProtoReflect() protoreflect.Message {
+	mi := &file_ferret_wire_v1_runtime_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DiagnosticAnnotation.ProtoReflect.Descriptor instead.
+func (*DiagnosticAnnotation) Descriptor() ([]byte, []int) {
+	return file_ferret_wire_v1_runtime_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *DiagnosticAnnotation) GetRange() *Range {
+	if x != nil {
+		return x.Range
+	}
+	return nil
+}
+
+func (x *DiagnosticAnnotation) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *DiagnosticAnnotation) GetPrimary() bool {
+	if x != nil {
+		return x.Primary
+	}
+	return false
+}
+
+// Diagnostic is the portable Unified API diagnostic contract.
+type Diagnostic struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// kind is an open producer-defined category, not a closed Wire enum.
+	Kind    string `protobuf:"bytes,1,opt,name=kind,proto3" json:"kind,omitempty"`
+	Message string `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	Hint    string `protobuf:"bytes,3,opt,name=hint,proto3" json:"hint,omitempty"`
+	Note    string `protobuf:"bytes,4,opt,name=note,proto3" json:"note,omitempty"`
+	// source preserves the complete semantic source name and content reported by the runtime.
+	Source *Source `protobuf:"bytes,7,opt,name=source,proto3" json:"source,omitempty"`
+	// annotations preserve the producer's order and primary markers.
+	Annotations   []*DiagnosticAnnotation `protobuf:"bytes,8,rep,name=annotations,proto3" json:"annotations,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Diagnostic) Reset() {
+	*x = Diagnostic{}
+	mi := &file_ferret_wire_v1_runtime_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Diagnostic) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Diagnostic) ProtoMessage() {}
+
+func (x *Diagnostic) ProtoReflect() protoreflect.Message {
+	mi := &file_ferret_wire_v1_runtime_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Diagnostic.ProtoReflect.Descriptor instead.
+func (*Diagnostic) Descriptor() ([]byte, []int) {
+	return file_ferret_wire_v1_runtime_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *Diagnostic) GetKind() string {
+	if x != nil {
+		return x.Kind
+	}
+	return ""
+}
+
+func (x *Diagnostic) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *Diagnostic) GetHint() string {
+	if x != nil {
+		return x.Hint
+	}
+	return ""
+}
+
+func (x *Diagnostic) GetNote() string {
+	if x != nil {
+		return x.Note
+	}
+	return ""
+}
+
+func (x *Diagnostic) GetSource() *Source {
+	if x != nil {
+		return x.Source
+	}
+	return nil
+}
+
+func (x *Diagnostic) GetAnnotations() []*DiagnosticAnnotation {
+	if x != nil {
+		return x.Annotations
+	}
+	return nil
+}
+
+// DiagnosticSet transports one ordered diagnostics.Diagnostics collection.
+// Unary failures attach it as a separate gRPC status detail beside ErrorDetail;
+// Wire never reconstructs it by parsing an error message.
+type DiagnosticSet struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Diagnostics   []*Diagnostic          `protobuf:"bytes,1,rep,name=diagnostics,proto3" json:"diagnostics,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DiagnosticSet) Reset() {
+	*x = DiagnosticSet{}
+	mi := &file_ferret_wire_v1_runtime_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DiagnosticSet) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DiagnosticSet) ProtoMessage() {}
+
+func (x *DiagnosticSet) ProtoReflect() protoreflect.Message {
+	mi := &file_ferret_wire_v1_runtime_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DiagnosticSet.ProtoReflect.Descriptor instead.
+func (*DiagnosticSet) Descriptor() ([]byte, []int) {
+	return file_ferret_wire_v1_runtime_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *DiagnosticSet) GetDiagnostics() []*Diagnostic {
+	if x != nil {
+		return x.Diagnostics
+	}
+	return nil
+}
+
 // Output is the Unified API encoded output contract. Wire does not expose runtime values.
 type Output struct {
 	state       protoimpl.MessageState `protogen:"open.v1"`
@@ -489,7 +692,7 @@ type Output struct {
 
 func (x *Output) Reset() {
 	*x = Output{}
-	mi := &file_ferret_wire_v1_runtime_proto_msgTypes[8]
+	mi := &file_ferret_wire_v1_runtime_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -501,7 +704,7 @@ func (x *Output) String() string {
 func (*Output) ProtoMessage() {}
 
 func (x *Output) ProtoReflect() protoreflect.Message {
-	mi := &file_ferret_wire_v1_runtime_proto_msgTypes[8]
+	mi := &file_ferret_wire_v1_runtime_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -514,7 +717,7 @@ func (x *Output) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Output.ProtoReflect.Descriptor instead.
 func (*Output) Descriptor() ([]byte, []int) {
-	return file_ferret_wire_v1_runtime_proto_rawDescGZIP(), []int{8}
+	return file_ferret_wire_v1_runtime_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *Output) GetContentType() string {
@@ -533,16 +736,19 @@ func (x *Output) GetContent() []byte {
 
 // Failure is a sanitized asynchronous runtime failure.
 type Failure struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Category      ErrorCategory          `protobuf:"varint,1,opt,name=category,proto3,enum=ferret.wire.v1.ErrorCategory" json:"category,omitempty"`
-	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	Category ErrorCategory          `protobuf:"varint,1,opt,name=category,proto3,enum=ferret.wire.v1.ErrorCategory" json:"category,omitempty"`
+	// message is sanitized and never contains an arbitrary runtime error string.
+	Message string `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	// diagnostic_set is present only when the runtime returned portable Unified API diagnostics.
+	DiagnosticSet *DiagnosticSet `protobuf:"bytes,4,opt,name=diagnostic_set,json=diagnosticSet,proto3" json:"diagnostic_set,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Failure) Reset() {
 	*x = Failure{}
-	mi := &file_ferret_wire_v1_runtime_proto_msgTypes[9]
+	mi := &file_ferret_wire_v1_runtime_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -554,7 +760,7 @@ func (x *Failure) String() string {
 func (*Failure) ProtoMessage() {}
 
 func (x *Failure) ProtoReflect() protoreflect.Message {
-	mi := &file_ferret_wire_v1_runtime_proto_msgTypes[9]
+	mi := &file_ferret_wire_v1_runtime_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -567,7 +773,7 @@ func (x *Failure) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Failure.ProtoReflect.Descriptor instead.
 func (*Failure) Descriptor() ([]byte, []int) {
-	return file_ferret_wire_v1_runtime_proto_rawDescGZIP(), []int{9}
+	return file_ferret_wire_v1_runtime_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *Failure) GetCategory() ErrorCategory {
@@ -584,11 +790,18 @@ func (x *Failure) GetMessage() string {
 	return ""
 }
 
+func (x *Failure) GetDiagnosticSet() *DiagnosticSet {
+	if x != nil {
+		return x.DiagnosticSet
+	}
+	return nil
+}
+
 var File_ferret_wire_v1_runtime_proto protoreflect.FileDescriptor
 
 const file_ferret_wire_v1_runtime_proto_rawDesc = "" +
 	"\n" +
-	"\x1cferret/wire/v1/runtime.proto\x12\x0eferret.wire.v1\"$\n" +
+	"\x1cferret/wire/v1/runtime.proto\x12\x0eferret.wire.v1\x1a\x1bferret/wire/v1/source.proto\"$\n" +
 	"\fConnectionId\x12\x14\n" +
 	"\x05value\x18\x01 \x01(\tR\x05value\"<\n" +
 	"\fProtocolInfo\x12\x12\n" +
@@ -608,13 +821,28 @@ const file_ferret_wire_v1_runtime_proto_rawDesc = "" +
 	"\rconnection_id\x18\x01 \x01(\v2\x1c.ferret.wire.v1.ConnectionIdR\fconnectionId\"\x19\n" +
 	"\x17CloseConnectionResponse\"\x8d\x01\n" +
 	"\vErrorDetail\x129\n" +
-	"\bcategory\x18\x01 \x01(\x0e2\x1d.ferret.wire.v1.ErrorCategoryR\bcategoryJ\x04\b\x02\x10\x03J\x04\b\x03\x10\x04J\x04\b\x04\x10\x05J\x04\b\x05\x10\x06R\amessageR\bresourceR\vresource_idR\vdiagnostics\"K\n" +
+	"\bcategory\x18\x01 \x01(\x0e2\x1d.ferret.wire.v1.ErrorCategoryR\bcategoryJ\x04\b\x02\x10\x03J\x04\b\x03\x10\x04J\x04\b\x04\x10\x05J\x04\b\x05\x10\x06R\amessageR\bresourceR\vresource_idR\vdiagnostics\"w\n" +
+	"\x14DiagnosticAnnotation\x12+\n" +
+	"\x05range\x18\x01 \x01(\v2\x15.ferret.wire.v1.RangeR\x05range\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x12\x18\n" +
+	"\aprimary\x18\x03 \x01(\bR\aprimary\"\xfe\x01\n" +
+	"\n" +
+	"Diagnostic\x12\x12\n" +
+	"\x04kind\x18\x01 \x01(\tR\x04kind\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x12\x12\n" +
+	"\x04hint\x18\x03 \x01(\tR\x04hint\x12\x12\n" +
+	"\x04note\x18\x04 \x01(\tR\x04note\x12.\n" +
+	"\x06source\x18\a \x01(\v2\x16.ferret.wire.v1.SourceR\x06source\x12F\n" +
+	"\vannotations\x18\b \x03(\v2$.ferret.wire.v1.DiagnosticAnnotationR\vannotationsJ\x04\b\x05\x10\x06J\x04\b\x06\x10\aR\x0fsource_identityR\x05spans\"M\n" +
+	"\rDiagnosticSet\x12<\n" +
+	"\vdiagnostics\x18\x01 \x03(\v2\x1a.ferret.wire.v1.DiagnosticR\vdiagnostics\"K\n" +
 	"\x06Output\x12!\n" +
 	"\fcontent_type\x18\x01 \x01(\tR\vcontentType\x12\x18\n" +
-	"\acontent\x18\x02 \x01(\fR\acontentR\x04data\"q\n" +
+	"\acontent\x18\x02 \x01(\fR\acontentR\x04data\"\xb7\x01\n" +
 	"\aFailure\x129\n" +
 	"\bcategory\x18\x01 \x01(\x0e2\x1d.ferret.wire.v1.ErrorCategoryR\bcategory\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\tR\amessageJ\x04\b\x03\x10\x04R\vdiagnostics*\x82\x05\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x12D\n" +
+	"\x0ediagnostic_set\x18\x04 \x01(\v2\x1d.ferret.wire.v1.DiagnosticSetR\rdiagnosticSetJ\x04\b\x03\x10\x04R\vdiagnostics*\x84\x05\n" +
 	"\rErrorCategory\x12\x1e\n" +
 	"\x1aERROR_CATEGORY_UNSPECIFIED\x10\x00\x12&\n" +
 	"\"ERROR_CATEGORY_COMPILATION_FAILURE\x10\x02\x12$\n" +
@@ -626,9 +854,8 @@ const file_ferret_wire_v1_runtime_proto_rawDesc = "" +
 	"\x1cERROR_CATEGORY_INVALID_STATE\x10\b\x12+\n" +
 	"'ERROR_CATEGORY_INTERNAL_RUNTIME_FAILURE\x10\n" +
 	"\x12!\n" +
-	"\x1dERROR_CATEGORY_WATCHER_LAGGED\x10\v\x12,\n" +
-	"(ERROR_CATEGORY_VALUE_REFERENCE_NOT_FOUND\x10\r\x12'\n" +
-	"#ERROR_CATEGORY_BREAKPOINT_NOT_FOUND\x10\x0f\"\x04\b\x01\x10\x01\"\x04\b\t\x10\t\"\x04\b\f\x10\f\"\x04\b\x0e\x10\x0e*\x1eERROR_CATEGORY_INVALID_REQUEST*%ERROR_CATEGORY_UNSUPPORTED_CAPABILITY*\x18ERROR_CATEGORY_CANCELLED*!ERROR_CATEGORY_RESOURCE_EXHAUSTED2\xc2\x01\n" +
+	"\x1dERROR_CATEGORY_WATCHER_LAGGED\x10\v\x12'\n" +
+	"#ERROR_CATEGORY_BREAKPOINT_NOT_FOUND\x10\x0f\"\x04\b\x01\x10\x01\"\x04\b\t\x10\t\"\x04\b\f\x10\f\"\x04\b\r\x10\r\"\x04\b\x0e\x10\x0e*\x1eERROR_CATEGORY_INVALID_REQUEST*%ERROR_CATEGORY_UNSUPPORTED_CAPABILITY*\x18ERROR_CATEGORY_CANCELLED*(ERROR_CATEGORY_VALUE_REFERENCE_NOT_FOUND*!ERROR_CATEGORY_RESOURCE_EXHAUSTED2\xc2\x01\n" +
 	"\x0eRuntimeService\x12L\n" +
 	"\aConnect\x12\x1e.ferret.wire.v1.ConnectRequest\x1a\x1f.ferret.wire.v1.ConnectResponse0\x01\x12b\n" +
 	"\x0fCloseConnection\x12&.ferret.wire.v1.CloseConnectionRequest\x1a'.ferret.wire.v1.CloseConnectionResponseB6Z4github.com/MontFerret/wire/gen/ferret/wire/v1;wirev1b\x06proto3"
@@ -646,7 +873,7 @@ func file_ferret_wire_v1_runtime_proto_rawDescGZIP() []byte {
 }
 
 var file_ferret_wire_v1_runtime_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_ferret_wire_v1_runtime_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
+var file_ferret_wire_v1_runtime_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
 var file_ferret_wire_v1_runtime_proto_goTypes = []any{
 	(ErrorCategory)(0),              // 0: ferret.wire.v1.ErrorCategory
 	(*ConnectionId)(nil),            // 1: ferret.wire.v1.ConnectionId
@@ -657,25 +884,35 @@ var file_ferret_wire_v1_runtime_proto_goTypes = []any{
 	(*CloseConnectionRequest)(nil),  // 6: ferret.wire.v1.CloseConnectionRequest
 	(*CloseConnectionResponse)(nil), // 7: ferret.wire.v1.CloseConnectionResponse
 	(*ErrorDetail)(nil),             // 8: ferret.wire.v1.ErrorDetail
-	(*Output)(nil),                  // 9: ferret.wire.v1.Output
-	(*Failure)(nil),                 // 10: ferret.wire.v1.Failure
+	(*DiagnosticAnnotation)(nil),    // 9: ferret.wire.v1.DiagnosticAnnotation
+	(*Diagnostic)(nil),              // 10: ferret.wire.v1.Diagnostic
+	(*DiagnosticSet)(nil),           // 11: ferret.wire.v1.DiagnosticSet
+	(*Output)(nil),                  // 12: ferret.wire.v1.Output
+	(*Failure)(nil),                 // 13: ferret.wire.v1.Failure
+	(*Range)(nil),                   // 14: ferret.wire.v1.Range
+	(*Source)(nil),                  // 15: ferret.wire.v1.Source
 }
 var file_ferret_wire_v1_runtime_proto_depIdxs = []int32{
-	1, // 0: ferret.wire.v1.ConnectResponse.connection_id:type_name -> ferret.wire.v1.ConnectionId
-	2, // 1: ferret.wire.v1.ConnectResponse.protocol:type_name -> ferret.wire.v1.ProtocolInfo
-	3, // 2: ferret.wire.v1.ConnectResponse.runtime_identity:type_name -> ferret.wire.v1.RuntimeIdentity
-	1, // 3: ferret.wire.v1.CloseConnectionRequest.connection_id:type_name -> ferret.wire.v1.ConnectionId
-	0, // 4: ferret.wire.v1.ErrorDetail.category:type_name -> ferret.wire.v1.ErrorCategory
-	0, // 5: ferret.wire.v1.Failure.category:type_name -> ferret.wire.v1.ErrorCategory
-	5, // 6: ferret.wire.v1.RuntimeService.Connect:input_type -> ferret.wire.v1.ConnectRequest
-	6, // 7: ferret.wire.v1.RuntimeService.CloseConnection:input_type -> ferret.wire.v1.CloseConnectionRequest
-	4, // 8: ferret.wire.v1.RuntimeService.Connect:output_type -> ferret.wire.v1.ConnectResponse
-	7, // 9: ferret.wire.v1.RuntimeService.CloseConnection:output_type -> ferret.wire.v1.CloseConnectionResponse
-	8, // [8:10] is the sub-list for method output_type
-	6, // [6:8] is the sub-list for method input_type
-	6, // [6:6] is the sub-list for extension type_name
-	6, // [6:6] is the sub-list for extension extendee
-	0, // [0:6] is the sub-list for field type_name
+	1,  // 0: ferret.wire.v1.ConnectResponse.connection_id:type_name -> ferret.wire.v1.ConnectionId
+	2,  // 1: ferret.wire.v1.ConnectResponse.protocol:type_name -> ferret.wire.v1.ProtocolInfo
+	3,  // 2: ferret.wire.v1.ConnectResponse.runtime_identity:type_name -> ferret.wire.v1.RuntimeIdentity
+	1,  // 3: ferret.wire.v1.CloseConnectionRequest.connection_id:type_name -> ferret.wire.v1.ConnectionId
+	0,  // 4: ferret.wire.v1.ErrorDetail.category:type_name -> ferret.wire.v1.ErrorCategory
+	14, // 5: ferret.wire.v1.DiagnosticAnnotation.range:type_name -> ferret.wire.v1.Range
+	15, // 6: ferret.wire.v1.Diagnostic.source:type_name -> ferret.wire.v1.Source
+	9,  // 7: ferret.wire.v1.Diagnostic.annotations:type_name -> ferret.wire.v1.DiagnosticAnnotation
+	10, // 8: ferret.wire.v1.DiagnosticSet.diagnostics:type_name -> ferret.wire.v1.Diagnostic
+	0,  // 9: ferret.wire.v1.Failure.category:type_name -> ferret.wire.v1.ErrorCategory
+	11, // 10: ferret.wire.v1.Failure.diagnostic_set:type_name -> ferret.wire.v1.DiagnosticSet
+	5,  // 11: ferret.wire.v1.RuntimeService.Connect:input_type -> ferret.wire.v1.ConnectRequest
+	6,  // 12: ferret.wire.v1.RuntimeService.CloseConnection:input_type -> ferret.wire.v1.CloseConnectionRequest
+	4,  // 13: ferret.wire.v1.RuntimeService.Connect:output_type -> ferret.wire.v1.ConnectResponse
+	7,  // 14: ferret.wire.v1.RuntimeService.CloseConnection:output_type -> ferret.wire.v1.CloseConnectionResponse
+	13, // [13:15] is the sub-list for method output_type
+	11, // [11:13] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for extension type_name
+	11, // [11:11] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
 func init() { file_ferret_wire_v1_runtime_proto_init() }
@@ -683,13 +920,14 @@ func file_ferret_wire_v1_runtime_proto_init() {
 	if File_ferret_wire_v1_runtime_proto != nil {
 		return
 	}
+	file_ferret_wire_v1_source_proto_init()
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_ferret_wire_v1_runtime_proto_rawDesc), len(file_ferret_wire_v1_runtime_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   10,
+			NumMessages:   13,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

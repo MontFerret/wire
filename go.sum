@@ -1,5 +1,5 @@
-github.com/MontFerret/api v1.0.0-alpha.10 h1:LwOhcA/b3gGAp3xYlHxHMouFtyjXs33EfQZ4di8RFDo=
-github.com/MontFerret/api v1.0.0-alpha.10/go.mod h1:Qxbv2zbziQ1/ZykQuBdwBPb4QX3LjAqdyT+rPS5sxjU=
+github.com/MontFerret/api v1.0.0-alpha.11 h1:9dA/xcuSNfP7qjLuzIBvshvzm+GWLsXjI1/e3spTbno=
+github.com/MontFerret/api v1.0.0-alpha.11/go.mod h1:Qxbv2zbziQ1/ZykQuBdwBPb4QX3LjAqdyT+rPS5sxjU=
 github.com/cespare/xxhash/v2 v2.3.0 h1:UL815xU9SqsFlibzuggzjXhog7bL6oX9BbNZnL2UFvs=
 github.com/cespare/xxhash/v2 v2.3.0/go.mod h1:VGX0DQ3Q6kWi7AoAeZDth3/j3BFtOZR5XLFGgcrjCOs=
 github.com/go-logr/logr v1.4.3 h1:CjnDlHq8ikf6E492q6eKboGOC0T8CDaOvkHCIg8idEI=

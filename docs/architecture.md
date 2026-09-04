@@ -7,10 +7,12 @@ particular runtime implementation.
 
 ## Boundaries and ownership
 
-The dependency direction is:
+The package dependency direction is:
 
 ```text
-consumers → protobuf/gRPC → Wire components and lifecycle → Unified API → runtime implementation
+consumer → client ────────────────┐
+             ↕ protobuf/gRPC      ├→ pkg/execution, pkg/debugger, pkg/failure
+host → server → server/internal ──┘→ Unified API → runtime implementation
 ```
 
 | Concern | Owner |
@@ -18,9 +20,10 @@ consumers → protobuf/gRPC → Wire components and lifecycle → Unified API �
 | FQL, runtime, output encoding, and debugger semantics | Unified API and runtime implementation |
 | Runtime construction, configuration, policies, and application state | Host application |
 | Versioned RPC contract | Protobuf definitions |
-| RPC adaptation | `internal/grpcserver` |
-| Logical connections and resources | `internal/core` |
-| Public server lifecycle | Top-level `wire` package |
+| Shared execution, debugger, identity, and failure semantics | `pkg/execution`, `pkg/debugger`, and `pkg/failure` |
+| RPC adaptation | `server/internal/grpcserver` |
+| Logical connections and resources | `server/internal/core` |
+| Public server lifecycle | `server` package |
 | Go client facade | `client` |
 | Physical transport, listener, authentication, and TLS | Host and Wire server layer |
 | DAP translation, LSP, and language intelligence | ferretd and compiler tooling |
@@ -50,9 +53,9 @@ by `api/debugger`.
 The host supplies both the configured runtime and listener:
 
 ```go
-runtime := createApplicationRuntime()
-server, err := wire.NewServer(runtime)
-err = server.Serve(ctx, listener)
+hostRuntime := createApplicationRuntime()
+wireServer, err := server.NewServer(hostRuntime)
+err = wireServer.Serve(ctx, listener)
 ```
 
 Wire borrows both. It does not close the runtime, construct or secure a
@@ -63,9 +66,10 @@ resources, or configuration. Importing Wire has no side effects, and
 The Connect handshake identifies the Wire protocol and may include a
 host-supplied runtime identity. It does not claim a Ferret version, runtime
 capability set, module inventory, or runtime implementation metadata that the
-Unified API cannot provide portably. The current API also has no neutral
-diagnostic or error taxonomy; Wire keeps only categories needed to operate the
-remote lifecycle and sanitizes implementation failures.
+Unified API cannot provide portably. The API's portable
+`diagnostics.Diagnostics` collection is preserved, but it has no severity or
+general structured runtime-error taxonomy. Wire keeps only categories needed
+to operate the remote lifecycle and sanitizes implementation failures.
 
 ### External implementation panic boundary
 
@@ -110,21 +114,37 @@ server-issued. They are scoped to one logical connection and cannot be inferred
 or transferred to another connection. The handwritten Go client keeps these
 IDs private; see [Client Handles](client.md).
 
-Core debugger state and client inspection values use the canonical
-`api/debugger` and `api/source` types. Protobuf messages remain transport
-representations and are converted explicitly at the gRPC server and client
-boundaries. Both directions validate coordinates, IDs, references, and enum
-values before conversion; invalid runtime values become sanitized internal
-failures, while malformed server responses become local client errors.
+Execution and debugger snapshots use the canonical types in `pkg/execution` and
+`pkg/debugger`; terminal failures use `pkg/failure`. Those shared packages
+contain no connection, plan, execution, or debug-session identity and do not
+depend on client or server implementation packages. Debugger values use the
+canonical `api/debugger` and `api/source` types. Protobuf messages remain
+transport representations and are converted explicitly at the gRPC server and
+client boundaries. Both directions validate coordinates, IDs, references, and
+enum values before conversion; invalid runtime values become sanitized
+internal failures, while malformed server responses become local client
+errors.
+
+Only errors typed as `diagnostics.Diagnostics` are converted. Wire does not
+parse error strings or expose arbitrary causes. Immediate diagnostics are a
+separate gRPC status detail; asynchronous diagnostics are stored on the
+failure snapshot. Source content, semantic source names, ordered annotations,
+ranges, kinds, hints, and notes remain intact.
 
 Compilation uses `api.Source` throughout the client and core. The protocol has
 cohesive `Source`, `Position`, `Span`, `Location`, and `Range` messages. Wire
 validates coordinates and preserves span values without assigning units to
-them. Debugger transport preserves event depth, requested and resolved
+them. `Location.SourceName` and protocol `source_name` do not imply a local
+filesystem path. Debugger transport preserves event depth, requested and resolved
 breakpoint locations, binding and bound state, point and function IDs, frame
 function IDs, variable flags, value references, stop reasons, and hit
 breakpoint IDs. Frame order is the zero-based index accepted by frame-local and
 evaluation calls; no redundant frame index is transmitted.
+
+Parameters preserve exact signed `int64` separately from finite protobuf
+doubles. Both adapters reject NaN and infinities, including when nested.
+Positive debugger value references are valid only in the current stopped state;
+zero is never a request reference, and resume makes prior references stale.
 
 The complete RPC and message contract, classification audit, and known Unified
 API gaps are documented in [Wire Protocol](protocol.md).
@@ -189,7 +209,7 @@ semantic event construction.
 DebugSession
 ├── debugSessionState
 ├── breakpointSet
-├── eventStream[DebugEvent]
+├── eventStream[debugger.Event]
 └── DebugController
     └── debugger.Session
 ```
@@ -237,7 +257,7 @@ the controller without waiting behind a potentially blocking stopped-state
 operation, then serializes the final state and event commit.
 
 Event buffers are bounded and producers are non-blocking. Each watch first
-replays the latest published snapshot when one exists, then receives ordered
+replays the latest published snapshot, then receives ordered
 changes through one terminal snapshot. Cancelling or disconnecting a watch
 detaches only that watcher; execution and debugging continue under their
 resource lifecycle. Slow clients cannot block runtime work or create unbounded
@@ -245,6 +265,12 @@ queues and are detached with resource exhaustion. Watcher slots remain owned
 until the stream handler exits, including after lag or a terminal snapshot.
 Detached cleanup has a named owner, is panic-safe, and terminates
 deterministically.
+
+Execution construction publishes running state. Debug-session construction
+publishes created state before the resource is returned, so every fresh debug
+watch has a snapshot without adding a Get RPC. Start, continue, and the three
+canonical step operations publish running before invoking the debugger; their
+completion then publishes stopped or terminal state with a monotonic sequence.
 
 ## Limits and security
 
@@ -270,6 +296,11 @@ required fields, ranges, and state; bound client-controlled allocations; and
 sanitize internal failures and panic values. They do not leak unnecessary host
 details, trust client-provided ownership, bypass host runtime policies, or
 introduce limit bypasses.
+
+Portable diagnostics may contain the source text and semantic name supplied to
+the runtime. Hosts should treat those fields like the original request. Runtime
+error strings, panic values, stacks, and implementation-specific diagnostic
+objects remain behind the sanitization boundary.
 
 Listener exposure, peer authentication, authorization, and TLS remain host
 transport concerns until separately specified. Wire never creates an unsafe

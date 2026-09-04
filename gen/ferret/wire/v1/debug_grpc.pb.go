@@ -25,9 +25,9 @@ const (
 	DebugService_DeleteBreakpoint_FullMethodName    = "/ferret.wire.v1.DebugService/DeleteBreakpoint"
 	DebugService_Continue_FullMethodName            = "/ferret.wire.v1.DebugService/Continue"
 	DebugService_Pause_FullMethodName               = "/ferret.wire.v1.DebugService/Pause"
-	DebugService_Next_FullMethodName                = "/ferret.wire.v1.DebugService/Next"
-	DebugService_Step_FullMethodName                = "/ferret.wire.v1.DebugService/Step"
-	DebugService_Out_FullMethodName                 = "/ferret.wire.v1.DebugService/Out"
+	DebugService_StepOver_FullMethodName            = "/ferret.wire.v1.DebugService/StepOver"
+	DebugService_StepIn_FullMethodName              = "/ferret.wire.v1.DebugService/StepIn"
+	DebugService_StepOut_FullMethodName             = "/ferret.wire.v1.DebugService/StepOut"
 	DebugService_Frames_FullMethodName              = "/ferret.wire.v1.DebugService/Frames"
 	DebugService_FrameLocals_FullMethodName         = "/ferret.wire.v1.DebugService/FrameLocals"
 	DebugService_Variables_FullMethodName           = "/ferret.wire.v1.DebugService/Variables"
@@ -40,16 +40,28 @@ const (
 // DebugServiceClient is the client API for DebugService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+//
+// DebugService exposes connection-owned debugger sessions without changing
+// the DebugSession -> DebugController -> Unified API debugger ownership chain.
 type DebugServiceClient interface {
+	// CreateDebugSession creates a CREATED resource from a reusable debug Plan.
 	CreateDebugSession(ctx context.Context, in *CreateDebugSessionRequest, opts ...grpc.CallOption) (*CreateDebugSessionResponse, error)
+	// Start begins execution once; later resumes use Continue or a step command.
 	Start(ctx context.Context, in *StartRequest, opts ...grpc.CallOption) (*StartResponse, error)
+	// SetBreakpoint is valid only while the session is CREATED or STOPPED.
 	SetBreakpoint(ctx context.Context, in *SetBreakpointRequest, opts ...grpc.CallOption) (*SetBreakpointResponse, error)
 	DeleteBreakpoint(ctx context.Context, in *DeleteBreakpointRequest, opts ...grpc.CallOption) (*DeleteBreakpointResponse, error)
+	// Continue publishes RUNNING before invoking the hosted debugger.
 	Continue(ctx context.Context, in *ContinueRequest, opts ...grpc.CallOption) (*ContinueResponse, error)
+	// Pause requests a stop without owning or releasing the session.
 	Pause(ctx context.Context, in *PauseRequest, opts ...grpc.CallOption) (*PauseResponse, error)
-	Next(ctx context.Context, in *NextRequest, opts ...grpc.CallOption) (*NextResponse, error)
-	Step(ctx context.Context, in *StepRequest, opts ...grpc.CallOption) (*StepResponse, error)
-	Out(ctx context.Context, in *OutRequest, opts ...grpc.CallOption) (*OutResponse, error)
+	// StepOver resumes until the next statement without entering a called function.
+	StepOver(ctx context.Context, in *StepOverRequest, opts ...grpc.CallOption) (*StepOverResponse, error)
+	// StepIn resumes until the next statement, entering a called function when applicable.
+	StepIn(ctx context.Context, in *StepInRequest, opts ...grpc.CallOption) (*StepInResponse, error)
+	// StepOut resumes until execution leaves the current frame.
+	StepOut(ctx context.Context, in *StepOutRequest, opts ...grpc.CallOption) (*StepOutResponse, error)
+	// Inspection RPCs require the current STOPPED state.
 	Frames(ctx context.Context, in *FramesRequest, opts ...grpc.CallOption) (*FramesResponse, error)
 	FrameLocals(ctx context.Context, in *FrameLocalsRequest, opts ...grpc.CallOption) (*FrameLocalsResponse, error)
 	Variables(ctx context.Context, in *VariablesRequest, opts ...grpc.CallOption) (*VariablesResponse, error)
@@ -58,7 +70,8 @@ type DebugServiceClient interface {
 	Terminate(ctx context.Context, in *TerminateRequest, opts ...grpc.CallOption) (*TerminateResponse, error)
 	// ReleaseDebugSession commits termination and cleanup. The session ID then becomes stale.
 	ReleaseDebugSession(ctx context.Context, in *ReleaseDebugSessionRequest, opts ...grpc.CallOption) (*ReleaseDebugSessionResponse, error)
-	// WatchDebug sends the latest published state, then ordered changes through one terminal state.
+	// WatchDebug always replays CREATED, RUNNING, STOPPED, or terminal state,
+	// then sends ordered changes. Disconnecting a watcher never cancels debugging.
 	WatchDebug(ctx context.Context, in *WatchDebugRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[WatchDebugResponse], error)
 }
 
@@ -130,30 +143,30 @@ func (c *debugServiceClient) Pause(ctx context.Context, in *PauseRequest, opts .
 	return out, nil
 }
 
-func (c *debugServiceClient) Next(ctx context.Context, in *NextRequest, opts ...grpc.CallOption) (*NextResponse, error) {
+func (c *debugServiceClient) StepOver(ctx context.Context, in *StepOverRequest, opts ...grpc.CallOption) (*StepOverResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(NextResponse)
-	err := c.cc.Invoke(ctx, DebugService_Next_FullMethodName, in, out, cOpts...)
+	out := new(StepOverResponse)
+	err := c.cc.Invoke(ctx, DebugService_StepOver_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *debugServiceClient) Step(ctx context.Context, in *StepRequest, opts ...grpc.CallOption) (*StepResponse, error) {
+func (c *debugServiceClient) StepIn(ctx context.Context, in *StepInRequest, opts ...grpc.CallOption) (*StepInResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(StepResponse)
-	err := c.cc.Invoke(ctx, DebugService_Step_FullMethodName, in, out, cOpts...)
+	out := new(StepInResponse)
+	err := c.cc.Invoke(ctx, DebugService_StepIn_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *debugServiceClient) Out(ctx context.Context, in *OutRequest, opts ...grpc.CallOption) (*OutResponse, error) {
+func (c *debugServiceClient) StepOut(ctx context.Context, in *StepOutRequest, opts ...grpc.CallOption) (*StepOutResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(OutResponse)
-	err := c.cc.Invoke(ctx, DebugService_Out_FullMethodName, in, out, cOpts...)
+	out := new(StepOutResponse)
+	err := c.cc.Invoke(ctx, DebugService_StepOut_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -242,16 +255,28 @@ type DebugService_WatchDebugClient = grpc.ServerStreamingClient[WatchDebugRespon
 // DebugServiceServer is the server API for DebugService service.
 // All implementations must embed UnimplementedDebugServiceServer
 // for forward compatibility.
+//
+// DebugService exposes connection-owned debugger sessions without changing
+// the DebugSession -> DebugController -> Unified API debugger ownership chain.
 type DebugServiceServer interface {
+	// CreateDebugSession creates a CREATED resource from a reusable debug Plan.
 	CreateDebugSession(context.Context, *CreateDebugSessionRequest) (*CreateDebugSessionResponse, error)
+	// Start begins execution once; later resumes use Continue or a step command.
 	Start(context.Context, *StartRequest) (*StartResponse, error)
+	// SetBreakpoint is valid only while the session is CREATED or STOPPED.
 	SetBreakpoint(context.Context, *SetBreakpointRequest) (*SetBreakpointResponse, error)
 	DeleteBreakpoint(context.Context, *DeleteBreakpointRequest) (*DeleteBreakpointResponse, error)
+	// Continue publishes RUNNING before invoking the hosted debugger.
 	Continue(context.Context, *ContinueRequest) (*ContinueResponse, error)
+	// Pause requests a stop without owning or releasing the session.
 	Pause(context.Context, *PauseRequest) (*PauseResponse, error)
-	Next(context.Context, *NextRequest) (*NextResponse, error)
-	Step(context.Context, *StepRequest) (*StepResponse, error)
-	Out(context.Context, *OutRequest) (*OutResponse, error)
+	// StepOver resumes until the next statement without entering a called function.
+	StepOver(context.Context, *StepOverRequest) (*StepOverResponse, error)
+	// StepIn resumes until the next statement, entering a called function when applicable.
+	StepIn(context.Context, *StepInRequest) (*StepInResponse, error)
+	// StepOut resumes until execution leaves the current frame.
+	StepOut(context.Context, *StepOutRequest) (*StepOutResponse, error)
+	// Inspection RPCs require the current STOPPED state.
 	Frames(context.Context, *FramesRequest) (*FramesResponse, error)
 	FrameLocals(context.Context, *FrameLocalsRequest) (*FrameLocalsResponse, error)
 	Variables(context.Context, *VariablesRequest) (*VariablesResponse, error)
@@ -260,7 +285,8 @@ type DebugServiceServer interface {
 	Terminate(context.Context, *TerminateRequest) (*TerminateResponse, error)
 	// ReleaseDebugSession commits termination and cleanup. The session ID then becomes stale.
 	ReleaseDebugSession(context.Context, *ReleaseDebugSessionRequest) (*ReleaseDebugSessionResponse, error)
-	// WatchDebug sends the latest published state, then ordered changes through one terminal state.
+	// WatchDebug always replays CREATED, RUNNING, STOPPED, or terminal state,
+	// then sends ordered changes. Disconnecting a watcher never cancels debugging.
 	WatchDebug(*WatchDebugRequest, grpc.ServerStreamingServer[WatchDebugResponse]) error
 	mustEmbedUnimplementedDebugServiceServer()
 }
@@ -290,14 +316,14 @@ func (UnimplementedDebugServiceServer) Continue(context.Context, *ContinueReques
 func (UnimplementedDebugServiceServer) Pause(context.Context, *PauseRequest) (*PauseResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Pause not implemented")
 }
-func (UnimplementedDebugServiceServer) Next(context.Context, *NextRequest) (*NextResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method Next not implemented")
+func (UnimplementedDebugServiceServer) StepOver(context.Context, *StepOverRequest) (*StepOverResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method StepOver not implemented")
 }
-func (UnimplementedDebugServiceServer) Step(context.Context, *StepRequest) (*StepResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method Step not implemented")
+func (UnimplementedDebugServiceServer) StepIn(context.Context, *StepInRequest) (*StepInResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method StepIn not implemented")
 }
-func (UnimplementedDebugServiceServer) Out(context.Context, *OutRequest) (*OutResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method Out not implemented")
+func (UnimplementedDebugServiceServer) StepOut(context.Context, *StepOutRequest) (*StepOutResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method StepOut not implemented")
 }
 func (UnimplementedDebugServiceServer) Frames(context.Context, *FramesRequest) (*FramesResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Frames not implemented")
@@ -449,56 +475,56 @@ func _DebugService_Pause_Handler(srv interface{}, ctx context.Context, dec func(
 	return interceptor(ctx, in, info, handler)
 }
 
-func _DebugService_Next_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(NextRequest)
+func _DebugService_StepOver_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(StepOverRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(DebugServiceServer).Next(ctx, in)
+		return srv.(DebugServiceServer).StepOver(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: DebugService_Next_FullMethodName,
+		FullMethod: DebugService_StepOver_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DebugServiceServer).Next(ctx, req.(*NextRequest))
+		return srv.(DebugServiceServer).StepOver(ctx, req.(*StepOverRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _DebugService_Step_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(StepRequest)
+func _DebugService_StepIn_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(StepInRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(DebugServiceServer).Step(ctx, in)
+		return srv.(DebugServiceServer).StepIn(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: DebugService_Step_FullMethodName,
+		FullMethod: DebugService_StepIn_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DebugServiceServer).Step(ctx, req.(*StepRequest))
+		return srv.(DebugServiceServer).StepIn(ctx, req.(*StepInRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _DebugService_Out_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(OutRequest)
+func _DebugService_StepOut_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(StepOutRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(DebugServiceServer).Out(ctx, in)
+		return srv.(DebugServiceServer).StepOut(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: DebugService_Out_FullMethodName,
+		FullMethod: DebugService_StepOut_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DebugServiceServer).Out(ctx, req.(*OutRequest))
+		return srv.(DebugServiceServer).StepOut(ctx, req.(*StepOutRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -654,16 +680,16 @@ var DebugService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _DebugService_Pause_Handler,
 		},
 		{
-			MethodName: "Next",
-			Handler:    _DebugService_Next_Handler,
+			MethodName: "StepOver",
+			Handler:    _DebugService_StepOver_Handler,
 		},
 		{
-			MethodName: "Step",
-			Handler:    _DebugService_Step_Handler,
+			MethodName: "StepIn",
+			Handler:    _DebugService_StepIn_Handler,
 		},
 		{
-			MethodName: "Out",
-			Handler:    _DebugService_Out_Handler,
+			MethodName: "StepOut",
+			Handler:    _DebugService_StepOut_Handler,
 		},
 		{
 			MethodName: "Frames",

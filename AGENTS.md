@@ -45,8 +45,8 @@ runtime implementations through the Unified API and Wire to consumers, and do
 not move DAP, LSP, transport, or
 host-configuration semantics into Wire for convenience.
 
-Use `internal/panicboundary` only around calls into externally supplied Unified
-API implementations. Never use it to contain panics from Wire-owned code. A
+Use `server/internal/panicboundary` only around calls into externally supplied
+Unified API implementations. Never use it to contain panics from Wire-owned code. A
 contained implementation panic is not a normal API error, and a stateful
 runtime resource whose operation panics must not be reused unless its owner can
 prove that reuse is safe.
@@ -69,9 +69,11 @@ changes are suspicious and require explanation.
 
 ## Client and public APIs
 
-The top-level wire package, the client package, and the versioned protobuf
-service are API-sensitive. Follow [Client Handles](docs/client.md) for the
-facade ownership and lifecycle contract.
+The `server` package, the `client` package, the shared `pkg/execution`,
+`pkg/debugger`, and `pkg/failure` packages, and the versioned protobuf service
+are API-sensitive. The module root intentionally has no Go compatibility
+package. Follow [Client Handles](docs/client.md) for the facade ownership and
+lifecycle contract.
 
 Export only externally required symbols, keep logical connection and resource
 IDs private in the handwritten client, add contract-focused comments, and
@@ -86,15 +88,15 @@ These rules are mandatory for handwritten Go code:
 * Prefer one grouped `type ( ... )` declaration for related package-level types.
 * Group structs, interfaces, aliases, and named primitive types when they form a
   cohesive responsibility.
-* Within `internal/core`, keep one principal stateful type and all of its
+* Within `server/internal/core`, keep one principal stateful type and all of its
   methods in one file. If that file becomes unreasonable, extract a real
   state-owning collaborator rather than a method-category file.
 * Cohesive value, option, snapshot, and watcher types may remain grouped with
   their principal type or in their own domain-focused file.
 * Keep related lifecycle or protocol-adaptation types together when proximity
   improves understanding.
-* Outside `internal/core`, split files by cohesive responsibility when that
-  improves ownership and navigation.
+* Outside `server/internal/core`, split files by cohesive responsibility when
+  that improves ownership and navigation.
 * Avoid overloaded files that combine unrelated responsibilities.
 * Do not create `helpers.go`, `utils.go`, or similar dumping grounds.
 
@@ -108,8 +110,8 @@ These rules are mandatory for handwritten Go code:
 * Keep methods close to the state and lifecycle they own.
 * Constructors may live beside the types they construct.
 * A type-centered file must not mix in unrelated package-level functions.
-* In `internal/core`, do not split a principal type's methods into lifecycle,
-  command, inspection, event, or other category files.
+* In `server/internal/core`, do not split a principal type's methods into
+  lifecycle, command, inspection, event, or other category files.
 * If behavior belongs to a connection, plan, execution, debug session, watcher,
   server, or client lifecycle, prefer a method on that owner.
 * Do not introduce manager or facade types whose methods only forward to the
@@ -217,9 +219,9 @@ contract crosses layers:
 | Behavior | Owning test layer |
 | --- | --- |
 | Protobuf/API compatibility | Buf lint and breaking checks |
-| Server request semantics | `internal/grpcserver` tests |
-| Logical ownership and limits | `internal/core` lifecycle tests |
-| Unified runtime adaptation | Top-level integration tests using Unified API fakes |
+| Server request semantics | `server/internal/grpcserver` tests |
+| Logical ownership and limits | `server/internal/core` lifecycle tests |
+| Unified runtime adaptation | `server` integration tests using Unified API fakes |
 | Cancellation and cleanup | Lifecycle and integration tests |
 | Debugger commands and inspection | Core and integration debugger tests |
 | Client facade and conversions | `client` contract tests |
