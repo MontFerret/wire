@@ -34,21 +34,21 @@ func (c *DebugController) Continue(ctx context.Context) (*debugger.Event, error)
 	})
 }
 
-func (c *DebugController) Next(ctx context.Context) (*debugger.Event, error) {
+func (c *DebugController) StepOver(ctx context.Context) (*debugger.Event, error) {
 	return panicboundary.Call(func() (*debugger.Event, error) {
-		return c.session.Next(ctx)
+		return c.session.StepOver(ctx)
 	})
 }
 
-func (c *DebugController) Step(ctx context.Context) (*debugger.Event, error) {
+func (c *DebugController) StepIn(ctx context.Context) (*debugger.Event, error) {
 	return panicboundary.Call(func() (*debugger.Event, error) {
-		return c.session.Step(ctx)
+		return c.session.StepIn(ctx)
 	})
 }
 
-func (c *DebugController) Out(ctx context.Context) (*debugger.Event, error) {
+func (c *DebugController) StepOut(ctx context.Context) (*debugger.Event, error) {
 	return panicboundary.Call(func() (*debugger.Event, error) {
-		return c.session.Out(ctx)
+		return c.session.StepOut(ctx)
 	})
 }
 

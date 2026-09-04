@@ -162,10 +162,13 @@ type Value_BooleanValue struct {
 }
 
 type Value_IntegerValue struct {
+	// integer_value preserves the complete signed 64-bit range exactly and is
+	// represented as a decimal string by protobuf JSON.
 	IntegerValue int64 `protobuf:"zigzag64,3,opt,name=integer_value,json=integerValue,proto3,oneof"`
 }
 
 type Value_FloatValue struct {
+	// float_value must be finite; Wire rejects protobuf JSON NaN and infinity spellings.
 	FloatValue float64 `protobuf:"fixed64,4,opt,name=float_value,json=floatValue,proto3,oneof"`
 }
 
@@ -290,8 +293,9 @@ func (x *ObjectValue) GetFields() map[string]*Value {
 }
 
 type Parameters struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Values        map[string]*Value      `protobuf:"bytes,1,rep,name=values,proto3" json:"values,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// values maps non-empty parameter names to portable values.
+	Values        map[string]*Value `protobuf:"bytes,1,rep,name=values,proto3" json:"values,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }

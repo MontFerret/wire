@@ -26,7 +26,11 @@ func (s DebugSnapshot) clone() DebugSnapshot {
 	}
 
 	if s.Failure != nil {
-		result.Failure = &Failure{Category: s.Failure.Category, Message: s.Failure.Message}
+		result.Failure = &Failure{
+			Category:    s.Failure.Category,
+			Message:     s.Failure.Message,
+			Diagnostics: cloneDiagnostics(s.Failure.Diagnostics),
+		}
 	}
 
 	return result

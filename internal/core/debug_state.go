@@ -65,7 +65,11 @@ func (s *debugSessionState) snapshot(id DebugSessionID, planID PlanID) DebugSnap
 	}
 
 	if s.failure != nil {
-		result.Failure = &Failure{Category: s.failure.Category, Message: s.failure.Message}
+		result.Failure = &Failure{
+			Category:    s.failure.Category,
+			Message:     s.failure.Message,
+			Diagnostics: cloneDiagnostics(s.failure.Diagnostics),
+		}
 	}
 
 	return result

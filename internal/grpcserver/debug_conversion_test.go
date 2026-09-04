@@ -11,9 +11,9 @@ import (
 )
 
 func TestUnifiedDebuggerTypesPreservePortableProtocolFields(t *testing.T) {
-	requested := source.Location{Position: source.Position{Line: 3, Column: 1}, File: "debug.fql"}
+	requested := source.Location{Position: source.Position{Line: 3, Column: 1}, SourceName: "debug.fql"}
 	resolved := source.Range{
-		Location: source.Location{Position: source.Position{Line: 4, Column: 2}, File: "debug.fql"},
+		Location: source.Location{Position: source.Position{Line: 4, Column: 2}, SourceName: "debug.fql"},
 		Span:     source.Span{Start: 10, End: 20},
 	}
 	convertedBreakpoint, err := breakpoint(debugger.Breakpoint{
@@ -28,7 +28,7 @@ func TestUnifiedDebuggerTypesPreservePortableProtocolFields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if convertedBreakpoint.GetId() != 7 || convertedBreakpoint.GetRequestedLocation().GetFile() != "debug.fql" ||
+	if convertedBreakpoint.GetId() != 7 || convertedBreakpoint.GetRequestedLocation().GetSourceName() != "debug.fql" ||
 		convertedBreakpoint.GetRequestedLocation().GetPosition().GetLine() != 3 ||
 		convertedBreakpoint.GetLocation().GetLocation().GetPosition().GetLine() != 4 ||
 		convertedBreakpoint.GetLocation().GetSpan().GetStart() != 10 || convertedBreakpoint.GetLocation().GetSpan().GetEnd() != 20 ||
@@ -42,9 +42,9 @@ func TestUnifiedDebuggerTypesPreservePortableProtocolFields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if unboundBreakpoint.GetRequestedLocation().GetFile() != "debug.fql" || unboundBreakpoint.GetLocation() != nil ||
+	if unboundBreakpoint.GetRequestedLocation().GetSourceName() != "debug.fql" || unboundBreakpoint.GetLocation() != nil ||
 		unboundBreakpoint.GetBound() ||
-		unboundBreakpoint.GetBindingMode() != wirev1.BreakpointBindingMode_BREAKPOINT_BINDING_MODE_NEXT_EXECUTABLE_IN_FILE {
+		unboundBreakpoint.GetBindingMode() != wirev1.BreakpointBindingMode_BREAKPOINT_BINDING_MODE_NEXT_EXECUTABLE_IN_SOURCE {
 		t.Fatalf("unexpected unbound breakpoint transport projection: %#v", unboundBreakpoint)
 	}
 
@@ -92,9 +92,9 @@ func TestBreakpointOptionsMapEveryUnifiedBindingMode(t *testing.T) {
 		options *wirev1.BreakpointOptions
 		want    debugger.BreakpointBindingMode
 	}{
-		{name: "missing", want: debugger.BreakpointBindNextExecutableInFile},
-		{name: "unspecified", options: breakpointProtocolOptions(wirev1.BreakpointBindingMode_BREAKPOINT_BINDING_MODE_UNSPECIFIED), want: debugger.BreakpointBindNextExecutableInFile},
-		{name: "next in file", options: breakpointProtocolOptions(wirev1.BreakpointBindingMode_BREAKPOINT_BINDING_MODE_NEXT_EXECUTABLE_IN_FILE), want: debugger.BreakpointBindNextExecutableInFile},
+		{name: "missing", want: debugger.BreakpointBindNextExecutableInSource},
+		{name: "unspecified", options: breakpointProtocolOptions(wirev1.BreakpointBindingMode_BREAKPOINT_BINDING_MODE_UNSPECIFIED), want: debugger.BreakpointBindNextExecutableInSource},
+		{name: "next in source", options: breakpointProtocolOptions(wirev1.BreakpointBindingMode_BREAKPOINT_BINDING_MODE_NEXT_EXECUTABLE_IN_SOURCE), want: debugger.BreakpointBindNextExecutableInSource},
 		{name: "exact", options: breakpointProtocolOptions(wirev1.BreakpointBindingMode_BREAKPOINT_BINDING_MODE_EXACT), want: debugger.BreakpointBindExact},
 		{name: "next in function", options: breakpointProtocolOptions(wirev1.BreakpointBindingMode_BREAKPOINT_BINDING_MODE_NEXT_EXECUTABLE_IN_FUNCTION), want: debugger.BreakpointBindNextExecutableInFunction},
 	}
@@ -137,7 +137,7 @@ func TestUnifiedDebuggerStopReasonsMapToProtocol(t *testing.T) {
 
 func TestDebuggerBoundaryRejectsMalformedRepresentations(t *testing.T) {
 	maxInt := uint64(^uint(0) >> 1)
-	requested := source.Location{Position: source.Position{Line: 1}, File: "debug.fql"}
+	requested := source.Location{Position: source.Position{Line: 1}, SourceName: "debug.fql"}
 	tests := []struct {
 		name     string
 		err      error

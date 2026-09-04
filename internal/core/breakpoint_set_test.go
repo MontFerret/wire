@@ -53,7 +53,7 @@ func TestDebugSessionCommitsBreakpointBookkeepingOnlyAfterRuntimeSuccess(t *test
 		},
 	}
 	session := newTestCoreDebugSession(t, runtime, 1)
-	location := source.Location{File: "query.fql", Position: source.Position{Line: 1}}
+	location := source.Location{SourceName: "query.fql", Position: source.Position{Line: 1}}
 
 	if _, err := session.SetBreakpointAt(context.Background(), location, debugger.BreakpointOptions{}); !hasCategory(err, ErrorInvalidState) || !errors.Is(err, setFailure) {
 		t.Fatalf("runtime set failure was not propagated: %v", err)
@@ -88,7 +88,7 @@ func TestDebugSessionRetainsBreakpointValidationAndStateGating(t *testing.T) {
 		t.Fatalf("request validation no longer precedes state gating: %v", err)
 	}
 
-	location := source.Location{File: "query.fql", Position: source.Position{Line: 1}}
+	location := source.Location{SourceName: "query.fql", Position: source.Position{Line: 1}}
 	if _, err := session.SetBreakpointAt(context.Background(), location, debugger.BreakpointOptions{}); !hasCategory(err, ErrorInvalidState) {
 		t.Fatalf("running session accepted breakpoint mutation: %v", err)
 	}

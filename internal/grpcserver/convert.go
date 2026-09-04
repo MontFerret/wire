@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/MontFerret/api/debugger"
+	"github.com/MontFerret/api/diagnostics"
 	"github.com/MontFerret/api/source"
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
 	"github.com/MontFerret/wire/internal/core"
@@ -40,21 +41,35 @@ func output(value *core.Output) *wirev1.Output {
 	return &wirev1.Output{ContentType: value.ContentType, Content: append([]byte(nil), value.Content...)}
 }
 
-func failure(value *core.Failure) *wirev1.Failure {
+func failure(value *core.Failure) (*wirev1.Failure, error) {
 	if value == nil {
-		return nil
+		return nil, nil
 	}
 
-	return &wirev1.Failure{Category: errorCategory(value.Category), Message: value.Message}
+	diagnosticSet, err := diagnosticsToProto(value.Diagnostics)
+	if err != nil {
+		return nil, err
+	}
+
+	return &wirev1.Failure{
+		Category:      errorCategory(value.Category),
+		Message:       value.Message,
+		DiagnosticSet: diagnosticSet,
+	}, nil
 }
 
-func execution(value core.ExecutionSnapshot) *wirev1.Execution {
+func execution(value core.ExecutionSnapshot) (*wirev1.Execution, error) {
+	convertedFailure, err := failure(value.Failure)
+	if err != nil {
+		return nil, err
+	}
+
 	return &wirev1.Execution{
 		Id:      &wirev1.ExecutionId{Value: string(value.ID)},
 		State:   executionState(value.State),
 		Output:  output(value.Output),
-		Failure: failure(value.Failure),
-	}
+		Failure: convertedFailure,
+	}, nil
 }
 
 func executionState(value core.ExecutionState) wirev1.ExecutionState {
@@ -72,11 +87,54 @@ func executionState(value core.ExecutionState) wirev1.ExecutionState {
 	}
 }
 
-func executionEvent(value core.ExecutionEvent) *wirev1.WatchExecutionResponse {
+func executionEvent(value core.ExecutionEvent) (*wirev1.WatchExecutionResponse, error) {
+	snapshot, err := execution(value.Snapshot)
+	if err != nil {
+		return nil, err
+	}
+
 	return &wirev1.WatchExecutionResponse{
 		Sequence:  value.Sequence,
-		Execution: execution(value.Snapshot),
+		Execution: snapshot,
+	}, nil
+}
+
+func diagnosticsToProto(values diagnostics.Diagnostics) (*wirev1.DiagnosticSet, error) {
+	if values == nil {
+		return nil, nil
 	}
+
+	result := &wirev1.DiagnosticSet{Diagnostics: make([]*wirev1.Diagnostic, len(values))}
+	for i, value := range values {
+		annotations := make([]*wirev1.DiagnosticAnnotation, len(value.Annotations))
+		for j, annotation := range value.Annotations {
+			convertedRange, err := sourceRange(annotation.Range)
+			if err != nil {
+				return nil, err
+			}
+
+			if convertedRange == nil {
+				return nil, runtimeConversionError("runtime returned a diagnostic annotation with no range")
+			}
+
+			annotations[j] = &wirev1.DiagnosticAnnotation{
+				Range:   convertedRange,
+				Message: annotation.Message,
+				Primary: annotation.Primary,
+			}
+		}
+
+		result.Diagnostics[i] = &wirev1.Diagnostic{
+			Kind:        value.Kind.String(),
+			Message:     value.Message,
+			Hint:        value.Hint,
+			Note:        value.Note,
+			Source:      &wirev1.Source{Name: value.Source.Name, Content: value.Source.Content},
+			Annotations: annotations,
+		}
+	}
+
+	return result, nil
 }
 
 func sourceLocation(value source.Location) (*wirev1.Location, error) {
@@ -84,8 +142,8 @@ func sourceLocation(value source.Location) (*wirev1.Location, error) {
 		return nil, nil
 	}
 
-	if value.File == "" {
-		return nil, runtimeConversionError("runtime returned a source location with no file")
+	if value.SourceName == "" {
+		return nil, runtimeConversionError("runtime returned a source location with no source name")
 	}
 
 	if value.Line <= 0 || value.Column < 0 {
@@ -93,7 +151,7 @@ func sourceLocation(value source.Location) (*wirev1.Location, error) {
 	}
 
 	return &wirev1.Location{
-		File: value.File,
+		SourceName: value.SourceName,
 		Position: &wirev1.Position{
 			Line:   int64(value.Line),
 			Column: int64(value.Column),
@@ -133,8 +191,8 @@ func sourceLocationFromProto(value *wirev1.Location, name string) (source.Locati
 		return source.Location{}, &core.DomainError{Category: core.ErrorInvalidRequest, Message: name + " is required"}
 	}
 
-	if value.GetFile() == "" {
-		return source.Location{}, &core.DomainError{Category: core.ErrorInvalidRequest, Message: name + " file is required"}
+	if value.GetSourceName() == "" {
+		return source.Location{}, &core.DomainError{Category: core.ErrorInvalidRequest, Message: name + " source name is required"}
 	}
 
 	position := value.GetPosition()
@@ -153,7 +211,7 @@ func sourceLocationFromProto(value *wirev1.Location, name string) (source.Locati
 	}
 
 	return source.Location{
-		File: value.GetFile(),
+		SourceName: value.GetSourceName(),
 		Position: source.Position{
 			Line:   line,
 			Column: column,
@@ -179,6 +237,11 @@ func debugSession(value core.DebugSnapshot) (*wirev1.DebugSession, error) {
 		return nil, runtimeConversionError("runtime returned an invalid debug depth")
 	}
 
+	convertedFailure, err := failure(value.Failure)
+	if err != nil {
+		return nil, err
+	}
+
 	hitIDs := make([]uint64, len(value.HitBreakpointIDs))
 	for i, id := range value.HitBreakpointIDs {
 		converted, err := debuggerIDToProto(id, "hit breakpoint ID", false)
@@ -196,7 +259,7 @@ func debugSession(value core.DebugSnapshot) (*wirev1.DebugSession, error) {
 		Location:         location,
 		HitBreakpointIds: hitIDs,
 		Output:           output(value.Output),
-		Failure:          failure(value.Failure),
+		Failure:          convertedFailure,
 		Depth:            int64(value.Depth),
 	}, nil
 }
@@ -264,6 +327,8 @@ func debugEventKind(value core.DebugEventKind) wirev1.DebugEventKind {
 		return wirev1.DebugEventKind_DEBUG_EVENT_KIND_FAILED
 	case core.DebugEventTerminated:
 		return wirev1.DebugEventKind_DEBUG_EVENT_KIND_TERMINATED
+	case core.DebugEventCreated:
+		return wirev1.DebugEventKind_DEBUG_EVENT_KIND_CREATED
 	default:
 		return wirev1.DebugEventKind_DEBUG_EVENT_KIND_UNSPECIFIED
 	}
@@ -321,8 +386,8 @@ func breakpoint(value debugger.Breakpoint) (*wirev1.Breakpoint, error) {
 
 func breakpointBindingMode(value debugger.BreakpointBindingMode) (wirev1.BreakpointBindingMode, error) {
 	switch value {
-	case debugger.BreakpointBindNextExecutableInFile:
-		return wirev1.BreakpointBindingMode_BREAKPOINT_BINDING_MODE_NEXT_EXECUTABLE_IN_FILE, nil
+	case debugger.BreakpointBindNextExecutableInSource:
+		return wirev1.BreakpointBindingMode_BREAKPOINT_BINDING_MODE_NEXT_EXECUTABLE_IN_SOURCE, nil
 	case debugger.BreakpointBindExact:
 		return wirev1.BreakpointBindingMode_BREAKPOINT_BINDING_MODE_EXACT, nil
 	case debugger.BreakpointBindNextExecutableInFunction:
@@ -341,8 +406,8 @@ func breakpointOptions(value *wirev1.BreakpointOptions) (debugger.BreakpointOpti
 
 	switch mode {
 	case wirev1.BreakpointBindingMode_BREAKPOINT_BINDING_MODE_UNSPECIFIED,
-		wirev1.BreakpointBindingMode_BREAKPOINT_BINDING_MODE_NEXT_EXECUTABLE_IN_FILE:
-		return debugger.BreakpointOptions{BindingMode: debugger.BreakpointBindNextExecutableInFile}, nil
+		wirev1.BreakpointBindingMode_BREAKPOINT_BINDING_MODE_NEXT_EXECUTABLE_IN_SOURCE:
+		return debugger.BreakpointOptions{BindingMode: debugger.BreakpointBindNextExecutableInSource}, nil
 	case wirev1.BreakpointBindingMode_BREAKPOINT_BINDING_MODE_EXACT:
 		return debugger.BreakpointOptions{BindingMode: debugger.BreakpointBindExact}, nil
 	case wirev1.BreakpointBindingMode_BREAKPOINT_BINDING_MODE_NEXT_EXECUTABLE_IN_FUNCTION:

@@ -43,6 +43,11 @@ func convertDebugSessionSnapshot(value *wirev1.DebugSession) (DebugSessionSnapsh
 		hitIDs[i] = converted
 	}
 
+	failure, err := convertFailure(value.GetFailure())
+	if err != nil {
+		return DebugSessionSnapshot{}, err
+	}
+
 	return DebugSessionSnapshot{
 		State:            state,
 		StopReason:       stopReason,
@@ -50,7 +55,7 @@ func convertDebugSessionSnapshot(value *wirev1.DebugSession) (DebugSessionSnapsh
 		HitBreakpointIDs: hitIDs,
 		Depth:            depth,
 		Output:           convertOutput(value.GetOutput()),
-		Failure:          convertFailure(value.GetFailure()),
+		Failure:          failure,
 	}, nil
 }
 
@@ -120,6 +125,8 @@ func convertDebugEventKind(value wirev1.DebugEventKind) (DebugEventKind, error) 
 		return DebugEventFailed, nil
 	case wirev1.DebugEventKind_DEBUG_EVENT_KIND_TERMINATED:
 		return DebugEventTerminated, nil
+	case wirev1.DebugEventKind_DEBUG_EVENT_KIND_CREATED:
+		return DebugEventCreated, nil
 	default:
 		return 0, invalidDebuggerResponse("unknown debug event kind %d", value)
 	}
@@ -130,8 +137,8 @@ func convertSourceLocation(value *wirev1.Location) (*source.Location, error) {
 		return nil, nil
 	}
 
-	if value.GetFile() == "" {
-		return nil, invalidDebuggerResponse("source location file is missing")
+	if value.GetSourceName() == "" {
+		return nil, invalidDebuggerResponse("source location source name is missing")
 	}
 
 	position := value.GetPosition()
@@ -150,8 +157,8 @@ func convertSourceLocation(value *wirev1.Location) (*source.Location, error) {
 	}
 
 	return &source.Location{
-		Position: source.Position{Line: line, Column: column},
-		File:     value.GetFile(),
+		Position:   source.Position{Line: line, Column: column},
+		SourceName: value.GetSourceName(),
 	}, nil
 }
 

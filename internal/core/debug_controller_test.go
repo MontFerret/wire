@@ -30,16 +30,16 @@ func (d *controllerDebugger) Continue(context.Context) (*debugger.Event, error) 
 	return d.command("continue")
 }
 
-func (d *controllerDebugger) Next(context.Context) (*debugger.Event, error) {
-	return d.command("next")
+func (d *controllerDebugger) StepOver(context.Context) (*debugger.Event, error) {
+	return d.command("step-over")
 }
 
-func (d *controllerDebugger) Step(context.Context) (*debugger.Event, error) {
-	return d.command("step")
+func (d *controllerDebugger) StepIn(context.Context) (*debugger.Event, error) {
+	return d.command("step-in")
 }
 
-func (d *controllerDebugger) Out(context.Context) (*debugger.Event, error) {
-	return d.command("out")
+func (d *controllerDebugger) StepOut(context.Context) (*debugger.Event, error) {
+	return d.command("step-out")
 }
 
 func (d *controllerDebugger) Pause() error {
@@ -138,9 +138,9 @@ func TestDebugControllerDelegatesCommandsAndInspection(t *testing.T) {
 	commands := []func(context.Context) (*debugger.Event, error){
 		controller.Start,
 		controller.Continue,
-		controller.Next,
-		controller.Step,
-		controller.Out,
+		controller.StepOver,
+		controller.StepIn,
+		controller.StepOut,
 	}
 	for _, command := range commands {
 		event, err := command(ctx)
@@ -173,7 +173,7 @@ func TestDebugControllerDelegatesCommandsAndInspection(t *testing.T) {
 		t.Fatalf("unexpected evaluated value: %#v, %v", value, err)
 	}
 
-	location := source.Location{File: "query.fql", Position: source.Position{Line: 1}}
+	location := source.Location{SourceName: "query.fql", Position: source.Position{Line: 1}}
 	options := debugger.BreakpointOptions{BindingMode: debugger.BreakpointBindExact}
 	breakpoint, err := controller.SetBreakpoint(location, options)
 	if err != nil || breakpoint.ID != 7 || breakpoint.RequestedLocation != location || breakpoint.BindingMode != options.BindingMode {
@@ -187,9 +187,9 @@ func TestDebugControllerDelegatesCommandsAndInspection(t *testing.T) {
 	wantCalls := []string{
 		"start",
 		"continue",
-		"next",
-		"step",
-		"out",
+		"step-over",
+		"step-in",
+		"step-out",
 		"pause",
 		"frames",
 		"frame-locals",
@@ -236,18 +236,18 @@ func TestDebugControllerContainsRuntimePanicsAtEachBoundary(t *testing.T) {
 
 			return err
 		}},
-		{name: "next", call: func(controller *DebugController) error {
-			_, err := controller.Next(context.Background())
+		{name: "step-over", call: func(controller *DebugController) error {
+			_, err := controller.StepOver(context.Background())
 
 			return err
 		}},
-		{name: "step", call: func(controller *DebugController) error {
-			_, err := controller.Step(context.Background())
+		{name: "step-in", call: func(controller *DebugController) error {
+			_, err := controller.StepIn(context.Background())
 
 			return err
 		}},
-		{name: "out", call: func(controller *DebugController) error {
-			_, err := controller.Out(context.Background())
+		{name: "step-out", call: func(controller *DebugController) error {
+			_, err := controller.StepOut(context.Background())
 
 			return err
 		}},

@@ -150,6 +150,8 @@ const (
 	DebugEventKind_DEBUG_EVENT_KIND_COMPLETED   DebugEventKind = 4
 	DebugEventKind_DEBUG_EVENT_KIND_FAILED      DebugEventKind = 5
 	DebugEventKind_DEBUG_EVENT_KIND_TERMINATED  DebugEventKind = 6
+	// CREATED is numbered after the original event set to preserve existing meanings.
+	DebugEventKind_DEBUG_EVENT_KIND_CREATED DebugEventKind = 7
 )
 
 // Enum value maps for DebugEventKind.
@@ -162,6 +164,7 @@ var (
 		4: "DEBUG_EVENT_KIND_COMPLETED",
 		5: "DEBUG_EVENT_KIND_FAILED",
 		6: "DEBUG_EVENT_KIND_TERMINATED",
+		7: "DEBUG_EVENT_KIND_CREATED",
 	}
 	DebugEventKind_value = map[string]int32{
 		"DEBUG_EVENT_KIND_UNSPECIFIED": 0,
@@ -171,6 +174,7 @@ var (
 		"DEBUG_EVENT_KIND_COMPLETED":   4,
 		"DEBUG_EVENT_KIND_FAILED":      5,
 		"DEBUG_EVENT_KIND_TERMINATED":  6,
+		"DEBUG_EVENT_KIND_CREATED":     7,
 	}
 )
 
@@ -205,7 +209,7 @@ type BreakpointBindingMode int32
 
 const (
 	BreakpointBindingMode_BREAKPOINT_BINDING_MODE_UNSPECIFIED                 BreakpointBindingMode = 0
-	BreakpointBindingMode_BREAKPOINT_BINDING_MODE_NEXT_EXECUTABLE_IN_FILE     BreakpointBindingMode = 1
+	BreakpointBindingMode_BREAKPOINT_BINDING_MODE_NEXT_EXECUTABLE_IN_SOURCE   BreakpointBindingMode = 1
 	BreakpointBindingMode_BREAKPOINT_BINDING_MODE_EXACT                       BreakpointBindingMode = 2
 	BreakpointBindingMode_BREAKPOINT_BINDING_MODE_NEXT_EXECUTABLE_IN_FUNCTION BreakpointBindingMode = 3
 )
@@ -214,13 +218,13 @@ const (
 var (
 	BreakpointBindingMode_name = map[int32]string{
 		0: "BREAKPOINT_BINDING_MODE_UNSPECIFIED",
-		1: "BREAKPOINT_BINDING_MODE_NEXT_EXECUTABLE_IN_FILE",
+		1: "BREAKPOINT_BINDING_MODE_NEXT_EXECUTABLE_IN_SOURCE",
 		2: "BREAKPOINT_BINDING_MODE_EXACT",
 		3: "BREAKPOINT_BINDING_MODE_NEXT_EXECUTABLE_IN_FUNCTION",
 	}
 	BreakpointBindingMode_value = map[string]int32{
 		"BREAKPOINT_BINDING_MODE_UNSPECIFIED":                 0,
-		"BREAKPOINT_BINDING_MODE_NEXT_EXECUTABLE_IN_FILE":     1,
+		"BREAKPOINT_BINDING_MODE_NEXT_EXECUTABLE_IN_SOURCE":   1,
 		"BREAKPOINT_BINDING_MODE_EXACT":                       2,
 		"BREAKPOINT_BINDING_MODE_NEXT_EXECUTABLE_IN_FUNCTION": 3,
 	}
@@ -254,8 +258,9 @@ func (BreakpointBindingMode) EnumDescriptor() ([]byte, []int) {
 }
 
 type DebugSessionId struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Value         string                 `protobuf:"bytes,1,opt,name=value,proto3" json:"value,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// value is opaque and valid only within the owning logical connection.
+	Value         string `protobuf:"bytes,1,opt,name=value,proto3" json:"value,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -298,17 +303,23 @@ func (x *DebugSessionId) GetValue() string {
 }
 
 type DebugSession struct {
-	state            protoimpl.MessageState `protogen:"open.v1"`
-	Id               *DebugSessionId        `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	State            DebugState             `protobuf:"varint,3,opt,name=state,proto3,enum=ferret.wire.v1.DebugState" json:"state,omitempty"`
-	StopReason       DebugStopReason        `protobuf:"varint,4,opt,name=stop_reason,json=stopReason,proto3,enum=ferret.wire.v1.DebugStopReason" json:"stop_reason,omitempty"`
-	HitBreakpointIds []uint64               `protobuf:"varint,6,rep,packed,name=hit_breakpoint_ids,json=hitBreakpointIds,proto3" json:"hit_breakpoint_ids,omitempty"`
-	Output           *Output                `protobuf:"bytes,7,opt,name=output,proto3" json:"output,omitempty"`
-	Failure          *Failure               `protobuf:"bytes,8,opt,name=failure,proto3" json:"failure,omitempty"`
-	Location         *Range                 `protobuf:"bytes,9,opt,name=location,proto3" json:"location,omitempty"`
-	Depth            int64                  `protobuf:"varint,10,opt,name=depth,proto3" json:"depth,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Id    *DebugSessionId        `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	// state is the debug-session lifecycle discriminator.
+	State DebugState `protobuf:"varint,3,opt,name=state,proto3,enum=ferret.wire.v1.DebugState" json:"state,omitempty"`
+	// stop_reason is meaningful only while state is STOPPED.
+	StopReason DebugStopReason `protobuf:"varint,4,opt,name=stop_reason,json=stopReason,proto3,enum=ferret.wire.v1.DebugStopReason" json:"stop_reason,omitempty"`
+	// hit_breakpoint_ids is populated only for a breakpoint stop.
+	HitBreakpointIds []uint64 `protobuf:"varint,6,rep,packed,name=hit_breakpoint_ids,json=hitBreakpointIds,proto3" json:"hit_breakpoint_ids,omitempty"`
+	// output is present only for COMPLETED sessions.
+	Output *Output `protobuf:"bytes,7,opt,name=output,proto3" json:"output,omitempty"`
+	// failure is present for failed sessions and may accompany a runtime-error stop.
+	Failure *Failure `protobuf:"bytes,8,opt,name=failure,proto3" json:"failure,omitempty"`
+	// location and depth describe the current stopped state.
+	Location      *Range `protobuf:"bytes,9,opt,name=location,proto3" json:"location,omitempty"`
+	Depth         int64  `protobuf:"varint,10,opt,name=depth,proto3" json:"depth,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *DebugSession) Reset() {
@@ -398,14 +409,16 @@ func (x *DebugSession) GetDepth() int64 {
 }
 
 type Breakpoint struct {
-	state             protoimpl.MessageState `protogen:"open.v1"`
-	Id                uint64                 `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
-	RequestedLocation *Location              `protobuf:"bytes,8,opt,name=requested_location,json=requestedLocation,proto3" json:"requested_location,omitempty"`
-	Location          *Range                 `protobuf:"bytes,9,opt,name=location,proto3" json:"location,omitempty"`
-	PointId           uint64                 `protobuf:"varint,10,opt,name=point_id,json=pointId,proto3" json:"point_id,omitempty"`
-	FunctionId        uint64                 `protobuf:"varint,11,opt,name=function_id,json=functionId,proto3" json:"function_id,omitempty"`
-	BindingMode       BreakpointBindingMode  `protobuf:"varint,12,opt,name=binding_mode,json=bindingMode,proto3,enum=ferret.wire.v1.BreakpointBindingMode" json:"binding_mode,omitempty"`
-	Bound             bool                   `protobuf:"varint,13,opt,name=bound,proto3" json:"bound,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// id is positive and owned by this debugger session.
+	Id uint64 `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
+	// requested_location is always present; location is present only when bound.
+	RequestedLocation *Location             `protobuf:"bytes,8,opt,name=requested_location,json=requestedLocation,proto3" json:"requested_location,omitempty"`
+	Location          *Range                `protobuf:"bytes,9,opt,name=location,proto3" json:"location,omitempty"`
+	PointId           uint64                `protobuf:"varint,10,opt,name=point_id,json=pointId,proto3" json:"point_id,omitempty"`
+	FunctionId        uint64                `protobuf:"varint,11,opt,name=function_id,json=functionId,proto3" json:"function_id,omitempty"`
+	BindingMode       BreakpointBindingMode `protobuf:"varint,12,opt,name=binding_mode,json=bindingMode,proto3,enum=ferret.wire.v1.BreakpointBindingMode" json:"binding_mode,omitempty"`
+	Bound             bool                  `protobuf:"varint,13,opt,name=bound,proto3" json:"bound,omitempty"`
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
 }
@@ -490,10 +503,12 @@ func (x *Breakpoint) GetBound() bool {
 }
 
 type DebugValue struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Type          string                 `protobuf:"bytes,1,opt,name=type,proto3" json:"type,omitempty"`
-	Display       string                 `protobuf:"bytes,2,opt,name=display,proto3" json:"display,omitempty"`
-	Reference     uint64                 `protobuf:"varint,3,opt,name=reference,proto3" json:"reference,omitempty"`
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Type    string                 `protobuf:"bytes,1,opt,name=type,proto3" json:"type,omitempty"`
+	Display string                 `protobuf:"bytes,2,opt,name=display,proto3" json:"display,omitempty"`
+	// reference is zero for a scalar value. A positive value is expandable only
+	// within this debug session's current stopped state and becomes stale on resume.
+	Reference     uint64 `protobuf:"varint,3,opt,name=reference,proto3" json:"reference,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -747,8 +762,9 @@ func (x *CreateDebugSessionRequest) GetOutputContentType() string {
 }
 
 type CreateDebugSessionResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Session       *DebugSession          `protobuf:"bytes,1,opt,name=session,proto3" json:"session,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// session is present in CREATED state and its CREATED event is already published.
+	Session       *DebugSession `protobuf:"bytes,1,opt,name=session,proto3" json:"session,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1054,7 +1070,7 @@ func (*PauseResponse) Descriptor() ([]byte, []int) {
 	return file_ferret_wire_v1_debug_proto_rawDescGZIP(), []int{13}
 }
 
-type NextRequest struct {
+type StepOverRequest struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	ConnectionId   *ConnectionId          `protobuf:"bytes,2,opt,name=connection_id,json=connectionId,proto3" json:"connection_id,omitempty"`
 	DebugSessionId *DebugSessionId        `protobuf:"bytes,3,opt,name=debug_session_id,json=debugSessionId,proto3" json:"debug_session_id,omitempty"`
@@ -1062,20 +1078,20 @@ type NextRequest struct {
 	sizeCache      protoimpl.SizeCache
 }
 
-func (x *NextRequest) Reset() {
-	*x = NextRequest{}
+func (x *StepOverRequest) Reset() {
+	*x = StepOverRequest{}
 	mi := &file_ferret_wire_v1_debug_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *NextRequest) String() string {
+func (x *StepOverRequest) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*NextRequest) ProtoMessage() {}
+func (*StepOverRequest) ProtoMessage() {}
 
-func (x *NextRequest) ProtoReflect() protoreflect.Message {
+func (x *StepOverRequest) ProtoReflect() protoreflect.Message {
 	mi := &file_ferret_wire_v1_debug_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -1087,45 +1103,45 @@ func (x *NextRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use NextRequest.ProtoReflect.Descriptor instead.
-func (*NextRequest) Descriptor() ([]byte, []int) {
+// Deprecated: Use StepOverRequest.ProtoReflect.Descriptor instead.
+func (*StepOverRequest) Descriptor() ([]byte, []int) {
 	return file_ferret_wire_v1_debug_proto_rawDescGZIP(), []int{14}
 }
 
-func (x *NextRequest) GetConnectionId() *ConnectionId {
+func (x *StepOverRequest) GetConnectionId() *ConnectionId {
 	if x != nil {
 		return x.ConnectionId
 	}
 	return nil
 }
 
-func (x *NextRequest) GetDebugSessionId() *DebugSessionId {
+func (x *StepOverRequest) GetDebugSessionId() *DebugSessionId {
 	if x != nil {
 		return x.DebugSessionId
 	}
 	return nil
 }
 
-type NextResponse struct {
+type StepOverResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *NextResponse) Reset() {
-	*x = NextResponse{}
+func (x *StepOverResponse) Reset() {
+	*x = StepOverResponse{}
 	mi := &file_ferret_wire_v1_debug_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *NextResponse) String() string {
+func (x *StepOverResponse) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*NextResponse) ProtoMessage() {}
+func (*StepOverResponse) ProtoMessage() {}
 
-func (x *NextResponse) ProtoReflect() protoreflect.Message {
+func (x *StepOverResponse) ProtoReflect() protoreflect.Message {
 	mi := &file_ferret_wire_v1_debug_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -1137,12 +1153,12 @@ func (x *NextResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use NextResponse.ProtoReflect.Descriptor instead.
-func (*NextResponse) Descriptor() ([]byte, []int) {
+// Deprecated: Use StepOverResponse.ProtoReflect.Descriptor instead.
+func (*StepOverResponse) Descriptor() ([]byte, []int) {
 	return file_ferret_wire_v1_debug_proto_rawDescGZIP(), []int{15}
 }
 
-type StepRequest struct {
+type StepInRequest struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	ConnectionId   *ConnectionId          `protobuf:"bytes,2,opt,name=connection_id,json=connectionId,proto3" json:"connection_id,omitempty"`
 	DebugSessionId *DebugSessionId        `protobuf:"bytes,3,opt,name=debug_session_id,json=debugSessionId,proto3" json:"debug_session_id,omitempty"`
@@ -1150,20 +1166,20 @@ type StepRequest struct {
 	sizeCache      protoimpl.SizeCache
 }
 
-func (x *StepRequest) Reset() {
-	*x = StepRequest{}
+func (x *StepInRequest) Reset() {
+	*x = StepInRequest{}
 	mi := &file_ferret_wire_v1_debug_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *StepRequest) String() string {
+func (x *StepInRequest) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*StepRequest) ProtoMessage() {}
+func (*StepInRequest) ProtoMessage() {}
 
-func (x *StepRequest) ProtoReflect() protoreflect.Message {
+func (x *StepInRequest) ProtoReflect() protoreflect.Message {
 	mi := &file_ferret_wire_v1_debug_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -1175,45 +1191,45 @@ func (x *StepRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use StepRequest.ProtoReflect.Descriptor instead.
-func (*StepRequest) Descriptor() ([]byte, []int) {
+// Deprecated: Use StepInRequest.ProtoReflect.Descriptor instead.
+func (*StepInRequest) Descriptor() ([]byte, []int) {
 	return file_ferret_wire_v1_debug_proto_rawDescGZIP(), []int{16}
 }
 
-func (x *StepRequest) GetConnectionId() *ConnectionId {
+func (x *StepInRequest) GetConnectionId() *ConnectionId {
 	if x != nil {
 		return x.ConnectionId
 	}
 	return nil
 }
 
-func (x *StepRequest) GetDebugSessionId() *DebugSessionId {
+func (x *StepInRequest) GetDebugSessionId() *DebugSessionId {
 	if x != nil {
 		return x.DebugSessionId
 	}
 	return nil
 }
 
-type StepResponse struct {
+type StepInResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *StepResponse) Reset() {
-	*x = StepResponse{}
+func (x *StepInResponse) Reset() {
+	*x = StepInResponse{}
 	mi := &file_ferret_wire_v1_debug_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *StepResponse) String() string {
+func (x *StepInResponse) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*StepResponse) ProtoMessage() {}
+func (*StepInResponse) ProtoMessage() {}
 
-func (x *StepResponse) ProtoReflect() protoreflect.Message {
+func (x *StepInResponse) ProtoReflect() protoreflect.Message {
 	mi := &file_ferret_wire_v1_debug_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -1225,12 +1241,12 @@ func (x *StepResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use StepResponse.ProtoReflect.Descriptor instead.
-func (*StepResponse) Descriptor() ([]byte, []int) {
+// Deprecated: Use StepInResponse.ProtoReflect.Descriptor instead.
+func (*StepInResponse) Descriptor() ([]byte, []int) {
 	return file_ferret_wire_v1_debug_proto_rawDescGZIP(), []int{17}
 }
 
-type OutRequest struct {
+type StepOutRequest struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	ConnectionId   *ConnectionId          `protobuf:"bytes,2,opt,name=connection_id,json=connectionId,proto3" json:"connection_id,omitempty"`
 	DebugSessionId *DebugSessionId        `protobuf:"bytes,3,opt,name=debug_session_id,json=debugSessionId,proto3" json:"debug_session_id,omitempty"`
@@ -1238,20 +1254,20 @@ type OutRequest struct {
 	sizeCache      protoimpl.SizeCache
 }
 
-func (x *OutRequest) Reset() {
-	*x = OutRequest{}
+func (x *StepOutRequest) Reset() {
+	*x = StepOutRequest{}
 	mi := &file_ferret_wire_v1_debug_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *OutRequest) String() string {
+func (x *StepOutRequest) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*OutRequest) ProtoMessage() {}
+func (*StepOutRequest) ProtoMessage() {}
 
-func (x *OutRequest) ProtoReflect() protoreflect.Message {
+func (x *StepOutRequest) ProtoReflect() protoreflect.Message {
 	mi := &file_ferret_wire_v1_debug_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -1263,45 +1279,45 @@ func (x *OutRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use OutRequest.ProtoReflect.Descriptor instead.
-func (*OutRequest) Descriptor() ([]byte, []int) {
+// Deprecated: Use StepOutRequest.ProtoReflect.Descriptor instead.
+func (*StepOutRequest) Descriptor() ([]byte, []int) {
 	return file_ferret_wire_v1_debug_proto_rawDescGZIP(), []int{18}
 }
 
-func (x *OutRequest) GetConnectionId() *ConnectionId {
+func (x *StepOutRequest) GetConnectionId() *ConnectionId {
 	if x != nil {
 		return x.ConnectionId
 	}
 	return nil
 }
 
-func (x *OutRequest) GetDebugSessionId() *DebugSessionId {
+func (x *StepOutRequest) GetDebugSessionId() *DebugSessionId {
 	if x != nil {
 		return x.DebugSessionId
 	}
 	return nil
 }
 
-type OutResponse struct {
+type StepOutResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *OutResponse) Reset() {
-	*x = OutResponse{}
+func (x *StepOutResponse) Reset() {
+	*x = StepOutResponse{}
 	mi := &file_ferret_wire_v1_debug_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *OutResponse) String() string {
+func (x *StepOutResponse) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*OutResponse) ProtoMessage() {}
+func (*StepOutResponse) ProtoMessage() {}
 
-func (x *OutResponse) ProtoReflect() protoreflect.Message {
+func (x *StepOutResponse) ProtoReflect() protoreflect.Message {
 	mi := &file_ferret_wire_v1_debug_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -1313,8 +1329,8 @@ func (x *OutResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use OutResponse.ProtoReflect.Descriptor instead.
-func (*OutResponse) Descriptor() ([]byte, []int) {
+// Deprecated: Use StepOutResponse.ProtoReflect.Descriptor instead.
+func (*StepOutResponse) Descriptor() ([]byte, []int) {
 	return file_ferret_wire_v1_debug_proto_rawDescGZIP(), []int{19}
 }
 
@@ -1863,9 +1879,10 @@ type VariablesRequest struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	ConnectionId   *ConnectionId          `protobuf:"bytes,1,opt,name=connection_id,json=connectionId,proto3" json:"connection_id,omitempty"`
 	DebugSessionId *DebugSessionId        `protobuf:"bytes,2,opt,name=debug_session_id,json=debugSessionId,proto3" json:"debug_session_id,omitempty"`
-	Reference      uint64                 `protobuf:"varint,3,opt,name=reference,proto3" json:"reference,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// reference is positive and valid only in the current stopped state.
+	Reference     uint64 `protobuf:"varint,3,opt,name=reference,proto3" json:"reference,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *VariablesRequest) Reset() {
@@ -2164,10 +2181,13 @@ func (*ReleaseDebugSessionResponse) Descriptor() ([]byte, []int) {
 }
 
 type WatchDebugResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Sequence      uint64                 `protobuf:"varint,2,opt,name=sequence,proto3" json:"sequence,omitempty"`
-	Kind          DebugEventKind         `protobuf:"varint,10,opt,name=kind,proto3,enum=ferret.wire.v1.DebugEventKind" json:"kind,omitempty"`
-	Session       *DebugSession          `protobuf:"bytes,11,opt,name=session,proto3" json:"session,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// sequence is positive and monotonic within one DebugSession event history.
+	Sequence uint64 `protobuf:"varint,2,opt,name=sequence,proto3" json:"sequence,omitempty"`
+	// kind distinguishes CREATED and the two transitions that produce RUNNING snapshots.
+	Kind DebugEventKind `protobuf:"varint,10,opt,name=kind,proto3,enum=ferret.wire.v1.DebugEventKind" json:"kind,omitempty"`
+	// session is the latest complete snapshot, including for replayed terminal state.
+	Session       *DebugSession `protobuf:"bytes,11,opt,name=session,proto3" json:"session,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2224,9 +2244,10 @@ func (x *WatchDebugResponse) GetSession() *DebugSession {
 }
 
 type WatchDebugRequest struct {
-	state          protoimpl.MessageState `protogen:"open.v1"`
-	ConnectionId   *ConnectionId          `protobuf:"bytes,1,opt,name=connection_id,json=connectionId,proto3" json:"connection_id,omitempty"`
-	DebugSessionId *DebugSessionId        `protobuf:"bytes,2,opt,name=debug_session_id,json=debugSessionId,proto3" json:"debug_session_id,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Both IDs address a non-owning subscription; cancelling it does not terminate the session.
+	ConnectionId   *ConnectionId   `protobuf:"bytes,1,opt,name=connection_id,json=connectionId,proto3" json:"connection_id,omitempty"`
+	DebugSessionId *DebugSessionId `protobuf:"bytes,2,opt,name=debug_session_id,json=debugSessionId,proto3" json:"debug_session_id,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -2339,20 +2360,19 @@ const file_ferret_wire_v1_debug_proto_rawDesc = "" +
 	"\fPauseRequest\x12A\n" +
 	"\rconnection_id\x18\x02 \x01(\v2\x1c.ferret.wire.v1.ConnectionIdR\fconnectionId\x12H\n" +
 	"\x10debug_session_id\x18\x03 \x01(\v2\x1e.ferret.wire.v1.DebugSessionIdR\x0edebugSessionIdJ\x04\b\x01\x10\x02R\acommand\"\x1e\n" +
-	"\rPauseResponseJ\x04\b\x01\x10\x02R\asession\"\xa9\x01\n" +
-	"\vNextRequest\x12A\n" +
+	"\rPauseResponseJ\x04\b\x01\x10\x02R\asession\"\xad\x01\n" +
+	"\x0fStepOverRequest\x12A\n" +
 	"\rconnection_id\x18\x02 \x01(\v2\x1c.ferret.wire.v1.ConnectionIdR\fconnectionId\x12H\n" +
-	"\x10debug_session_id\x18\x03 \x01(\v2\x1e.ferret.wire.v1.DebugSessionIdR\x0edebugSessionIdJ\x04\b\x01\x10\x02R\acommand\"\x1d\n" +
-	"\fNextResponseJ\x04\b\x01\x10\x02R\asession\"\xa9\x01\n" +
-	"\vStepRequest\x12A\n" +
+	"\x10debug_session_id\x18\x03 \x01(\v2\x1e.ferret.wire.v1.DebugSessionIdR\x0edebugSessionIdJ\x04\b\x01\x10\x02R\acommand\"!\n" +
+	"\x10StepOverResponseJ\x04\b\x01\x10\x02R\asession\"\xab\x01\n" +
+	"\rStepInRequest\x12A\n" +
 	"\rconnection_id\x18\x02 \x01(\v2\x1c.ferret.wire.v1.ConnectionIdR\fconnectionId\x12H\n" +
-	"\x10debug_session_id\x18\x03 \x01(\v2\x1e.ferret.wire.v1.DebugSessionIdR\x0edebugSessionIdJ\x04\b\x01\x10\x02R\acommand\"\x1d\n" +
-	"\fStepResponseJ\x04\b\x01\x10\x02R\asession\"\xa8\x01\n" +
-	"\n" +
-	"OutRequest\x12A\n" +
+	"\x10debug_session_id\x18\x03 \x01(\v2\x1e.ferret.wire.v1.DebugSessionIdR\x0edebugSessionIdJ\x04\b\x01\x10\x02R\acommand\"\x1f\n" +
+	"\x0eStepInResponseJ\x04\b\x01\x10\x02R\asession\"\xac\x01\n" +
+	"\x0eStepOutRequest\x12A\n" +
 	"\rconnection_id\x18\x02 \x01(\v2\x1c.ferret.wire.v1.ConnectionIdR\fconnectionId\x12H\n" +
-	"\x10debug_session_id\x18\x03 \x01(\v2\x1e.ferret.wire.v1.DebugSessionIdR\x0edebugSessionIdJ\x04\b\x01\x10\x02R\acommand\"\x1c\n" +
-	"\vOutResponseJ\x04\b\x01\x10\x02R\asession\"\x9f\x01\n" +
+	"\x10debug_session_id\x18\x03 \x01(\v2\x1e.ferret.wire.v1.DebugSessionIdR\x0edebugSessionIdJ\x04\b\x01\x10\x02R\acommand\" \n" +
+	"\x0fStepOutResponseJ\x04\b\x01\x10\x02R\asession\"\x9f\x01\n" +
 	"\x10TerminateRequest\x12A\n" +
 	"\rconnection_id\x18\x01 \x01(\v2\x1c.ferret.wire.v1.ConnectionIdR\fconnectionId\x12H\n" +
 	"\x10debug_session_id\x18\x02 \x01(\v2\x1e.ferret.wire.v1.DebugSessionIdR\x0edebugSessionId\"\x13\n" +
@@ -2430,7 +2450,7 @@ const file_ferret_wire_v1_debug_proto_rawDesc = "" +
 	"\x1cDEBUG_STOP_REASON_BREAKPOINT\x10\x02\x12\x1a\n" +
 	"\x16DEBUG_STOP_REASON_STEP\x10\x03\x12\x1b\n" +
 	"\x17DEBUG_STOP_REASON_PAUSE\x10\x04\x12#\n" +
-	"\x1fDEBUG_STOP_REASON_RUNTIME_ERROR\x10\x05*\xec\x01\n" +
+	"\x1fDEBUG_STOP_REASON_RUNTIME_ERROR\x10\x05*\x8a\x02\n" +
 	"\x0eDebugEventKind\x12 \n" +
 	"\x1cDEBUG_EVENT_KIND_UNSPECIFIED\x10\x00\x12\x1c\n" +
 	"\x18DEBUG_EVENT_KIND_STARTED\x10\x01\x12\x1e\n" +
@@ -2438,12 +2458,13 @@ const file_ferret_wire_v1_debug_proto_rawDesc = "" +
 	"\x18DEBUG_EVENT_KIND_STOPPED\x10\x03\x12\x1e\n" +
 	"\x1aDEBUG_EVENT_KIND_COMPLETED\x10\x04\x12\x1b\n" +
 	"\x17DEBUG_EVENT_KIND_FAILED\x10\x05\x12\x1f\n" +
-	"\x1bDEBUG_EVENT_KIND_TERMINATED\x10\x06*\xd1\x01\n" +
+	"\x1bDEBUG_EVENT_KIND_TERMINATED\x10\x06\x12\x1c\n" +
+	"\x18DEBUG_EVENT_KIND_CREATED\x10\a*\x84\x02\n" +
 	"\x15BreakpointBindingMode\x12'\n" +
-	"#BREAKPOINT_BINDING_MODE_UNSPECIFIED\x10\x00\x123\n" +
-	"/BREAKPOINT_BINDING_MODE_NEXT_EXECUTABLE_IN_FILE\x10\x01\x12!\n" +
+	"#BREAKPOINT_BINDING_MODE_UNSPECIFIED\x10\x00\x125\n" +
+	"1BREAKPOINT_BINDING_MODE_NEXT_EXECUTABLE_IN_SOURCE\x10\x01\x12!\n" +
 	"\x1dBREAKPOINT_BINDING_MODE_EXACT\x10\x02\x127\n" +
-	"3BREAKPOINT_BINDING_MODE_NEXT_EXECUTABLE_IN_FUNCTION\x10\x032\xcb\n" +
+	"3BREAKPOINT_BINDING_MODE_NEXT_EXECUTABLE_IN_FUNCTION\x10\x03*/BREAKPOINT_BINDING_MODE_NEXT_EXECUTABLE_IN_FILE2\xe9\n" +
 	"\n" +
 	"\fDebugService\x12k\n" +
 	"\x12CreateDebugSession\x12).ferret.wire.v1.CreateDebugSessionRequest\x1a*.ferret.wire.v1.CreateDebugSessionResponse\x12D\n" +
@@ -2451,10 +2472,10 @@ const file_ferret_wire_v1_debug_proto_rawDesc = "" +
 	"\rSetBreakpoint\x12$.ferret.wire.v1.SetBreakpointRequest\x1a%.ferret.wire.v1.SetBreakpointResponse\x12e\n" +
 	"\x10DeleteBreakpoint\x12'.ferret.wire.v1.DeleteBreakpointRequest\x1a(.ferret.wire.v1.DeleteBreakpointResponse\x12M\n" +
 	"\bContinue\x12\x1f.ferret.wire.v1.ContinueRequest\x1a .ferret.wire.v1.ContinueResponse\x12D\n" +
-	"\x05Pause\x12\x1c.ferret.wire.v1.PauseRequest\x1a\x1d.ferret.wire.v1.PauseResponse\x12A\n" +
-	"\x04Next\x12\x1b.ferret.wire.v1.NextRequest\x1a\x1c.ferret.wire.v1.NextResponse\x12A\n" +
-	"\x04Step\x12\x1b.ferret.wire.v1.StepRequest\x1a\x1c.ferret.wire.v1.StepResponse\x12>\n" +
-	"\x03Out\x12\x1a.ferret.wire.v1.OutRequest\x1a\x1b.ferret.wire.v1.OutResponse\x12G\n" +
+	"\x05Pause\x12\x1c.ferret.wire.v1.PauseRequest\x1a\x1d.ferret.wire.v1.PauseResponse\x12M\n" +
+	"\bStepOver\x12\x1f.ferret.wire.v1.StepOverRequest\x1a .ferret.wire.v1.StepOverResponse\x12G\n" +
+	"\x06StepIn\x12\x1d.ferret.wire.v1.StepInRequest\x1a\x1e.ferret.wire.v1.StepInResponse\x12J\n" +
+	"\aStepOut\x12\x1e.ferret.wire.v1.StepOutRequest\x1a\x1f.ferret.wire.v1.StepOutResponse\x12G\n" +
 	"\x06Frames\x12\x1d.ferret.wire.v1.FramesRequest\x1a\x1e.ferret.wire.v1.FramesResponse\x12V\n" +
 	"\vFrameLocals\x12\".ferret.wire.v1.FrameLocalsRequest\x1a#.ferret.wire.v1.FrameLocalsResponse\x12P\n" +
 	"\tVariables\x12 .ferret.wire.v1.VariablesRequest\x1a!.ferret.wire.v1.VariablesResponse\x12\\\n" +
@@ -2497,12 +2518,12 @@ var file_ferret_wire_v1_debug_proto_goTypes = []any{
 	(*ContinueResponse)(nil),            // 15: ferret.wire.v1.ContinueResponse
 	(*PauseRequest)(nil),                // 16: ferret.wire.v1.PauseRequest
 	(*PauseResponse)(nil),               // 17: ferret.wire.v1.PauseResponse
-	(*NextRequest)(nil),                 // 18: ferret.wire.v1.NextRequest
-	(*NextResponse)(nil),                // 19: ferret.wire.v1.NextResponse
-	(*StepRequest)(nil),                 // 20: ferret.wire.v1.StepRequest
-	(*StepResponse)(nil),                // 21: ferret.wire.v1.StepResponse
-	(*OutRequest)(nil),                  // 22: ferret.wire.v1.OutRequest
-	(*OutResponse)(nil),                 // 23: ferret.wire.v1.OutResponse
+	(*StepOverRequest)(nil),             // 18: ferret.wire.v1.StepOverRequest
+	(*StepOverResponse)(nil),            // 19: ferret.wire.v1.StepOverResponse
+	(*StepInRequest)(nil),               // 20: ferret.wire.v1.StepInRequest
+	(*StepInResponse)(nil),              // 21: ferret.wire.v1.StepInResponse
+	(*StepOutRequest)(nil),              // 22: ferret.wire.v1.StepOutRequest
+	(*StepOutResponse)(nil),             // 23: ferret.wire.v1.StepOutResponse
 	(*TerminateRequest)(nil),            // 24: ferret.wire.v1.TerminateRequest
 	(*TerminateResponse)(nil),           // 25: ferret.wire.v1.TerminateResponse
 	(*BreakpointOptions)(nil),           // 26: ferret.wire.v1.BreakpointOptions
@@ -2552,12 +2573,12 @@ var file_ferret_wire_v1_debug_proto_depIdxs = []int32{
 	4,  // 18: ferret.wire.v1.ContinueRequest.debug_session_id:type_name -> ferret.wire.v1.DebugSessionId
 	47, // 19: ferret.wire.v1.PauseRequest.connection_id:type_name -> ferret.wire.v1.ConnectionId
 	4,  // 20: ferret.wire.v1.PauseRequest.debug_session_id:type_name -> ferret.wire.v1.DebugSessionId
-	47, // 21: ferret.wire.v1.NextRequest.connection_id:type_name -> ferret.wire.v1.ConnectionId
-	4,  // 22: ferret.wire.v1.NextRequest.debug_session_id:type_name -> ferret.wire.v1.DebugSessionId
-	47, // 23: ferret.wire.v1.StepRequest.connection_id:type_name -> ferret.wire.v1.ConnectionId
-	4,  // 24: ferret.wire.v1.StepRequest.debug_session_id:type_name -> ferret.wire.v1.DebugSessionId
-	47, // 25: ferret.wire.v1.OutRequest.connection_id:type_name -> ferret.wire.v1.ConnectionId
-	4,  // 26: ferret.wire.v1.OutRequest.debug_session_id:type_name -> ferret.wire.v1.DebugSessionId
+	47, // 21: ferret.wire.v1.StepOverRequest.connection_id:type_name -> ferret.wire.v1.ConnectionId
+	4,  // 22: ferret.wire.v1.StepOverRequest.debug_session_id:type_name -> ferret.wire.v1.DebugSessionId
+	47, // 23: ferret.wire.v1.StepInRequest.connection_id:type_name -> ferret.wire.v1.ConnectionId
+	4,  // 24: ferret.wire.v1.StepInRequest.debug_session_id:type_name -> ferret.wire.v1.DebugSessionId
+	47, // 25: ferret.wire.v1.StepOutRequest.connection_id:type_name -> ferret.wire.v1.ConnectionId
+	4,  // 26: ferret.wire.v1.StepOutRequest.debug_session_id:type_name -> ferret.wire.v1.DebugSessionId
 	47, // 27: ferret.wire.v1.TerminateRequest.connection_id:type_name -> ferret.wire.v1.ConnectionId
 	4,  // 28: ferret.wire.v1.TerminateRequest.debug_session_id:type_name -> ferret.wire.v1.DebugSessionId
 	3,  // 29: ferret.wire.v1.BreakpointOptions.binding_mode:type_name -> ferret.wire.v1.BreakpointBindingMode
@@ -2592,9 +2613,9 @@ var file_ferret_wire_v1_debug_proto_depIdxs = []int32{
 	29, // 58: ferret.wire.v1.DebugService.DeleteBreakpoint:input_type -> ferret.wire.v1.DeleteBreakpointRequest
 	14, // 59: ferret.wire.v1.DebugService.Continue:input_type -> ferret.wire.v1.ContinueRequest
 	16, // 60: ferret.wire.v1.DebugService.Pause:input_type -> ferret.wire.v1.PauseRequest
-	18, // 61: ferret.wire.v1.DebugService.Next:input_type -> ferret.wire.v1.NextRequest
-	20, // 62: ferret.wire.v1.DebugService.Step:input_type -> ferret.wire.v1.StepRequest
-	22, // 63: ferret.wire.v1.DebugService.Out:input_type -> ferret.wire.v1.OutRequest
+	18, // 61: ferret.wire.v1.DebugService.StepOver:input_type -> ferret.wire.v1.StepOverRequest
+	20, // 62: ferret.wire.v1.DebugService.StepIn:input_type -> ferret.wire.v1.StepInRequest
+	22, // 63: ferret.wire.v1.DebugService.StepOut:input_type -> ferret.wire.v1.StepOutRequest
 	31, // 64: ferret.wire.v1.DebugService.Frames:input_type -> ferret.wire.v1.FramesRequest
 	33, // 65: ferret.wire.v1.DebugService.FrameLocals:input_type -> ferret.wire.v1.FrameLocalsRequest
 	35, // 66: ferret.wire.v1.DebugService.Variables:input_type -> ferret.wire.v1.VariablesRequest
@@ -2608,9 +2629,9 @@ var file_ferret_wire_v1_debug_proto_depIdxs = []int32{
 	30, // 74: ferret.wire.v1.DebugService.DeleteBreakpoint:output_type -> ferret.wire.v1.DeleteBreakpointResponse
 	15, // 75: ferret.wire.v1.DebugService.Continue:output_type -> ferret.wire.v1.ContinueResponse
 	17, // 76: ferret.wire.v1.DebugService.Pause:output_type -> ferret.wire.v1.PauseResponse
-	19, // 77: ferret.wire.v1.DebugService.Next:output_type -> ferret.wire.v1.NextResponse
-	21, // 78: ferret.wire.v1.DebugService.Step:output_type -> ferret.wire.v1.StepResponse
-	23, // 79: ferret.wire.v1.DebugService.Out:output_type -> ferret.wire.v1.OutResponse
+	19, // 77: ferret.wire.v1.DebugService.StepOver:output_type -> ferret.wire.v1.StepOverResponse
+	21, // 78: ferret.wire.v1.DebugService.StepIn:output_type -> ferret.wire.v1.StepInResponse
+	23, // 79: ferret.wire.v1.DebugService.StepOut:output_type -> ferret.wire.v1.StepOutResponse
 	32, // 80: ferret.wire.v1.DebugService.Frames:output_type -> ferret.wire.v1.FramesResponse
 	34, // 81: ferret.wire.v1.DebugService.FrameLocals:output_type -> ferret.wire.v1.FrameLocalsResponse
 	36, // 82: ferret.wire.v1.DebugService.Variables:output_type -> ferret.wire.v1.VariablesResponse

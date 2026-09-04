@@ -110,7 +110,7 @@ func (s *Server) Pause(ctx context.Context, request *wirev1.PauseRequest) (*wire
 	return &wirev1.PauseResponse{}, nil
 }
 
-func (s *Server) Next(ctx context.Context, request *wirev1.NextRequest) (*wirev1.NextResponse, error) {
+func (s *Server) StepOver(ctx context.Context, request *wirev1.StepOverRequest) (*wirev1.StepOverResponse, error) {
 	operation, cancel, session, err := s.debugCommand(ctx, request)
 	if err != nil {
 		return nil, err
@@ -118,14 +118,14 @@ func (s *Server) Next(ctx context.Context, request *wirev1.NextRequest) (*wirev1
 
 	defer cancel()
 
-	if _, err := session.Next(operation); err != nil {
+	if _, err := session.StepOver(operation); err != nil {
 		return nil, rpcError(err)
 	}
 
-	return &wirev1.NextResponse{}, nil
+	return &wirev1.StepOverResponse{}, nil
 }
 
-func (s *Server) Step(ctx context.Context, request *wirev1.StepRequest) (*wirev1.StepResponse, error) {
+func (s *Server) StepIn(ctx context.Context, request *wirev1.StepInRequest) (*wirev1.StepInResponse, error) {
 	operation, cancel, session, err := s.debugCommand(ctx, request)
 	if err != nil {
 		return nil, err
@@ -133,14 +133,14 @@ func (s *Server) Step(ctx context.Context, request *wirev1.StepRequest) (*wirev1
 
 	defer cancel()
 
-	if _, err := session.Step(operation); err != nil {
+	if _, err := session.StepIn(operation); err != nil {
 		return nil, rpcError(err)
 	}
 
-	return &wirev1.StepResponse{}, nil
+	return &wirev1.StepInResponse{}, nil
 }
 
-func (s *Server) Out(ctx context.Context, request *wirev1.OutRequest) (*wirev1.OutResponse, error) {
+func (s *Server) StepOut(ctx context.Context, request *wirev1.StepOutRequest) (*wirev1.StepOutResponse, error) {
 	operation, cancel, session, err := s.debugCommand(ctx, request)
 	if err != nil {
 		return nil, err
@@ -148,11 +148,11 @@ func (s *Server) Out(ctx context.Context, request *wirev1.OutRequest) (*wirev1.O
 
 	defer cancel()
 
-	if _, err := session.Out(operation); err != nil {
+	if _, err := session.StepOut(operation); err != nil {
 		return nil, rpcError(err)
 	}
 
-	return &wirev1.OutResponse{}, nil
+	return &wirev1.StepOutResponse{}, nil
 }
 
 func (s *Server) Terminate(ctx context.Context, request *wirev1.TerminateRequest) (*wirev1.TerminateResponse, error) {

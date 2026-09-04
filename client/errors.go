@@ -3,6 +3,7 @@ package client
 import (
 	"errors"
 
+	"github.com/MontFerret/api/diagnostics"
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -14,7 +15,7 @@ type (
 	Failure struct {
 		Category    ErrorCategory
 		Message     string
-		Diagnostics []Diagnostic
+		Diagnostics diagnostics.Diagnostics
 	}
 
 	// ErrorCategory is the stable Wire failure category independent of transport
@@ -26,7 +27,7 @@ type (
 	Error struct {
 		Category    ErrorCategory
 		Message     string
-		Diagnostics []Diagnostic
+		Diagnostics diagnostics.Diagnostics
 		cause       error
 	}
 )
@@ -45,7 +46,6 @@ const (
 	ErrorInternal
 	ErrorWatcherLagged
 	ErrorCancelled
-	ErrorValueReferenceNotFound
 	ErrorResourceExhausted
 	ErrorBreakpointNotFound
 )
@@ -105,14 +105,19 @@ func decodeError(err error) error {
 	result := &Error{Message: grpcStatus.Message(), cause: err}
 
 	for _, raw := range grpcStatus.Details() {
-		detail, ok := raw.(*wirev1.ErrorDetail)
-		if !ok || detail.GetCategory() == wirev1.ErrorCategory_ERROR_CATEGORY_UNSPECIFIED {
-			continue
+		switch detail := raw.(type) {
+		case *wirev1.ErrorDetail:
+			if detail.GetCategory() != wirev1.ErrorCategory_ERROR_CATEGORY_UNSPECIFIED {
+				result.Category = clientErrorCategory(detail.GetCategory())
+			}
+		case *wirev1.DiagnosticSet:
+			converted, conversionErr := convertDiagnosticSet(detail)
+			if conversionErr != nil {
+				return conversionErr
+			}
+
+			result.Diagnostics = converted
 		}
-
-		result.Category = clientErrorCategory(detail.GetCategory())
-
-		break
 	}
 
 	if result.Category == 0 {
@@ -122,15 +127,21 @@ func decodeError(err error) error {
 	return result
 }
 
-func convertFailure(value *wirev1.Failure) *Failure {
+func convertFailure(value *wirev1.Failure) (*Failure, error) {
 	if value == nil {
-		return nil
+		return nil, nil
+	}
+
+	convertedDiagnostics, err := convertDiagnosticSet(value.GetDiagnosticSet())
+	if err != nil {
+		return nil, err
 	}
 
 	return &Failure{
-		Category: clientErrorCategory(value.GetCategory()),
-		Message:  value.GetMessage(),
-	}
+		Category:    clientErrorCategory(value.GetCategory()),
+		Message:     value.GetMessage(),
+		Diagnostics: convertedDiagnostics,
+	}, nil
 }
 
 func clientErrorCategory(value wirev1.ErrorCategory) ErrorCategory {
@@ -151,8 +162,6 @@ func clientErrorCategory(value wirev1.ErrorCategory) ErrorCategory {
 		return ErrorInvalidState
 	case wirev1.ErrorCategory_ERROR_CATEGORY_WATCHER_LAGGED:
 		return ErrorWatcherLagged
-	case wirev1.ErrorCategory_ERROR_CATEGORY_VALUE_REFERENCE_NOT_FOUND:
-		return ErrorValueReferenceNotFound
 	case wirev1.ErrorCategory_ERROR_CATEGORY_BREAKPOINT_NOT_FOUND:
 		return ErrorBreakpointNotFound
 	default:

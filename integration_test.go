@@ -12,6 +12,8 @@ import (
 
 	"github.com/MontFerret/api"
 	"github.com/MontFerret/api/debugger"
+	"github.com/MontFerret/api/diagnostics"
+	"github.com/MontFerret/api/source"
 	"github.com/MontFerret/wire"
 	"github.com/MontFerret/wire/client"
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
@@ -247,6 +249,80 @@ func TestGenericRuntimeFailuresAreStructuredAndSanitized(t *testing.T) {
 	if wireErr.Message != "compilation failed" || strings.Contains(wireErr.Message, "secret") || len(wireErr.Diagnostics) != 0 {
 		t.Fatalf("runtime details escaped generic fallback: %#v", wireErr)
 	}
+}
+
+func TestPortableDiagnosticsCrossImmediateAndAsynchronousFailures(t *testing.T) {
+	values := testDiagnostics()
+
+	t.Run("compile status", func(t *testing.T) {
+		runtime := &apiRuntimeSpy{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
+			return nil, errors.Join(errors.New("runtime compiler secret"), values)
+		}}
+		env := newIntegrationEnv(t, runtime)
+
+		_, err := env.client.Compile(context.Background(), api.Source{Name: "query.fql", Content: "RETURN"}, client.CompileOptions{})
+		var wireErr *client.Error
+		if !errors.As(err, &wireErr) || wireErr.Category != client.ErrorCompilation {
+			t.Fatalf("unexpected compile error: %v", err)
+		}
+		if wireErr.Message != "compilation failed" || strings.Contains(wireErr.Message, "secret") ||
+			!reflect.DeepEqual(wireErr.Diagnostics, values) {
+			t.Fatalf("portable compile diagnostics changed: %#v", wireErr)
+		}
+	})
+
+	t.Run("execution failure", func(t *testing.T) {
+		plan := &apiPlanSpy{newSession: func(context.Context, apiSessionOptions) (api.Session, error) {
+			return &apiSessionSpy{run: func(context.Context) (api.Output, error) {
+				return api.Output{ContentType: "text/plain", Content: []byte("partial")},
+					errors.Join(errors.New("runtime execution secret"), values)
+			}}, nil
+		}}
+		runtime := &apiRuntimeSpy{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
+			return plan, nil
+		}}
+		env := newIntegrationEnv(t, runtime)
+
+		compiled, err := env.client.Compile(context.Background(), api.Source{Name: "query.fql", Content: "RETURN"}, client.CompileOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		execution, err := compiled.Execute(context.Background(), nil, client.ExecuteOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		output, err := execution.Wait(testContext(t))
+		var failure *client.Failure
+		if !errors.As(err, &failure) || failure.Category != client.ErrorExecution {
+			t.Fatalf("unexpected execution failure: %v", err)
+		}
+		if failure.Message != "runtime operation failed" || strings.Contains(failure.Message, "secret") ||
+			!reflect.DeepEqual(failure.Diagnostics, values) {
+			t.Fatalf("portable execution diagnostics changed: %#v", failure)
+		}
+		if output.ContentType != "text/plain" || string(output.Content) != "partial" {
+			t.Fatalf("partial encoded output changed: %#v", output)
+		}
+	})
+}
+
+func testDiagnostics() diagnostics.Diagnostics {
+	return diagnostics.Diagnostics{{
+		Kind:    diagnostics.TypeError,
+		Message: "expected an expression",
+		Source:  source.New("query.fql", "RETURN"),
+		Annotations: []diagnostics.Annotation{{
+			Range: source.Range{
+				Location: source.Location{Position: source.Position{Line: 1, Column: 6}, SourceName: "query.fql"},
+				Span:     source.Span{Start: 6, End: 6},
+			},
+			Message: "expression is missing",
+			Primary: true,
+		}},
+		Hint: "provide a value",
+		Note: "RETURN requires an expression",
+	}}
 }
 
 func TestMessageLimitsRemainAtTheGRPCBoundary(t *testing.T) {

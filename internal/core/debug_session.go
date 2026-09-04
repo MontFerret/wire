@@ -49,7 +49,7 @@ func newDebugSession(
 	maxWatchers int,
 	maxBreakpoints int,
 ) *DebugSession {
-	return &DebugSession{
+	session := &DebugSession{
 		id:          id,
 		owner:       owner,
 		planID:      planID,
@@ -60,6 +60,9 @@ func newDebugSession(
 		breakpoints: newBreakpointSet(maxBreakpoints),
 		events:      newEventStream[DebugEvent](maxWatchers),
 	}
+	session.publishLocked(DebugEventCreated, false)
+
+	return session
 }
 
 func (d *DebugSession) Close(ctx context.Context) error {
@@ -113,7 +116,7 @@ func (d *DebugSession) SetBreakpoint(
 	location source.Location,
 ) (debugger.Breakpoint, error) {
 	return d.SetBreakpointAt(ctx, location, debugger.BreakpointOptions{
-		BindingMode: debugger.BreakpointBindNextExecutableInFile,
+		BindingMode: debugger.BreakpointBindNextExecutableInSource,
 	})
 }
 
@@ -126,8 +129,8 @@ func (d *DebugSession) SetBreakpointAt(
 		return debugger.Breakpoint{}, err
 	}
 
-	if location.File == "" {
-		return debugger.Breakpoint{}, invalidRequest("breakpoint file is required")
+	if location.SourceName == "" {
+		return debugger.Breakpoint{}, invalidRequest("breakpoint source name is required")
 	}
 
 	if location.Line <= 0 {
@@ -219,16 +222,16 @@ func (d *DebugSession) Continue(ctx context.Context) (DebugSnapshot, error) {
 	return d.start(ctx, false, d.controller.Continue)
 }
 
-func (d *DebugSession) Next(ctx context.Context) (DebugSnapshot, error) {
-	return d.start(ctx, false, d.controller.Next)
+func (d *DebugSession) StepOver(ctx context.Context) (DebugSnapshot, error) {
+	return d.start(ctx, false, d.controller.StepOver)
 }
 
-func (d *DebugSession) Step(ctx context.Context) (DebugSnapshot, error) {
-	return d.start(ctx, false, d.controller.Step)
+func (d *DebugSession) StepIn(ctx context.Context) (DebugSnapshot, error) {
+	return d.start(ctx, false, d.controller.StepIn)
 }
 
-func (d *DebugSession) Out(ctx context.Context) (DebugSnapshot, error) {
-	return d.start(ctx, false, d.controller.Out)
+func (d *DebugSession) StepOut(ctx context.Context) (DebugSnapshot, error) {
+	return d.start(ctx, false, d.controller.StepOut)
 }
 
 func (d *DebugSession) Frames(ctx context.Context) ([]debugger.Frame, error) {
@@ -428,7 +431,7 @@ func (d *DebugSession) finishCommand(event *debugger.Event, commandErr error) {
 			d.publishLocked(DebugEventTerminated, true)
 		} else {
 			d.state.status = DebugFailed
-			d.state.failure = failureFromError(ErrorInternal)
+			d.state.failure = failureFromError(ErrorInternal, commandErr)
 			d.publishLocked(DebugEventFailed, true)
 		}
 
@@ -458,7 +461,7 @@ func (d *DebugSession) finishCommand(event *debugger.Event, commandErr error) {
 		case debugger.ReasonRuntimeError:
 			d.state.status = DebugStopped
 			d.state.reason = debugger.ReasonRuntimeError
-			d.state.failure = failureFromError(ErrorExecution)
+			d.state.failure = failureFromError(ErrorExecution, event.Error)
 			d.publishLocked(DebugEventStopped, false)
 		case debugger.ReasonCompleted:
 			d.state.status = DebugCompleted
@@ -475,7 +478,7 @@ func (d *DebugSession) finishCommand(event *debugger.Event, commandErr error) {
 		case debugger.ReasonTerminated:
 			if event.Error != nil && !errors.Is(context.Cause(d.ctx), context.Canceled) {
 				d.state.status = DebugFailed
-				d.state.failure = failureFromError(ErrorExecution)
+				d.state.failure = failureFromError(ErrorExecution, event.Error)
 				d.publishLocked(DebugEventFailed, true)
 			} else {
 				d.state.status = DebugTerminated
@@ -485,7 +488,7 @@ func (d *DebugSession) finishCommand(event *debugger.Event, commandErr error) {
 			terminal = true
 		default:
 			d.state.status = DebugFailed
-			d.state.failure = failureFromError(ErrorInternal)
+			d.state.failure = failureFromError(ErrorInternal, nil)
 			d.publishLocked(DebugEventFailed, true)
 			terminal = true
 		}
@@ -538,7 +541,7 @@ func (d *DebugSession) poisonAfterRuntimePanic(operation string, err error) erro
 	d.stateMu.Lock()
 	if !d.state.status.terminal() {
 		d.state.status = DebugFailed
-		d.state.failure = failureFromError(ErrorInternal)
+		d.state.failure = failureFromError(ErrorInternal, err)
 		d.publishLocked(DebugEventFailed, true)
 	}
 	d.stateMu.Unlock()

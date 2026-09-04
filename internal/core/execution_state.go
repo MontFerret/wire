@@ -1,5 +1,7 @@
 package core
 
+import "github.com/MontFerret/api/diagnostics"
+
 type (
 	ExecutionState uint8
 
@@ -9,8 +11,9 @@ type (
 	}
 
 	Failure struct {
-		Category ErrorCategory
-		Message  string
+		Category    ErrorCategory
+		Message     string
+		Diagnostics diagnostics.Diagnostics
 	}
 
 	ExecutionSnapshot struct {
@@ -37,7 +40,11 @@ func (s ExecutionSnapshot) clone() ExecutionSnapshot {
 	}
 
 	if s.Failure != nil {
-		result.Failure = &Failure{Category: s.Failure.Category, Message: s.Failure.Message}
+		result.Failure = &Failure{
+			Category:    s.Failure.Category,
+			Message:     s.Failure.Message,
+			Diagnostics: cloneDiagnostics(s.Failure.Diagnostics),
+		}
 	}
 
 	return result

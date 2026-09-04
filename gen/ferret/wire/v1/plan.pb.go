@@ -78,8 +78,9 @@ func (OptimizationLevel) EnumDescriptor() ([]byte, []int) {
 }
 
 type PlanId struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Value         string                 `protobuf:"bytes,1,opt,name=value,proto3" json:"value,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// value is opaque and valid only within the owning logical connection.
+	Value         string `protobuf:"bytes,1,opt,name=value,proto3" json:"value,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -166,9 +167,10 @@ func (x *CompileOptions) GetOptimizationLevel() OptimizationLevel {
 }
 
 type Plan struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            *PlanId                `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Parameters    []string               `protobuf:"bytes,2,rep,name=parameters,proto3" json:"parameters,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Id    *PlanId                `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	// parameters preserves the order reported by the hosted Unified API plan.
+	Parameters    []string `protobuf:"bytes,2,rep,name=parameters,proto3" json:"parameters,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -278,8 +280,9 @@ func (x *CompileRequest) GetOptions() *CompileOptions {
 }
 
 type CompileResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Plan          *Plan                  `protobuf:"bytes,1,opt,name=plan,proto3" json:"plan,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// plan is present on success. Portable compile diagnostics use gRPC status details.
+	Plan          *Plan `protobuf:"bytes,1,opt,name=plan,proto3" json:"plan,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -382,8 +385,9 @@ func (x *CompileDebugRequest) GetOptions() *CompileOptions {
 }
 
 type CompileDebugResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Plan          *Plan                  `protobuf:"bytes,1,opt,name=plan,proto3" json:"plan,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// plan is present on success. It may create multiple independent debug sessions.
+	Plan          *Plan `protobuf:"bytes,1,opt,name=plan,proto3" json:"plan,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }

@@ -25,6 +25,7 @@ const (
 	DebugEventCompleted
 	DebugEventFailed
 	DebugEventTerminated
+	DebugEventCreated
 )
 
 func (e DebugEvent) clone() DebugEvent {

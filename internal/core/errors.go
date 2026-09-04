@@ -1,6 +1,10 @@
 package core
 
-import "errors"
+import (
+	"errors"
+
+	"github.com/MontFerret/api/diagnostics"
+)
 
 var ErrWatcherLagged = errors.New("wire watcher lagged")
 
@@ -37,6 +41,42 @@ func ignoreMissingResource(err error, category ErrorCategory) error {
 	return err
 }
 
-func failureFromError(category ErrorCategory) *Failure {
-	return &Failure{Category: category, Message: "runtime operation failed"}
+func failureFromError(category ErrorCategory, err error) *Failure {
+	return &Failure{
+		Category:    category,
+		Message:     "runtime operation failed",
+		Diagnostics: diagnosticsFromError(err),
+	}
+}
+
+func diagnosticsFromError(err error) diagnostics.Diagnostics {
+	if err == nil {
+		return nil
+	}
+
+	var values diagnostics.Diagnostics
+	if errors.As(err, &values) {
+		return cloneDiagnostics(values)
+	}
+
+	var pointer *diagnostics.Diagnostics
+	if errors.As(err, &pointer) && pointer != nil {
+		return cloneDiagnostics(*pointer)
+	}
+
+	return nil
+}
+
+func cloneDiagnostics(values diagnostics.Diagnostics) diagnostics.Diagnostics {
+	if values == nil {
+		return nil
+	}
+
+	result := make(diagnostics.Diagnostics, len(values))
+	for i, value := range values {
+		result[i] = value
+		result[i].Annotations = append([]diagnostics.Annotation(nil), value.Annotations...)
+	}
+
+	return result
 }

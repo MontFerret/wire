@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/MontFerret/api/diagnostics"
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
 	"github.com/MontFerret/wire/internal/core"
 	"google.golang.org/grpc/codes"
@@ -45,7 +46,7 @@ func rpcError(err error) error {
 	case core.ErrorInvalidRequest, core.ErrorCompilation:
 		code = codes.InvalidArgument
 	case core.ErrorPlanNotFound, core.ErrorExecutionNotFound, core.ErrorDebugSessionNotFound,
-		core.ErrorConnectionNotFound, core.ErrorValueReferenceNotFound, core.ErrorBreakpointNotFound:
+		core.ErrorConnectionNotFound, core.ErrorBreakpointNotFound:
 		code = codes.NotFound
 	case core.ErrorInvalidState:
 		code = codes.FailedPrecondition
@@ -60,10 +61,28 @@ func rpcError(err error) error {
 		message = "internal runtime failure"
 	}
 
-	return statusWithCategory(code, message, errorCategory(domain.Category))
+	diagnosticSet, conversionErr := diagnosticSetFromError(err)
+	if conversionErr != nil {
+		return statusWithCategory(
+			codes.Internal,
+			"internal runtime failure",
+			wirev1.ErrorCategory_ERROR_CATEGORY_INTERNAL_RUNTIME_FAILURE,
+		)
+	}
+
+	return statusWithDiagnostics(code, message, errorCategory(domain.Category), diagnosticSet)
 }
 
 func statusWithCategory(code codes.Code, message string, category wirev1.ErrorCategory) error {
+	return statusWithDiagnostics(code, message, category, nil)
+}
+
+func statusWithDiagnostics(
+	code codes.Code,
+	message string,
+	category wirev1.ErrorCategory,
+	diagnosticSet *wirev1.DiagnosticSet,
+) error {
 	base := status.New(code, message)
 	if category == wirev1.ErrorCategory_ERROR_CATEGORY_UNSPECIFIED {
 		return base.Err()
@@ -74,7 +93,30 @@ func statusWithCategory(code codes.Code, message string, category wirev1.ErrorCa
 		return base.Err()
 	}
 
+	if diagnosticSet != nil {
+		withDiagnostics, err := withDetails.WithDetails(diagnosticSet)
+		if err != nil {
+			return withDetails.Err()
+		}
+
+		withDetails = withDiagnostics
+	}
+
 	return withDetails.Err()
+}
+
+func diagnosticSetFromError(err error) (*wirev1.DiagnosticSet, error) {
+	var values diagnostics.Diagnostics
+	if errors.As(err, &values) {
+		return diagnosticsToProto(values)
+	}
+
+	var pointer *diagnostics.Diagnostics
+	if errors.As(err, &pointer) && pointer != nil {
+		return diagnosticsToProto(*pointer)
+	}
+
+	return nil, nil
 }
 
 func errorCategory(value core.ErrorCategory) wirev1.ErrorCategory {
@@ -95,8 +137,6 @@ func errorCategory(value core.ErrorCategory) wirev1.ErrorCategory {
 		return wirev1.ErrorCategory_ERROR_CATEGORY_INVALID_STATE
 	case core.ErrorWatcherLagged:
 		return wirev1.ErrorCategory_ERROR_CATEGORY_WATCHER_LAGGED
-	case core.ErrorValueReferenceNotFound:
-		return wirev1.ErrorCategory_ERROR_CATEGORY_VALUE_REFERENCE_NOT_FOUND
 	case core.ErrorBreakpointNotFound:
 		return wirev1.ErrorCategory_ERROR_CATEGORY_BREAKPOINT_NOT_FOUND
 	case core.ErrorInternal:

@@ -10,12 +10,17 @@ func convertOutput(value *wirev1.Output) *Output {
 	return &Output{ContentType: value.GetContentType(), Content: append([]byte(nil), value.GetContent()...)}
 }
 
-func convertExecutionSnapshot(value *wirev1.Execution) ExecutionSnapshot {
+func convertExecutionSnapshot(value *wirev1.Execution) (ExecutionSnapshot, error) {
+	failure, err := convertFailure(value.GetFailure())
+	if err != nil {
+		return ExecutionSnapshot{}, err
+	}
+
 	return ExecutionSnapshot{
 		State:   convertExecutionState(value.GetState()),
 		Output:  convertOutput(value.GetOutput()),
-		Failure: convertFailure(value.GetFailure()),
-	}
+		Failure: failure,
+	}, nil
 }
 
 func convertExecutionState(value wirev1.ExecutionState) ExecutionState {
@@ -33,9 +38,14 @@ func convertExecutionState(value wirev1.ExecutionState) ExecutionState {
 	}
 }
 
-func convertExecutionEvent(value *wirev1.WatchExecutionResponse) ExecutionEvent {
+func convertExecutionEvent(value *wirev1.WatchExecutionResponse) (ExecutionEvent, error) {
+	snapshot, err := convertExecutionSnapshot(value.GetExecution())
+	if err != nil {
+		return ExecutionEvent{}, err
+	}
+
 	return ExecutionEvent{
 		Sequence: value.GetSequence(),
-		Snapshot: convertExecutionSnapshot(value.GetExecution()),
-	}
+		Snapshot: snapshot,
+	}, nil
 }

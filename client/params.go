@@ -69,8 +69,17 @@ func encodeValue(value any, depth int) (*wirev1.Value, error) {
 
 		return &wirev1.Value{Value: &wirev1.Value_IntegerValue{IntegerValue: int64(value)}}, nil
 	case float32:
-		return &wirev1.Value{Value: &wirev1.Value_FloatValue{FloatValue: float64(value)}}, nil
+		converted := float64(value)
+		if math.IsNaN(converted) || math.IsInf(converted, 0) {
+			return nil, fmt.Errorf("floating-point value must be finite")
+		}
+
+		return &wirev1.Value{Value: &wirev1.Value_FloatValue{FloatValue: converted}}, nil
 	case float64:
+		if math.IsNaN(value) || math.IsInf(value, 0) {
+			return nil, fmt.Errorf("floating-point value must be finite")
+		}
+
 		return &wirev1.Value{Value: &wirev1.Value_FloatValue{FloatValue: value}}, nil
 	case string:
 		return &wirev1.Value{Value: &wirev1.Value_StringValue{StringValue: value}}, nil

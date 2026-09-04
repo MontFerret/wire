@@ -614,8 +614,8 @@ func TestDebugUsesUnifiedSessionAndPreservesWireState(t *testing.T) {
 				HitBreakpointIDs: hitIDs,
 				Depth:            4,
 				Location: source.Range{Location: source.Location{
-					Position: source.Position{Line: 1, Column: 2},
-					File:     "debug.fql",
+					Position:   source.Position{Line: 1, Column: 2},
+					SourceName: "debug.fql",
 				}, Span: source.Span{Start: 3, End: 8}},
 			}, nil
 		},
@@ -629,8 +629,8 @@ func TestDebugUsesUnifiedSessionAndPreservesWireState(t *testing.T) {
 			Name:       "main",
 			FunctionID: 17,
 			Location: source.Location{
-				Position: source.Position{Line: 1, Column: 2},
-				File:     "debug.fql",
+				Position:   source.Position{Line: 1, Column: 2},
+				SourceName: "debug.fql",
 			},
 		}},
 		locals: []debugger.Variable{{
@@ -662,7 +662,7 @@ func TestDebugUsesUnifiedSessionAndPreservesWireState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	requested := source.Location{Position: source.Position{Line: 1, Column: 2}, File: "debug.fql"}
+	requested := source.Location{Position: source.Position{Line: 1, Column: 2}, SourceName: "debug.fql"}
 	breakpoint, err := connection.SetBreakpoint(context.Background(), opened.ID, requested)
 	if err != nil {
 		t.Fatal(err)

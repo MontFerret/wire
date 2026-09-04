@@ -81,6 +81,21 @@ func TestDebugEventsDistinguishStartedFromContinued(t *testing.T) {
 	}
 }
 
+func TestDebugEventsExposeCreatedSnapshot(t *testing.T) {
+	event, err := convertDebugEvent(&wirev1.WatchDebugResponse{
+		Sequence: 1,
+		Kind:     wirev1.DebugEventKind_DEBUG_EVENT_KIND_CREATED,
+		Session:  &wirev1.DebugSession{State: wirev1.DebugState_DEBUG_STATE_CREATED},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if event.Sequence != 1 || event.Kind != DebugEventCreated || event.Snapshot.State != DebugCreated {
+		t.Fatalf("created snapshot changed: %#v", event)
+	}
+}
+
 func TestDebugStopReasonsUseUnifiedAPIValues(t *testing.T) {
 	tests := []struct {
 		transport wirev1.DebugStopReason
@@ -121,7 +136,7 @@ func TestDebugConversionsUseUnifiedAPITypesAndPreserveTransportFields(t *testing
 		t.Fatal(err)
 	}
 	if snapshot.StopReason != debugger.ReasonBreakpoint || snapshot.Location == nil ||
-		snapshot.Location.Location != (source.Location{Position: source.Position{Line: 4, Column: 2}, File: "debug.fql"}) ||
+		snapshot.Location.Location != (source.Location{Position: source.Position{Line: 4, Column: 2}, SourceName: "debug.fql"}) ||
 		snapshot.Location.Span != (source.Span{Start: 12, End: 18}) || snapshot.Depth != 3 ||
 		len(snapshot.HitBreakpointIDs) != 1 || snapshot.HitBreakpointIDs[0] != 7 {
 		t.Fatalf("unexpected Unified API snapshot: %#v", snapshot)
@@ -307,7 +322,7 @@ func TestDebugEventsCancelWatchOnMalformedServerValue(t *testing.T) {
 }
 
 func debugTestLocation(file string, line int64, column int64) *wirev1.Location {
-	return &wirev1.Location{File: file, Position: &wirev1.Position{Line: line, Column: column}}
+	return &wirev1.Location{SourceName: file, Position: &wirev1.Position{Line: line, Column: column}}
 }
 
 func debugTestRange(file string, line int64, column int64, start int64, end int64) *wirev1.Range {

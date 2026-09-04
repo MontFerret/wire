@@ -47,7 +47,6 @@ const (
 	ErrorUnsupported
 	ErrorInternal
 	ErrorWatcherLagged
-	ErrorValueReferenceNotFound
 	ErrorResourceExhausted
 	ErrorBreakpointNotFound
 )

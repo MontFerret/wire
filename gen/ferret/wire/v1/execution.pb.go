@@ -77,8 +77,9 @@ func (ExecutionState) EnumDescriptor() ([]byte, []int) {
 }
 
 type ExecutionId struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Value         string                 `protobuf:"bytes,1,opt,name=value,proto3" json:"value,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// value is opaque and valid only within the owning logical connection.
+	Value         string `protobuf:"bytes,1,opt,name=value,proto3" json:"value,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -121,11 +122,14 @@ func (x *ExecutionId) GetValue() string {
 }
 
 type Execution struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            *ExecutionId           `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	State         ExecutionState         `protobuf:"varint,3,opt,name=state,proto3,enum=ferret.wire.v1.ExecutionState" json:"state,omitempty"`
-	Output        *Output                `protobuf:"bytes,4,opt,name=output,proto3" json:"output,omitempty"`
-	Failure       *Failure               `protobuf:"bytes,5,opt,name=failure,proto3" json:"failure,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Id    *ExecutionId           `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	// state is the only execution lifecycle discriminator.
+	State ExecutionState `protobuf:"varint,3,opt,name=state,proto3,enum=ferret.wire.v1.ExecutionState" json:"state,omitempty"`
+	// output is required on completion and may contain partial output on other terminal states.
+	Output *Output `protobuf:"bytes,4,opt,name=output,proto3" json:"output,omitempty"`
+	// failure is present only for failed executions.
+	Failure       *Failure `protobuf:"bytes,5,opt,name=failure,proto3" json:"failure,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -189,9 +193,11 @@ func (x *Execution) GetFailure() *Failure {
 }
 
 type WatchExecutionResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Sequence      uint64                 `protobuf:"varint,2,opt,name=sequence,proto3" json:"sequence,omitempty"`
-	Execution     *Execution             `protobuf:"bytes,8,opt,name=execution,proto3" json:"execution,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// sequence is positive and monotonic within one Execution event history.
+	Sequence uint64 `protobuf:"varint,2,opt,name=sequence,proto3" json:"sequence,omitempty"`
+	// execution is the latest complete snapshot, including for replayed terminal state.
+	Execution     *Execution `protobuf:"bytes,8,opt,name=execution,proto3" json:"execution,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -241,11 +247,12 @@ func (x *WatchExecutionResponse) GetExecution() *Execution {
 }
 
 type ExecuteRequest struct {
-	state             protoimpl.MessageState `protogen:"open.v1"`
-	ConnectionId      *ConnectionId          `protobuf:"bytes,1,opt,name=connection_id,json=connectionId,proto3" json:"connection_id,omitempty"`
-	PlanId            *PlanId                `protobuf:"bytes,2,opt,name=plan_id,json=planId,proto3" json:"plan_id,omitempty"`
-	Parameters        *Parameters            `protobuf:"bytes,3,opt,name=parameters,proto3" json:"parameters,omitempty"`
-	OutputContentType string                 `protobuf:"bytes,4,opt,name=output_content_type,json=outputContentType,proto3" json:"output_content_type,omitempty"`
+	state        protoimpl.MessageState `protogen:"open.v1"`
+	ConnectionId *ConnectionId          `protobuf:"bytes,1,opt,name=connection_id,json=connectionId,proto3" json:"connection_id,omitempty"`
+	PlanId       *PlanId                `protobuf:"bytes,2,opt,name=plan_id,json=planId,proto3" json:"plan_id,omitempty"`
+	Parameters   *Parameters            `protobuf:"bytes,3,opt,name=parameters,proto3" json:"parameters,omitempty"`
+	// output_content_type requests a runtime-supported encoded output codec; empty preserves the runtime default.
+	OutputContentType string `protobuf:"bytes,4,opt,name=output_content_type,json=outputContentType,proto3" json:"output_content_type,omitempty"`
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
 }
@@ -309,8 +316,9 @@ func (x *ExecuteRequest) GetOutputContentType() string {
 }
 
 type ExecuteResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Execution     *Execution             `protobuf:"bytes,1,opt,name=execution,proto3" json:"execution,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// execution is present and already in RUNNING state.
+	Execution     *Execution `protobuf:"bytes,1,opt,name=execution,proto3" json:"execution,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }

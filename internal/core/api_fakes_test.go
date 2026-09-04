@@ -49,6 +49,7 @@ type (
 		breakpoints      map[debugger.BreakpointID]debugger.Breakpoint
 		frames           []debugger.Frame
 		locals           []debugger.Variable
+		variables        func(debugger.ValueReference) ([]debugger.Variable, error)
 		setCalls         int
 		deleteCalls      int
 		pauseCalls       int
@@ -262,15 +263,15 @@ func (d *spyDebugger) Continue(ctx context.Context) (*debugger.Event, error) {
 	return d.resumeDebug(ctx)
 }
 
-func (d *spyDebugger) Step(ctx context.Context) (*debugger.Event, error) {
+func (d *spyDebugger) StepIn(ctx context.Context) (*debugger.Event, error) {
 	return d.resumeDebug(ctx)
 }
 
-func (d *spyDebugger) Next(ctx context.Context) (*debugger.Event, error) {
+func (d *spyDebugger) StepOver(ctx context.Context) (*debugger.Event, error) {
 	return d.resumeDebug(ctx)
 }
 
-func (d *spyDebugger) Out(ctx context.Context) (*debugger.Event, error) {
+func (d *spyDebugger) StepOut(ctx context.Context) (*debugger.Event, error) {
 	return d.resumeDebug(ctx)
 }
 
@@ -376,7 +377,11 @@ func (d *spyDebugger) FrameLocals(int) ([]debugger.Variable, error) {
 	return append([]debugger.Variable(nil), d.locals...), nil
 }
 
-func (d *spyDebugger) Variables(debugger.ValueReference) ([]debugger.Variable, error) {
+func (d *spyDebugger) Variables(reference debugger.ValueReference) ([]debugger.Variable, error) {
+	if d.variables != nil {
+		return d.variables(reference)
+	}
+
 	return append([]debugger.Variable(nil), d.locals...), nil
 }
 

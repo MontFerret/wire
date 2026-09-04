@@ -54,7 +54,8 @@ const (
 	DebugTerminated
 )
 
-// Debug event kinds. Every session has one ordered terminal event.
+// Debug event kinds. Every session starts with a created event and has one
+// ordered terminal event.
 const (
 	DebugEventStarted DebugEventKind = iota + 1
 	DebugEventContinued
@@ -62,6 +63,7 @@ const (
 	DebugEventCompleted
 	DebugEventFailed
 	DebugEventTerminated
+	DebugEventCreated
 )
 
 // Watch opens an ordered event stream tied to both ctx and the Client's

@@ -125,7 +125,7 @@ func (e *Execution) finish(output *Output, err error, category ErrorCategory) {
 		e.publishLocked(ExecutionEventCancelled, true)
 	case err != nil:
 		e.state = ExecutionFailed
-		e.failure = failureFromError(category)
+		e.failure = failureFromError(category, err)
 		e.publishLocked(ExecutionEventFailed, true)
 	default:
 		e.state = ExecutionCompleted
@@ -190,7 +190,11 @@ func (e *Execution) snapshotLocked() ExecutionSnapshot {
 	}
 
 	if e.failure != nil {
-		result.Failure = &Failure{Category: e.failure.Category, Message: e.failure.Message}
+		result.Failure = &Failure{
+			Category:    e.failure.Category,
+			Message:     e.failure.Message,
+			Diagnostics: cloneDiagnostics(e.failure.Diagnostics),
+		}
 	}
 
 	return result

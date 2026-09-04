@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/MontFerret/api/debugger"
+	"github.com/MontFerret/api/diagnostics"
 	"github.com/MontFerret/api/source"
 	"github.com/MontFerret/wire/internal/panicboundary"
 )
@@ -34,6 +35,195 @@ func TestDebugSessionRejectsInvalidCommandWithoutRuntimeOrEvent(t *testing.T) {
 	case event := <-subscription.Events:
 		t.Fatalf("invalid command published event: %#v", event)
 	case <-time.After(25 * time.Millisecond):
+	}
+
+	closeTestCoreDebugSession(t, session)
+}
+
+func TestDebugSessionPublishesAndReplaysCreatedAndRunningSnapshots(t *testing.T) {
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	runtime := &spyDebugger{start: func(context.Context) (*debugger.Event, error) {
+		close(entered)
+		<-release
+
+		return &debugger.Event{Reason: debugger.ReasonEntry}, nil
+	}}
+	session := newTestCoreDebugSession(t, runtime, 1)
+	created, err := session.Watch()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.Current.Sequence != 1 || created.Current.Kind != DebugEventCreated ||
+		created.Current.Snapshot.State != DebugCreated {
+		t.Fatalf("unexpected created snapshot: %#v", created.Current)
+	}
+	created.Cancel()
+
+	if _, err := session.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	<-entered
+
+	running, err := session.Watch()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer running.Cancel()
+	if running.Current.Sequence != 2 || running.Current.Kind != DebugEventStarted ||
+		running.Current.Snapshot.State != DebugRunning {
+		t.Fatalf("unexpected running replay: %#v", running.Current)
+	}
+
+	close(release)
+	stopped := receiveDebugEvent(t, running.Events)
+	if stopped.Sequence != 3 || stopped.Kind != DebugEventStopped || stopped.Snapshot.State != DebugStopped {
+		t.Fatalf("unexpected stopped event: %#v", stopped)
+	}
+
+	closeTestCoreDebugSession(t, session)
+}
+
+func TestDebugWatchDisconnectDoesNotCancelSession(t *testing.T) {
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	cancelled := make(chan bool, 1)
+	runtime := &spyDebugger{start: func(ctx context.Context) (*debugger.Event, error) {
+		close(entered)
+		select {
+		case <-ctx.Done():
+			cancelled <- true
+
+			return nil, ctx.Err()
+		case <-release:
+			cancelled <- false
+
+			return &debugger.Event{Reason: debugger.ReasonEntry}, nil
+		}
+	}}
+	session := newTestCoreDebugSession(t, runtime, 1)
+	subscription, err := session.Watch()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := session.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	<-entered
+	_ = receiveDebugEvent(t, subscription.Events)
+	subscription.Cancel()
+
+	select {
+	case wasCancelled := <-cancelled:
+		t.Fatalf("watch disconnect settled runtime command; cancelled=%v", wasCancelled)
+	case <-time.After(25 * time.Millisecond):
+	}
+	if snapshot := session.snapshot(); snapshot.State != DebugRunning {
+		t.Fatalf("watch disconnect changed debug state: %#v", snapshot)
+	}
+
+	close(release)
+	if wasCancelled := <-cancelled; wasCancelled {
+		t.Fatal("watch disconnect cancelled the debug operation")
+	}
+	_ = waitCoreDebugState(t, session, DebugStopped)
+	closeTestCoreDebugSession(t, session)
+}
+
+func TestDebugValueReferenceValidationUsesCurrentStoppedState(t *testing.T) {
+	runtimeErr := errors.New("stale runtime reference")
+	var calls atomic.Int32
+	runtime := &spyDebugger{variables: func(debugger.ValueReference) ([]debugger.Variable, error) {
+		calls.Add(1)
+
+		return nil, runtimeErr
+	}}
+	session := newTestCoreDebugSession(t, runtime, 1)
+	session.state.status = DebugStopped
+
+	if _, err := session.Variables(context.Background(), 0); !hasCategory(err, ErrorInvalidRequest) {
+		t.Fatalf("zero reference did not fail as invalid argument: %v", err)
+	}
+	if calls.Load() != 0 {
+		t.Fatal("zero reference reached the runtime")
+	}
+	if _, err := session.Variables(context.Background(), 17); !hasCategory(err, ErrorInvalidState) || !errors.Is(err, runtimeErr) {
+		t.Fatalf("stale positive reference did not use InvalidState: %v", err)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("positive reference reached the runtime %d times", calls.Load())
+	}
+
+	closeTestCoreDebugSession(t, session)
+}
+
+func TestDebugSessionRuntimeErrorPreservesPortableDiagnostics(t *testing.T) {
+	values := diagnostics.Diagnostics{{
+		Kind:    diagnostics.TypeError,
+		Message: "invalid expression",
+		Source:  source.New("query.fql", "RETURN true + 1"),
+		Annotations: []diagnostics.Annotation{{
+			Range: source.Range{
+				Location: source.Location{Position: source.Position{Line: 1, Column: 7}, SourceName: "query.fql"},
+				Span:     source.Span{Start: 7, End: 15},
+			},
+			Primary: true,
+		}},
+	}}
+	runtime := &spyDebugger{start: func(context.Context) (*debugger.Event, error) {
+		return &debugger.Event{Reason: debugger.ReasonRuntimeError, Error: errors.Join(errors.New("secret"), values)}, nil
+	}}
+	session := newTestCoreDebugSession(t, runtime, 1)
+	subscription, err := session.Watch()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer subscription.Cancel()
+
+	if _, err := session.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	_ = receiveDebugEvent(t, subscription.Events)
+	stopped := receiveDebugEvent(t, subscription.Events)
+	if stopped.Kind != DebugEventStopped || stopped.Snapshot.State != DebugStopped ||
+		stopped.Snapshot.Failure == nil || stopped.Snapshot.Failure.Message != "runtime operation failed" ||
+		!reflect.DeepEqual(stopped.Snapshot.Failure.Diagnostics, values) {
+		t.Fatalf("portable debug diagnostics changed: %#v", stopped)
+	}
+
+	values[0].Annotations[0].Message = "mutated"
+	if stopped.Snapshot.Failure.Diagnostics[0].Annotations[0].Message == "mutated" {
+		t.Fatal("debug snapshot retained runtime diagnostic storage")
+	}
+
+	closeTestCoreDebugSession(t, session)
+}
+
+func TestDebugSessionFailurePreservesPortableDiagnostics(t *testing.T) {
+	values := diagnostics.Diagnostics{{
+		Kind:    diagnostics.UnexpectedError,
+		Message: "debug execution failed",
+		Source:  source.New("query.fql", "RETURN 1"),
+	}}
+	runtime := &spyDebugger{start: func(context.Context) (*debugger.Event, error) {
+		return &debugger.Event{Reason: debugger.ReasonTerminated, Error: values}, nil
+	}}
+	session := newTestCoreDebugSession(t, runtime, 1)
+	subscription, err := session.Watch()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer subscription.Cancel()
+
+	if _, err := session.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	_ = receiveDebugEvent(t, subscription.Events)
+	failed := receiveDebugEvent(t, subscription.Events)
+	if failed.Kind != DebugEventFailed || failed.Snapshot.State != DebugFailed ||
+		failed.Snapshot.Failure == nil || !reflect.DeepEqual(failed.Snapshot.Failure.Diagnostics, values) {
+		t.Fatalf("portable terminal debug diagnostics changed: %#v", failed)
 	}
 
 	closeTestCoreDebugSession(t, session)
@@ -135,7 +325,7 @@ func TestDebugSessionCommandPanicPublishesFailureAndClosesRuntime(t *testing.T) 
 }
 
 func TestDebugSessionSynchronousPanicPoisonsAndClosesRuntime(t *testing.T) {
-	location := source.Location{File: "query.fql", Position: source.Position{Line: 1}}
+	location := source.Location{SourceName: "query.fql", Position: source.Position{Line: 1}}
 	tests := []struct {
 		name    string
 		state   DebugState
@@ -237,7 +427,7 @@ func TestDebugSessionStoppedOperationsSerializeWithoutHoldingStateLock(t *testin
 		}, nil
 	}}
 	session := newTestCoreDebugSession(t, runtime, 2)
-	location := source.Location{File: "query.fql", Position: source.Position{Line: 1}}
+	location := source.Location{SourceName: "query.fql", Position: source.Position{Line: 1}}
 	results := make(chan error, 2)
 
 	go func() {
@@ -354,7 +544,7 @@ func TestDebugSessionCloseReachesRuntimeDuringBlockedStoppedOperation(t *testing
 		},
 	}
 	session := newTestCoreDebugSession(t, runtime, 1)
-	location := source.Location{File: "query.fql", Position: source.Position{Line: 1}}
+	location := source.Location{SourceName: "query.fql", Position: source.Position{Line: 1}}
 	operationResult := make(chan error, 1)
 	go func() {
 		_, err := session.SetBreakpoint(context.Background(), location)

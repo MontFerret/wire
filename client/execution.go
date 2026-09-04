@@ -209,7 +209,13 @@ func (events *ExecutionEvents) Recv() (ExecutionEvent, error) {
 		return ExecutionEvent{}, fmt.Errorf("Wire server returned an empty execution event")
 	}
 
-	event := convertExecutionEvent(value)
+	event, err := convertExecutionEvent(value)
+	if err != nil {
+		events.cancel()
+
+		return ExecutionEvent{}, err
+	}
+
 	if event.Snapshot.State.Terminal() {
 		events.cancel()
 	}

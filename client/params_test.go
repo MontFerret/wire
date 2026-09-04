@@ -37,6 +37,11 @@ func TestEncodeParametersUsesExplicitWireVariants(t *testing.T) {
 func TestEncodeParametersRejectsUnsupportedAndOutOfRangeValues(t *testing.T) {
 	for _, values := range []map[string]any{
 		{"too_large": uint64(math.MaxInt64) + 1},
+		{"nan64": math.NaN()},
+		{"positive_infinity64": math.Inf(1)},
+		{"negative_infinity64": math.Inf(-1)},
+		{"positive_infinity32": float32(math.Inf(1))},
+		{"nested_nan": map[string]any{"value": []any{math.NaN()}}},
 		{"unsupported": []string{"implicit reflection is not supported"}},
 		{"duration": 5 * time.Second},
 		{"datetime": time.Now()},
@@ -49,11 +54,20 @@ func TestEncodeParametersRejectsUnsupportedAndOutOfRangeValues(t *testing.T) {
 		}
 	}
 
+	boundaries, err := encodeParameters(map[string]any{"minimum": int64(math.MinInt64), "maximum": int64(math.MaxInt64)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if boundaries.GetValues()["minimum"].GetIntegerValue() != math.MinInt64 ||
+		boundaries.GetValues()["maximum"].GetIntegerValue() != math.MaxInt64 {
+		t.Fatalf("signed int64 boundaries changed: %#v", boundaries.GetValues())
+	}
+
 	nested := any("leaf")
 	for range maxParameterDepth {
 		nested = []any{nested}
 	}
-	_, err := encodeParameters(map[string]any{"nested": nested})
+	_, err = encodeParameters(map[string]any{"nested": nested})
 	if err == nil || !strings.Contains(err.Error(), "nesting") {
 		t.Fatalf("unexpected nesting error: %v", err)
 	}

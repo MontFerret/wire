@@ -29,7 +29,12 @@ func (s *Server) Execute(ctx context.Context, request *wirev1.ExecuteRequest) (*
 		return nil, rpcError(err)
 	}
 
-	return &wirev1.ExecuteResponse{Execution: execution(snapshot)}, nil
+	converted, err := execution(snapshot)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+
+	return &wirev1.ExecuteResponse{Execution: converted}, nil
 }
 
 func (s *Server) CancelExecution(ctx context.Context, request *wirev1.CancelExecutionRequest) (*wirev1.CancelExecutionResponse, error) {
@@ -86,7 +91,12 @@ func (s *Server) WatchExecution(request *wirev1.WatchExecutionRequest, stream wi
 	defer subscription.Cancel()
 
 	if subscription.Current.Sequence > 0 {
-		if err := stream.Send(executionEvent(subscription.Current)); err != nil {
+		converted, err := executionEvent(subscription.Current)
+		if err != nil {
+			return rpcError(err)
+		}
+
+		if err := stream.Send(converted); err != nil {
 			return err
 		}
 	}
@@ -103,7 +113,12 @@ func (s *Server) WatchExecution(request *wirev1.WatchExecutionRequest, stream wi
 				return subscriptionError(errorsChannel)
 			}
 
-			if err := stream.Send(executionEvent(event)); err != nil {
+			converted, err := executionEvent(event)
+			if err != nil {
+				return rpcError(err)
+			}
+
+			if err := stream.Send(converted); err != nil {
 				return err
 			}
 		case watchErr, ok := <-errorsChannel:

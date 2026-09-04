@@ -30,6 +30,23 @@ func TestProtocolDescriptorsReserveRemovedV1Surface(t *testing.T) {
 			reserved: []protoreflect.Name{"identity"},
 		},
 		{
+			message:  wirev1.File_ferret_wire_v1_source_proto.Messages().ByName("Location"),
+			fields:   []protoreflect.Name{"source_name", "position"},
+			reserved: []protoreflect.Name{"file"},
+		},
+		{
+			message:  wirev1.File_ferret_wire_v1_runtime_proto.Messages().ByName("Diagnostic"),
+			fields:   []protoreflect.Name{"kind", "message", "hint", "note", "source", "annotations"},
+			numbers:  []protoreflect.FieldNumber{5, 6},
+			reserved: []protoreflect.Name{"source_identity", "spans"},
+		},
+		{
+			message:  wirev1.File_ferret_wire_v1_runtime_proto.Messages().ByName("Failure"),
+			fields:   []protoreflect.Name{"category", "message", "diagnostic_set"},
+			numbers:  []protoreflect.FieldNumber{3},
+			reserved: []protoreflect.Name{"diagnostics"},
+		},
+		{
 			message:  wirev1.File_ferret_wire_v1_plan_proto.Messages().ByName("CompileOptions"),
 			fields:   []protoreflect.Name{"optimization_level"},
 			numbers:  []protoreflect.FieldNumber{1},
@@ -112,14 +129,13 @@ func TestProtocolDescriptorsReserveRemovedV1Surface(t *testing.T) {
 
 	if wirev1.File_ferret_wire_v1_runtime_proto.Messages().ByName("RuntimeInfo") != nil ||
 		wirev1.File_ferret_wire_v1_runtime_proto.Messages().ByName("ConnectionOpened") != nil ||
-		wirev1.File_ferret_wire_v1_runtime_proto.Messages().ByName("Diagnostic") != nil ||
 		wirev1.File_ferret_wire_v1_runtime_proto.Enums().ByName("Capability") != nil ||
 		wirev1.File_ferret_wire_v1_runtime_proto.Enums().ByName("ResourceKind") != nil {
 		t.Fatal("removed native runtime metadata remains in the descriptor")
 	}
 
 	errorCategory := wirev1.File_ferret_wire_v1_runtime_proto.Enums().ByName("ErrorCategory")
-	for _, number := range []protoreflect.EnumNumber{1, 9, 12, 14} {
+	for _, number := range []protoreflect.EnumNumber{1, 9, 12, 13, 14} {
 		if !errorCategory.ReservedRanges().Has(number) {
 			t.Errorf("ErrorCategory does not reserve value %d", number)
 		}
@@ -128,15 +144,62 @@ func TestProtocolDescriptorsReserveRemovedV1Surface(t *testing.T) {
 		"ERROR_CATEGORY_INVALID_REQUEST",
 		"ERROR_CATEGORY_UNSUPPORTED_CAPABILITY",
 		"ERROR_CATEGORY_CANCELLED",
+		"ERROR_CATEGORY_VALUE_REFERENCE_NOT_FOUND",
 		"ERROR_CATEGORY_RESOURCE_EXHAUSTED",
 	} {
 		if !errorCategory.ReservedNames().Has(name) {
 			t.Errorf("ErrorCategory does not reserve value name %s", name)
 		}
 	}
+	if errorCategory.Values().ByName("ERROR_CATEGORY_VALUE_REFERENCE_NOT_FOUND") != nil {
+		t.Error("ErrorCategory still declares the removed value-reference category")
+	}
+
+	location := wirev1.File_ferret_wire_v1_source_proto.Messages().ByName("Location")
+	if location.Fields().ByName("source_name").Number() != 1 || location.Fields().ByName("position").Number() != 2 {
+		t.Error("Location field numbers changed")
+	}
+
+	diagnostic := wirev1.File_ferret_wire_v1_runtime_proto.Messages().ByName("Diagnostic")
+	for name, number := range map[protoreflect.Name]protoreflect.FieldNumber{
+		"kind": 1, "message": 2, "hint": 3, "note": 4, "source": 7, "annotations": 8,
+	} {
+		if field := diagnostic.Fields().ByName(name); field == nil || field.Number() != number {
+			t.Errorf("Diagnostic.%s does not use field %d", name, number)
+		}
+	}
+	annotation := wirev1.File_ferret_wire_v1_runtime_proto.Messages().ByName("DiagnosticAnnotation")
+	for name, number := range map[protoreflect.Name]protoreflect.FieldNumber{
+		"range": 1, "message": 2, "primary": 3,
+	} {
+		if field := annotation.Fields().ByName(name); field == nil || field.Number() != number {
+			t.Errorf("DiagnosticAnnotation.%s does not use field %d", name, number)
+		}
+	}
+	diagnosticSet := wirev1.File_ferret_wire_v1_runtime_proto.Messages().ByName("DiagnosticSet")
+	if field := diagnosticSet.Fields().ByName("diagnostics"); field == nil || field.Number() != 1 {
+		t.Error("DiagnosticSet.diagnostics does not use field 1")
+	}
+	failure := wirev1.File_ferret_wire_v1_runtime_proto.Messages().ByName("Failure")
+	if field := failure.Fields().ByName("diagnostic_set"); field == nil || field.Number() != 4 {
+		t.Error("Failure.diagnostic_set does not use field 4")
+	}
+
+	debugEventKind := wirev1.File_ferret_wire_v1_debug_proto.Enums().ByName("DebugEventKind")
+	if created := debugEventKind.Values().ByName("DEBUG_EVENT_KIND_CREATED"); created == nil || created.Number() != 7 {
+		t.Error("DebugEventKind does not expose CREATED at value 7")
+	}
+	breakpointMode := wirev1.File_ferret_wire_v1_debug_proto.Enums().ByName("BreakpointBindingMode")
+	if next := breakpointMode.Values().ByName("BREAKPOINT_BINDING_MODE_NEXT_EXECUTABLE_IN_SOURCE"); next == nil || next.Number() != 1 {
+		t.Error("BreakpointBindingMode does not expose source-neutral default at value 1")
+	}
+	if !breakpointMode.ReservedNames().Has("BREAKPOINT_BINDING_MODE_NEXT_EXECUTABLE_IN_FILE") ||
+		breakpointMode.Values().ByName("BREAKPOINT_BINDING_MODE_NEXT_EXECUTABLE_IN_FILE") != nil {
+		t.Error("BreakpointBindingMode does not reserve the removed file-specific name")
+	}
 
 	debugMessages := wirev1.File_ferret_wire_v1_debug_proto.Messages()
-	for _, operation := range []string{"Continue", "Pause", "Next", "Step", "Out"} {
+	for _, operation := range []string{"Continue", "Pause", "StepOver", "StepIn", "StepOut"} {
 		request := debugMessages.ByName(protoreflect.Name(operation + "Request"))
 		response := debugMessages.ByName(protoreflect.Name(operation + "Response"))
 		if request == nil || !request.ReservedRanges().Has(1) || !request.ReservedNames().Has("command") {
@@ -144,6 +207,11 @@ func TestProtocolDescriptorsReserveRemovedV1Surface(t *testing.T) {
 		}
 		if response == nil || !response.ReservedRanges().Has(1) || !response.ReservedNames().Has("session") {
 			t.Errorf("%sResponse does not reserve the removed session snapshot", operation)
+		}
+	}
+	for _, removed := range []protoreflect.Name{"NextRequest", "NextResponse", "StepRequest", "StepResponse", "OutRequest", "OutResponse"} {
+		if debugMessages.ByName(removed) != nil {
+			t.Errorf("DebugService still declares removed envelope %s", removed)
 		}
 	}
 	setBreakpoint := debugMessages.ByName("SetBreakpointRequest")
@@ -160,7 +228,12 @@ func TestProtocolDescriptorsReserveRemovedV1Surface(t *testing.T) {
 		t.Error("PlanService does not expose distinct normal and debug compilation")
 	}
 	debugMethods := wirev1.File_ferret_wire_v1_debug_proto.Services().ByName("DebugService").Methods()
-	for _, removed := range []protoreflect.Name{"OpenDebugSession", "StartDebug", "StopDebug"} {
+	for _, required := range []protoreflect.Name{"StepOver", "StepIn", "StepOut"} {
+		if debugMethods.ByName(required) == nil {
+			t.Errorf("DebugService is missing RPC %s", required)
+		}
+	}
+	for _, removed := range []protoreflect.Name{"OpenDebugSession", "StartDebug", "StopDebug", "Next", "Step", "Out"} {
 		if debugMethods.ByName(removed) != nil {
 			t.Errorf("DebugService still exposes removed RPC %s", removed)
 		}
@@ -171,7 +244,7 @@ func TestProtocolSourcesContainNoNativeMetadataOrFakeCapabilities(t *testing.T) 
 	banned := []string{
 		"ferret_version",
 		"module_build",
-		"message Diagnostic",
+		"message DiagnosticSpan",
 		"message ConnectionOpened",
 		"enum Capability",
 		"enum ResourceKind",

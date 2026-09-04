@@ -11,7 +11,7 @@ func TestDebugSessionStateBuildsDefensiveSnapshots(t *testing.T) {
 	state := debugSessionState{
 		status:   DebugStopped,
 		reason:   debugger.ReasonBreakpoint,
-		location: source.Range{Location: source.Location{File: "query.fql"}},
+		location: source.Range{Location: source.Location{SourceName: "query.fql"}},
 		hitIDs:   []debugger.BreakpointID{1},
 		depth:    2,
 		output:   &Output{ContentType: "application/json", Content: []byte("1")},
@@ -42,7 +42,7 @@ func TestDebugSessionStateTransitionsPreserveSupportingValues(t *testing.T) {
 	state := debugSessionState{
 		status:   DebugStopped,
 		reason:   debugger.ReasonBreakpoint,
-		location: source.Range{Location: source.Location{File: "query.fql"}},
+		location: source.Range{Location: source.Location{SourceName: "query.fql"}},
 		hitIDs:   []debugger.BreakpointID{1},
 		depth:    2,
 		output:   &Output{Content: []byte("1")},

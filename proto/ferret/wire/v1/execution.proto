@@ -8,17 +8,21 @@ import "ferret/wire/v1/value.proto";
 
 option go_package = "github.com/MontFerret/wire/gen/ferret/wire/v1;wirev1";
 
+// ExecutionService owns asynchronous sessions created from reusable plans.
 service ExecutionService {
   // Execute publishes an asynchronous execution of an existing reusable plan.
   rpc Execute(ExecuteRequest) returns (ExecuteResponse);
+  // CancelExecution requests cancellation without releasing the execution.
   rpc CancelExecution(CancelExecutionRequest) returns (CancelExecutionResponse);
   // ReleaseExecution commits cancellation and cleanup. The execution ID then becomes stale.
   rpc ReleaseExecution(ReleaseExecutionRequest) returns (ReleaseExecutionResponse);
   // WatchExecution sends the latest snapshot, then ordered changes through one terminal snapshot.
+  // Disconnecting a watcher never cancels or releases the execution.
   rpc WatchExecution(WatchExecutionRequest) returns (stream WatchExecutionResponse);
 }
 
 message ExecutionId {
+  // value is opaque and valid only within the owning logical connection.
   string value = 1;
 }
 
@@ -35,8 +39,11 @@ message Execution {
   reserved "plan_id";
 
   ExecutionId id = 1;
+  // state is the only execution lifecycle discriminator.
   ExecutionState state = 3;
+  // output is required on completion and may contain partial output on other terminal states.
   Output output = 4;
+  // failure is present only for failed executions.
   Failure failure = 5;
 }
 
@@ -44,7 +51,9 @@ message WatchExecutionResponse {
   reserved 1, 3, 4, 5, 6, 7;
   reserved "execution_id", "output", "started", "completed", "failed", "cancelled";
 
+  // sequence is positive and monotonic within one Execution event history.
   uint64 sequence = 2;
+  // execution is the latest complete snapshot, including for replayed terminal state.
   Execution execution = 8;
 }
 
@@ -52,10 +61,12 @@ message ExecuteRequest {
   ConnectionId connection_id = 1;
   PlanId plan_id = 2;
   Parameters parameters = 3;
+  // output_content_type requests a runtime-supported encoded output codec; empty preserves the runtime default.
   string output_content_type = 4;
 }
 
 message ExecuteResponse {
+  // execution is present and already in RUNNING state.
   Execution execution = 1;
 }
 

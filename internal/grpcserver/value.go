@@ -2,6 +2,7 @@ package grpcserver
 
 import (
 	"fmt"
+	"math"
 
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -52,6 +53,10 @@ func decodeValue(input *wirev1.Value, depth int) (any, error) {
 	case *wirev1.Value_IntegerValue:
 		return value.IntegerValue, nil
 	case *wirev1.Value_FloatValue:
+		if math.IsNaN(value.FloatValue) || math.IsInf(value.FloatValue, 0) {
+			return nil, fmt.Errorf("floating-point value must be finite")
+		}
+
 		return value.FloatValue, nil
 	case *wirev1.Value_StringValue:
 		return value.StringValue, nil
