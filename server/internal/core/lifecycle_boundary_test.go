@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 	wiredebugger "github.com/MontFerret/wire/pkg/debugger"
+	wireexecution "github.com/MontFerret/wire/pkg/execution"
 	"github.com/MontFerret/wire/pkg/failure"
-	wireruntime "github.com/MontFerret/wire/pkg/runtime"
 	"reflect"
 	"strings"
 	"sync"
@@ -480,7 +480,7 @@ func TestSessionClosePanicIsContainedAndAttemptedOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	finished := waitExecution(t, connection, execution.ID)
-	if finished.State != wireruntime.StateFailed || finished.Failure == nil || finished.Failure.Category != failure.CategoryInternalRuntime {
+	if finished.State != wireexecution.StateFailed || finished.Failure == nil || finished.Failure.Category != failure.CategoryInternalRuntime {
 		t.Fatalf("close panic was not contained: %#v", finished)
 	}
 	_, closeCalls := session.counts()

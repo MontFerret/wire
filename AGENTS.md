@@ -69,10 +69,11 @@ changes are suspicious and require explanation.
 
 ## Client and public APIs
 
-The `server` package, the `client` package, the shared packages under `pkg`, and
-the versioned protobuf service are API-sensitive. The module root intentionally
-has no Go compatibility package. Follow [Client Handles](docs/client.md) for
-the facade ownership and lifecycle contract.
+The `server` package, the `client` package, the shared `pkg/execution`,
+`pkg/debugger`, and `pkg/failure` packages, and the versioned protobuf service
+are API-sensitive. The module root intentionally has no Go compatibility
+package. Follow [Client Handles](docs/client.md) for the facade ownership and
+lifecycle contract.
 
 Export only externally required symbols, keep logical connection and resource
 IDs private in the handwritten client, add contract-focused comments, and

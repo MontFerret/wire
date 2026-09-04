@@ -6,8 +6,8 @@ import (
 	"sync"
 
 	"github.com/MontFerret/api"
+	wireexecution "github.com/MontFerret/wire/pkg/execution"
 	"github.com/MontFerret/wire/pkg/failure"
-	wireruntime "github.com/MontFerret/wire/pkg/runtime"
 	"github.com/MontFerret/wire/server/internal/lifecycle"
 	"github.com/MontFerret/wire/server/internal/panicboundary"
 )
@@ -23,10 +23,10 @@ type (
 		cancel      context.CancelCauseFunc
 		parameters  map[string]any
 		contentType string
-		state       wireruntime.State
+		state       wireexecution.State
 		output      *api.Output
 		failure     *failure.Failure
-		events      *eventStream[wireruntime.Event]
+		events      *eventStream[wireexecution.Event]
 		done        chan struct{}
 		close       lifecycle.Close
 		release     lifecycle.Close
@@ -58,7 +58,7 @@ func newExecution(
 		cancel:      cancel,
 		parameters:  cloneParameters(input.Parameters),
 		contentType: input.OutputContentType,
-		state:       wireruntime.StateRunning,
+		state:       wireexecution.StateRunning,
 		events:      newEventStream(maxWatchers, cloneExecutionEvent, sequenceExecutionEvent),
 		done:        make(chan struct{}),
 	}
@@ -116,21 +116,21 @@ func (e *Execution) finish(output *api.Output, err error, category failure.Categ
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	if e.state != wireruntime.StateRunning {
+	if e.state != wireexecution.StateRunning {
 		return
 	}
 
 	e.output = output
 	switch {
 	case errors.Is(err, context.Canceled) || errors.Is(context.Cause(e.ctx), context.Canceled):
-		e.state = wireruntime.StateCancelled
+		e.state = wireexecution.StateCancelled
 		e.publishLocked(true)
 	case err != nil:
-		e.state = wireruntime.StateFailed
+		e.state = wireexecution.StateFailed
 		e.failure = failureFromError(category, err)
 		e.publishLocked(true)
 	default:
-		e.state = wireruntime.StateCompleted
+		e.state = wireexecution.StateCompleted
 		e.publishLocked(true)
 	}
 }
@@ -192,7 +192,7 @@ func (e *Execution) Watch() (ExecutionSubscription, error) {
 func (e *Execution) snapshotLocked() ExecutionRecord {
 	return ExecutionRecord{
 		ID: e.id,
-		Snapshot: cloneExecutionSnapshot(wireruntime.Snapshot{
+		Snapshot: cloneExecutionSnapshot(wireexecution.Snapshot{
 			State:   e.state,
 			Output:  e.output,
 			Failure: e.failure,
@@ -201,7 +201,7 @@ func (e *Execution) snapshotLocked() ExecutionRecord {
 }
 
 func (e *Execution) publishLocked(terminal bool) {
-	e.events.publish(wireruntime.Event{Snapshot: e.snapshotLocked().Snapshot}, terminal)
+	e.events.publish(wireexecution.Event{Snapshot: e.snapshotLocked().Snapshot}, terminal)
 
 	if terminal {
 		close(e.done)

@@ -11,11 +11,17 @@ import (
 	"testing"
 
 	wiredebugger "github.com/MontFerret/wire/pkg/debugger"
-	wireruntime "github.com/MontFerret/wire/pkg/runtime"
+	"github.com/MontFerret/wire/pkg/execution"
 )
 
 func TestPackageDependencyDirection(t *testing.T) {
 	root := repositoryRoot(t)
+	legacyRuntimePackage := filepath.Join(root, "pkg", "runtime")
+	if _, err := os.Stat(legacyRuntimePackage); err == nil {
+		t.Errorf("obsolete shared package remains at %s", legacyRuntimePackage)
+	} else if !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
 
 	entries, err := os.ReadDir(root)
 	if err != nil {
@@ -68,8 +74,8 @@ func TestPackageDependencyDirection(t *testing.T) {
 
 func TestSharedSnapshotsContainNoResourceIdentity(t *testing.T) {
 	for name, snapshot := range map[string]reflect.Type{
-		"runtime":  reflect.TypeFor[wireruntime.Snapshot](),
-		"debugger": reflect.TypeFor[wiredebugger.Snapshot](),
+		"execution": reflect.TypeFor[execution.Snapshot](),
+		"debugger":  reflect.TypeFor[wiredebugger.Snapshot](),
 	} {
 		for _, field := range []string{"ConnectionID", "PlanID", "ExecutionID", "DebugSessionID"} {
 			if _, exists := snapshot.FieldByName(field); exists {

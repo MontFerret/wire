@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"reflect"
 
-	wireruntime "github.com/MontFerret/wire/pkg/runtime"
+	"github.com/MontFerret/wire/pkg/execution"
 	"github.com/google/uuid"
 )
 
@@ -17,7 +17,7 @@ type (
 	RuntimeInfo struct {
 		ProtocolName    string
 		ProtocolVersion string
-		RuntimeIdentity wireruntime.Identity
+		RuntimeIdentity execution.Identity
 	}
 
 	ErrorKind uint8

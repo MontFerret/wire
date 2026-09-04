@@ -8,22 +8,22 @@ import (
 
 	"github.com/MontFerret/api"
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
+	wireexecution "github.com/MontFerret/wire/pkg/execution"
 	"github.com/MontFerret/wire/pkg/failure"
-	wireruntime "github.com/MontFerret/wire/pkg/runtime"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
 func TestExecutionStateTerminal(t *testing.T) {
 	tests := []struct {
-		state    wireruntime.State
+		state    wireexecution.State
 		terminal bool
 	}{
 		{state: 0},
-		{state: wireruntime.StateRunning},
-		{state: wireruntime.StateCompleted, terminal: true},
-		{state: wireruntime.StateFailed, terminal: true},
-		{state: wireruntime.StateCancelled, terminal: true},
+		{state: wireexecution.StateRunning},
+		{state: wireexecution.StateCompleted, terminal: true},
+		{state: wireexecution.StateFailed, terminal: true},
+		{state: wireexecution.StateCancelled, terminal: true},
 	}
 
 	for _, test := range tests {
@@ -36,12 +36,12 @@ func TestExecutionStateTerminal(t *testing.T) {
 func TestExecutionStateConversionMapsEveryProtocolValue(t *testing.T) {
 	tests := []struct {
 		protocol wirev1.ExecutionState
-		want     wireruntime.State
+		want     wireexecution.State
 	}{
-		{protocol: wirev1.ExecutionState_EXECUTION_STATE_RUNNING, want: wireruntime.StateRunning},
-		{protocol: wirev1.ExecutionState_EXECUTION_STATE_COMPLETED, want: wireruntime.StateCompleted},
-		{protocol: wirev1.ExecutionState_EXECUTION_STATE_FAILED, want: wireruntime.StateFailed},
-		{protocol: wirev1.ExecutionState_EXECUTION_STATE_CANCELLED, want: wireruntime.StateCancelled},
+		{protocol: wirev1.ExecutionState_EXECUTION_STATE_RUNNING, want: wireexecution.StateRunning},
+		{protocol: wirev1.ExecutionState_EXECUTION_STATE_COMPLETED, want: wireexecution.StateCompleted},
+		{protocol: wirev1.ExecutionState_EXECUTION_STATE_FAILED, want: wireexecution.StateFailed},
+		{protocol: wirev1.ExecutionState_EXECUTION_STATE_CANCELLED, want: wireexecution.StateCancelled},
 	}
 
 	for _, test := range tests {

@@ -2,18 +2,18 @@ package core
 
 import (
 	"github.com/MontFerret/api"
+	"github.com/MontFerret/wire/pkg/execution"
 	"github.com/MontFerret/wire/pkg/failure"
-	wireruntime "github.com/MontFerret/wire/pkg/runtime"
 )
 
 // ExecutionRecord combines server-private identity with a shared semantic
 // snapshot. Registry and parent metadata never enters the shared model.
 type ExecutionRecord struct {
 	ID ExecutionID
-	wireruntime.Snapshot
+	execution.Snapshot
 }
 
-func cloneExecutionSnapshot(snapshot wireruntime.Snapshot) wireruntime.Snapshot {
+func cloneExecutionSnapshot(snapshot execution.Snapshot) execution.Snapshot {
 	result := snapshot
 
 	if snapshot.Output != nil {

@@ -11,7 +11,7 @@ The package dependency direction is:
 
 ```text
 consumer → client ────────────────┐
-             ↕ protobuf/gRPC      ├→ pkg/runtime, pkg/debugger, pkg/failure
+             ↕ protobuf/gRPC      ├→ pkg/execution, pkg/debugger, pkg/failure
 host → server → server/internal ──┘→ Unified API → runtime implementation
 ```
 
@@ -20,7 +20,7 @@ host → server → server/internal ──┘→ Unified API → runtime impleme
 | FQL, runtime, output encoding, and debugger semantics | Unified API and runtime implementation |
 | Runtime construction, configuration, policies, and application state | Host application |
 | Versioned RPC contract | Protobuf definitions |
-| Shared execution, debugger, identity, and failure semantics | `pkg/runtime`, `pkg/debugger`, and `pkg/failure` |
+| Shared execution, debugger, identity, and failure semantics | `pkg/execution`, `pkg/debugger`, and `pkg/failure` |
 | RPC adaptation | `server/internal/grpcserver` |
 | Logical connections and resources | `server/internal/core` |
 | Public server lifecycle | `server` package |
@@ -114,7 +114,7 @@ server-issued. They are scoped to one logical connection and cannot be inferred
 or transferred to another connection. The handwritten Go client keeps these
 IDs private; see [Client Handles](client.md).
 
-Execution and debugger snapshots use the canonical types in `pkg/runtime` and
+Execution and debugger snapshots use the canonical types in `pkg/execution` and
 `pkg/debugger`; terminal failures use `pkg/failure`. Those shared packages
 contain no connection, plan, execution, or debug-session identity and do not
 depend on client or server implementation packages. Debugger values use the

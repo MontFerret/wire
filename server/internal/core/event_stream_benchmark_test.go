@@ -3,7 +3,7 @@ package core
 import (
 	"testing"
 
-	wireruntime "github.com/MontFerret/wire/pkg/runtime"
+	"github.com/MontFerret/wire/pkg/execution"
 )
 
 func BenchmarkExecutionEventPublication(b *testing.B) {
@@ -42,7 +42,7 @@ func newPublicationBenchmarkExecution() *Execution {
 	return &Execution{
 		id:     ExecutionID("execution"),
 		planID: PlanID("plan"),
-		state:  wireruntime.StateRunning,
+		state:  execution.StateRunning,
 		events: newEventStream(1, cloneExecutionEvent, sequenceExecutionEvent),
 		done:   make(chan struct{}),
 	}

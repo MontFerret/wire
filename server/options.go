@@ -4,7 +4,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/MontFerret/wire/pkg/runtime"
+	"github.com/MontFerret/wire/pkg/execution"
 )
 
 type (
@@ -30,7 +30,7 @@ type (
 	serverOptionFunc func(*serverOptions) error
 
 	serverOptions struct {
-		runtimeIdentity runtime.Identity
+		runtimeIdentity execution.Identity
 		limits          ServerLimits
 	}
 )
@@ -42,7 +42,7 @@ func (option serverOptionFunc) apply(options *serverOptions) error {
 // WithRuntimeIdentity publishes optional host application identity during the
 // Connect handshake. Name is required; Wire does not derive identity from the
 // process or environment.
-func WithRuntimeIdentity(identity runtime.Identity) ServerOption {
+func WithRuntimeIdentity(identity execution.Identity) ServerOption {
 	return serverOptionFunc(func(options *serverOptions) error {
 		if identity.Name == "" {
 			return errors.New("runtime identity name is required")

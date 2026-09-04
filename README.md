@@ -51,7 +51,7 @@ The host chooses and configures both the runtime implementation and endpoint. Th
 
 ```go
 func serveRuntime(ctx context.Context, hostRuntime api.Runtime, listener net.Listener) error {
-    wireServer, err := server.NewServer(hostRuntime, server.WithRuntimeIdentity(wireruntime.Identity{
+    wireServer, err := server.NewServer(hostRuntime, server.WithRuntimeIdentity(execution.Identity{
         Name: "my-app", Version: "1.0.0", InstanceID: "worker-1",
     }))
     if err != nil {
@@ -143,7 +143,7 @@ for {
     if err != nil {
         log.Fatal(err)
     }
-    if event.Snapshot.State == wireruntime.StateCompleted {
+    if event.Snapshot.State == execution.StateCompleted {
         fmt.Printf("%s: %s\n", event.Snapshot.Output.ContentType, event.Snapshot.Output.Content)
         break
     }
@@ -154,7 +154,7 @@ for {
 ```
 
 The public Go API is split by ownership: `server` hosts a borrowed `api.Runtime`,
-`client` owns remote handles, and `pkg/runtime`, `pkg/debugger`, and
+`client` owns remote handles, and `pkg/execution`, `pkg/debugger`, and
 `pkg/failure` contain the semantic values shared by both sides. The module root
 intentionally has no Go compatibility package.
 

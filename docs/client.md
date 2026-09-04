@@ -89,7 +89,7 @@ Plan resource.
 
 The metadata facade maps `APIIdentity` and `WireVersion` from the handshake's
 protocol name and version and maps optional host runtime identity directly to
-`*runtime.Identity` from `pkg/runtime`.
+`*execution.Identity` from `pkg/execution`.
 Legacy Ferret-version and capability fields remain empty rather than
 fabricating values not carried by the protocol.
 
@@ -149,8 +149,8 @@ are joined rather than replacing one another.
 ## Snapshots and events
 
 Handles represent identity, ownership, and operations; they are not mutable
-state snapshots. Execution state crosses the facade as `runtime.Event` and
-`runtime.Snapshot` from `pkg/runtime`; debug state crosses as `debugger.Event`
+state snapshots. Execution state crosses the facade as `execution.Event` and
+`execution.Snapshot` from `pkg/execution`; debug state crosses as `debugger.Event`
 and `debugger.Snapshot` from Wire's `pkg/debugger`. These snapshots preserve
 Unified API `api.Output` and use API `debugger.Reason`, `source.Range`, and
 `debugger.BreakpointID` values without exposing generated protobuf messages.
@@ -164,8 +164,8 @@ terminal event. A newly created debug session replays sequence 1 with
 `debugger.EventCreated` and a created snapshot; the client does not need a Get
 RPC.
 
-`runtime.Event` contains a sequence and execution snapshot.
-`runtime.State.Terminal` identifies completed, failed, and cancelled states.
+`execution.Event` contains a sequence and execution snapshot.
+`execution.State.Terminal` identifies completed, failed, and cancelled states.
 Debug events retain a separate `debugger.EventKind` because starting and
 continuing are distinct transitions that both publish a running snapshot.
 `debugger.State.Terminal` centralizes completed, failed, and terminated state

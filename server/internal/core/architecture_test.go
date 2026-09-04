@@ -15,7 +15,7 @@ import (
 	"github.com/MontFerret/api"
 	"github.com/MontFerret/api/debugger"
 	wiredebugger "github.com/MontFerret/wire/pkg/debugger"
-	wireruntime "github.com/MontFerret/wire/pkg/runtime"
+	"github.com/MontFerret/wire/pkg/execution"
 	"github.com/MontFerret/wire/server/internal/panicboundary"
 	"github.com/google/uuid"
 )
@@ -98,7 +98,7 @@ func TestOperationAggregatesDelegateSupportingInfrastructure(t *testing.T) {
 		}
 
 		events, exists := typeOfExecution.FieldByName("events")
-		if !exists || events.Type != reflect.TypeFor[*eventStream[wireruntime.Event]]() {
+		if !exists || events.Type != reflect.TypeFor[*eventStream[execution.Event]]() {
 			t.Fatalf("Execution does not own the shared event stream: %v", events.Type)
 		}
 	})

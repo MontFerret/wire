@@ -15,7 +15,7 @@ import (
 	"github.com/MontFerret/api/source"
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
 	wiredebugger "github.com/MontFerret/wire/pkg/debugger"
-	wireruntime "github.com/MontFerret/wire/pkg/runtime"
+	"github.com/MontFerret/wire/pkg/execution"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
@@ -343,7 +343,7 @@ func TestHandleOperationsUseBoundOwnerResources(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if event, err := executionEvents.Recv(); err != nil || event.Snapshot.State != wireruntime.StateRunning {
+	if event, err := executionEvents.Recv(); err != nil || event.Snapshot.State != execution.StateRunning {
 		t.Fatalf("unexpected execution event: %#v, %v", event, err)
 	}
 

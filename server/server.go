@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/MontFerret/api"
-	wireruntime "github.com/MontFerret/wire/pkg/runtime"
+	"github.com/MontFerret/wire/pkg/execution"
 	"github.com/MontFerret/wire/server/internal/core"
 	"github.com/MontFerret/wire/server/internal/grpcserver"
 	"github.com/MontFerret/wire/server/internal/lifecycle"
@@ -43,7 +43,7 @@ func NewServer(runtime api.Runtime, options ...ServerOption) (*Server, error) {
 	info := core.RuntimeInfo{
 		ProtocolName:    protocolName,
 		ProtocolVersion: protocolVersion,
-		RuntimeIdentity: wireruntime.Identity{
+		RuntimeIdentity: execution.Identity{
 			Name:       configured.runtimeIdentity.Name,
 			Version:    configured.runtimeIdentity.Version,
 			InstanceID: configured.runtimeIdentity.InstanceID,

@@ -2,7 +2,7 @@ package client
 
 import (
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
-	"github.com/MontFerret/wire/pkg/runtime"
+	"github.com/MontFerret/wire/pkg/execution"
 )
 
 type (
@@ -18,7 +18,7 @@ type (
 		APIIdentity     string
 		WireVersion     string
 		FerretVersion   string
-		RuntimeIdentity *runtime.Identity
+		RuntimeIdentity *execution.Identity
 		Capabilities    Capabilities
 	}
 )
@@ -30,7 +30,7 @@ func convertRuntimeInfo(protocol *wirev1.ProtocolInfo, identity *wirev1.RuntimeI
 	}
 
 	if identity != nil {
-		result.RuntimeIdentity = &runtime.Identity{
+		result.RuntimeIdentity = &execution.Identity{
 			Name:       identity.GetName(),
 			Version:    identity.GetVersion(),
 			InstanceID: identity.GetInstanceId(),

@@ -3,7 +3,7 @@ package core
 import (
 	"context"
 	"errors"
-	wireruntime "github.com/MontFerret/wire/pkg/runtime"
+	"github.com/MontFerret/wire/pkg/execution"
 	"reflect"
 	"sync"
 	"testing"
@@ -448,7 +448,7 @@ func TestExecutionTerminalStateSurvivesCancellationOrdering(t *testing.T) {
 		}
 		close(finishRun)
 		settled := waitExecution(t, connection, started.ID)
-		if settled.State != wireruntime.StateCancelled {
+		if settled.State != execution.StateCancelled {
 			t.Fatalf("cancellation did not retain the terminal state: %#v", settled)
 		}
 	})
@@ -471,7 +471,7 @@ func TestExecutionTerminalStateSurvivesCancellationOrdering(t *testing.T) {
 			t.Fatal(err)
 		}
 		settled := waitExecution(t, connection, started.ID)
-		if settled.State != wireruntime.StateCompleted {
+		if settled.State != execution.StateCompleted {
 			t.Fatalf("execution did not complete: %#v", settled)
 		}
 
@@ -479,7 +479,7 @@ func TestExecutionTerminalStateSurvivesCancellationOrdering(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if afterCancel.State != wireruntime.StateCompleted {
+		if afterCancel.State != execution.StateCompleted {
 			t.Fatalf("late cancellation changed terminal state: %#v", afterCancel)
 		}
 	})

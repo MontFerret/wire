@@ -3,8 +3,8 @@ package core
 import (
 	"context"
 	"errors"
+	wireexecution "github.com/MontFerret/wire/pkg/execution"
 	"github.com/MontFerret/wire/pkg/failure"
-	wireruntime "github.com/MontFerret/wire/pkg/runtime"
 	"reflect"
 	"strings"
 	"sync"
@@ -110,7 +110,7 @@ func TestCompileExecuteRetainsReusableAPIPlanAndSessionOptions(t *testing.T) {
 			t.Fatal(executeErr)
 		}
 		finished := waitExecution(t, connection, execution.ID)
-		if finished.State != wireruntime.StateCompleted || finished.Output == nil || finished.Output.ContentType != "application/json" {
+		if finished.State != wireexecution.StateCompleted || finished.Output == nil || finished.Output.ContentType != "application/json" {
 			t.Fatalf("unexpected execution result: %#v", finished)
 		}
 	}
@@ -356,7 +356,7 @@ func TestSessionConstructionPanicsAreSanitized(t *testing.T) {
 			t.Fatal(err)
 		}
 		finished := waitExecution(t, connection, execution.ID)
-		if finished.State != wireruntime.StateFailed || finished.Failure == nil || finished.Failure.Category != failure.CategoryInternalRuntime ||
+		if finished.State != wireexecution.StateFailed || finished.Failure == nil || finished.Failure.Category != failure.CategoryInternalRuntime ||
 			strings.Contains(finished.Failure.Message, "secret") {
 			t.Fatalf("execution constructor panic was not sanitized: %#v", finished)
 		}
@@ -434,7 +434,7 @@ func TestBoundaryPanicsDoNotPoisonReusableParents(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		if settled := waitExecution(t, connection, first.ID); settled.State != wireruntime.StateFailed {
+		if settled := waitExecution(t, connection, first.ID); settled.State != wireexecution.StateFailed {
 			t.Fatalf("constructor panic did not fail execution: %#v", settled)
 		}
 
@@ -443,7 +443,7 @@ func TestBoundaryPanicsDoNotPoisonReusableParents(t *testing.T) {
 			t.Fatalf("plan was poisoned after session-constructor panic: %v", err)
 		}
 
-		if settled := waitExecution(t, connection, second.ID); settled.State != wireruntime.StateCompleted {
+		if settled := waitExecution(t, connection, second.ID); settled.State != wireexecution.StateCompleted {
 			t.Fatalf("second execution did not complete: %#v", settled)
 		}
 
@@ -523,7 +523,7 @@ func TestSuccessfulNilAPIResourcesAreRejectedSafely(t *testing.T) {
 		t.Fatal(err)
 	}
 	finished := waitExecution(t, connection, execution.ID)
-	if finished.State != wireruntime.StateFailed || finished.Failure == nil || finished.Failure.Category != failure.CategoryInternalRuntime {
+	if finished.State != wireexecution.StateFailed || finished.Failure == nil || finished.Failure.Category != failure.CategoryInternalRuntime {
 		t.Fatalf("typed-nil session was not rejected: %#v", finished)
 	}
 }
@@ -565,7 +565,7 @@ func TestAPIResourcesReturnedWithErrorsAreClosedOnce(t *testing.T) {
 		}
 
 		finished := waitExecution(t, connection, execution.ID)
-		if finished.State != wireruntime.StateFailed || finished.Failure == nil || finished.Failure.Category != failure.CategoryInternalRuntime ||
+		if finished.State != wireexecution.StateFailed || finished.Failure == nil || finished.Failure.Category != failure.CategoryInternalRuntime ||
 			strings.Contains(finished.Failure.Message, "secret") {
 			t.Fatalf("unexpected session-plus-error result: %#v", finished)
 		}
@@ -667,7 +667,7 @@ func TestExecutionUsesPortableFailureFallbacks(t *testing.T) {
 				t.Fatal(err)
 			}
 			finished := waitExecution(t, connection, execution.ID)
-			if finished.State != wireruntime.StateFailed || finished.Failure == nil || finished.Failure.Category != test.want {
+			if finished.State != wireexecution.StateFailed || finished.Failure == nil || finished.Failure.Category != test.want {
 				t.Fatalf("unexpected failure: %#v", finished)
 			}
 			if (finished.Output != nil) != test.wantOutput {
@@ -687,7 +687,7 @@ func TestExecutionUsesPortableFailureFallbacks(t *testing.T) {
 					t.Fatal(cancelErr)
 				}
 
-				if afterCancel.State != wireruntime.StateFailed {
+				if afterCancel.State != wireexecution.StateFailed {
 					t.Fatalf("late cancellation changed the poisoned execution: %#v", afterCancel)
 				}
 

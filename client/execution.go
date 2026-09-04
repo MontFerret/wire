@@ -7,7 +7,7 @@ import (
 
 	"github.com/MontFerret/api"
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
-	"github.com/MontFerret/wire/pkg/runtime"
+	"github.com/MontFerret/wire/pkg/execution"
 )
 
 type (
@@ -129,19 +129,19 @@ func (e *Execution) Wait(ctx context.Context) (api.Output, error) {
 
 		output := executionOutput(event.Snapshot)
 		switch event.Snapshot.State {
-		case runtime.StateCompleted:
+		case execution.StateCompleted:
 			if event.Snapshot.Output == nil {
 				return api.Output{}, errors.New("Wire server returned a completed execution without output")
 			}
 
 			return output, nil
-		case runtime.StateFailed:
+		case execution.StateFailed:
 			if event.Snapshot.Failure == nil {
 				return output, errors.New("Wire server returned a failed execution without failure details")
 			}
 
 			return output, event.Snapshot.Failure
-		case runtime.StateCancelled:
+		case execution.StateCancelled:
 			return output, ErrExecutionCancelled
 		}
 	}
@@ -163,29 +163,29 @@ func (e *Execution) Close(ctx context.Context) error {
 
 // Recv blocks for the next ordered execution event. It releases the local
 // stream when a terminal event or error is observed.
-func (events *ExecutionEvents) Recv() (runtime.Event, error) {
+func (events *ExecutionEvents) Recv() (execution.Event, error) {
 	if events == nil || events.stream == nil {
-		return runtime.Event{}, errors.New("execution event receiver is nil")
+		return execution.Event{}, errors.New("execution event receiver is nil")
 	}
 
 	value, err := events.stream.Recv()
 	if err != nil {
 		events.cancel()
 
-		return runtime.Event{}, decodeError(err)
+		return execution.Event{}, decodeError(err)
 	}
 
 	if value.GetExecution() == nil {
 		events.cancel()
 
-		return runtime.Event{}, fmt.Errorf("Wire server returned an empty execution event")
+		return execution.Event{}, fmt.Errorf("Wire server returned an empty execution event")
 	}
 
 	event, err := convertExecutionEvent(value)
 	if err != nil {
 		events.cancel()
 
-		return runtime.Event{}, err
+		return execution.Event{}, err
 	}
 
 	if event.Snapshot.State.Terminal() {
@@ -211,7 +211,7 @@ func (e *Execution) release(ctx context.Context) error {
 	return e.client.releaseExecution(ctx, e.id)
 }
 
-func executionOutput(snapshot runtime.Snapshot) api.Output {
+func executionOutput(snapshot execution.Snapshot) api.Output {
 	if snapshot.Output == nil {
 		return api.Output{}
 	}

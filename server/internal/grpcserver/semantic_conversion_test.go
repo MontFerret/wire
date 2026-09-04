@@ -10,20 +10,20 @@ import (
 	"github.com/MontFerret/api/source"
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
 	wiredebugger "github.com/MontFerret/wire/pkg/debugger"
+	wireexecution "github.com/MontFerret/wire/pkg/execution"
 	wirefailure "github.com/MontFerret/wire/pkg/failure"
-	wireruntime "github.com/MontFerret/wire/pkg/runtime"
 	"github.com/MontFerret/wire/server/internal/core"
 )
 
 func TestExecutionStateMapsEverySharedValue(t *testing.T) {
 	tests := []struct {
-		shared wireruntime.State
+		shared wireexecution.State
 		want   wirev1.ExecutionState
 	}{
-		{shared: wireruntime.StateRunning, want: wirev1.ExecutionState_EXECUTION_STATE_RUNNING},
-		{shared: wireruntime.StateCompleted, want: wirev1.ExecutionState_EXECUTION_STATE_COMPLETED},
-		{shared: wireruntime.StateFailed, want: wirev1.ExecutionState_EXECUTION_STATE_FAILED},
-		{shared: wireruntime.StateCancelled, want: wirev1.ExecutionState_EXECUTION_STATE_CANCELLED},
+		{shared: wireexecution.StateRunning, want: wirev1.ExecutionState_EXECUTION_STATE_RUNNING},
+		{shared: wireexecution.StateCompleted, want: wirev1.ExecutionState_EXECUTION_STATE_COMPLETED},
+		{shared: wireexecution.StateFailed, want: wirev1.ExecutionState_EXECUTION_STATE_FAILED},
+		{shared: wireexecution.StateCancelled, want: wirev1.ExecutionState_EXECUTION_STATE_CANCELLED},
 	}
 
 	for _, test := range tests {
@@ -170,7 +170,7 @@ func TestSharedEventsPreserveFieldsAndDetachMutableData(t *testing.T) {
 	}
 }
 
-func executionStateError(state wireruntime.State) error {
+func executionStateError(state wireexecution.State) error {
 	_, err := executionState(state)
 
 	return err

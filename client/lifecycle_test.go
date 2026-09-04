@@ -10,7 +10,7 @@ import (
 
 	"github.com/MontFerret/api"
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
-	wireruntime "github.com/MontFerret/wire/pkg/runtime"
+	wireexecution "github.com/MontFerret/wire/pkg/execution"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -155,7 +155,7 @@ func TestCloseRejectsNewOperationsAndCancelsFacadeWatchers(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if event, err := events.Recv(); err != nil || event.Snapshot.State != wireruntime.StateRunning {
+	if event, err := events.Recv(); err != nil || event.Snapshot.State != wireexecution.StateRunning {
 		t.Fatalf("watcher did not attach: %#v, %v", event, err)
 	}
 

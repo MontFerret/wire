@@ -9,8 +9,8 @@ import (
 	"github.com/MontFerret/api/source"
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
 	wiredebugger "github.com/MontFerret/wire/pkg/debugger"
+	wireexecution "github.com/MontFerret/wire/pkg/execution"
 	wirefailure "github.com/MontFerret/wire/pkg/failure"
-	wireruntime "github.com/MontFerret/wire/pkg/runtime"
 	"github.com/MontFerret/wire/server/internal/core"
 )
 
@@ -18,8 +18,8 @@ func protocolInfo(value core.RuntimeInfo) *wirev1.ProtocolInfo {
 	return &wirev1.ProtocolInfo{Name: value.ProtocolName, Version: value.ProtocolVersion}
 }
 
-func runtimeIdentity(value wireruntime.Identity) *wirev1.RuntimeIdentity {
-	if value == (wireruntime.Identity{}) {
+func runtimeIdentity(value wireexecution.Identity) *wirev1.RuntimeIdentity {
+	if value == (wireexecution.Identity{}) {
 		return nil
 	}
 
@@ -113,22 +113,22 @@ func execution(value core.ExecutionRecord) (*wirev1.Execution, error) {
 	}, nil
 }
 
-func executionState(value wireruntime.State) (wirev1.ExecutionState, error) {
+func executionState(value wireexecution.State) (wirev1.ExecutionState, error) {
 	switch value {
-	case wireruntime.StateRunning:
+	case wireexecution.StateRunning:
 		return wirev1.ExecutionState_EXECUTION_STATE_RUNNING, nil
-	case wireruntime.StateCompleted:
+	case wireexecution.StateCompleted:
 		return wirev1.ExecutionState_EXECUTION_STATE_COMPLETED, nil
-	case wireruntime.StateFailed:
+	case wireexecution.StateFailed:
 		return wirev1.ExecutionState_EXECUTION_STATE_FAILED, nil
-	case wireruntime.StateCancelled:
+	case wireexecution.StateCancelled:
 		return wirev1.ExecutionState_EXECUTION_STATE_CANCELLED, nil
 	}
 
 	return 0, runtimeConversionError("runtime returned an invalid execution state")
 }
 
-func executionEvent(id core.ExecutionID, value wireruntime.Event) (*wirev1.WatchExecutionResponse, error) {
+func executionEvent(id core.ExecutionID, value wireexecution.Event) (*wirev1.WatchExecutionResponse, error) {
 	snapshot, err := execution(core.ExecutionRecord{ID: id, Snapshot: value.Snapshot})
 	if err != nil {
 		return nil, err
