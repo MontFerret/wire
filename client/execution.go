@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 
-	"github.com/MontFerret/api"
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
 	"github.com/MontFerret/wire/pkg/execution"
 )
@@ -79,24 +78,24 @@ func (e *Execution) Watch(ctx context.Context) (*ExecutionEvents, error) {
 // returns ErrExecutionCancelled. Caller cancellation returns the waiting
 // context's error. Wait does not release the execution or retain mutable
 // snapshot state.
-func (e *Execution) Wait(ctx context.Context) (api.Output, error) {
+func (e *Execution) Wait(ctx context.Context) (Output, error) {
 	events, err := e.Watch(ctx)
 	if err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
-			return api.Output{}, ctxErr
+			return Output{}, ctxErr
 		}
 
-		return api.Output{}, err
+		return Output{}, err
 	}
 
 	for {
 		event, receiveErr := events.Recv()
 		if receiveErr != nil {
 			if ctxErr := ctx.Err(); ctxErr != nil {
-				return api.Output{}, ctxErr
+				return Output{}, ctxErr
 			}
 
-			return api.Output{}, receiveErr
+			return Output{}, receiveErr
 		}
 
 		if !event.Snapshot.State.Terminal() {
@@ -107,7 +106,7 @@ func (e *Execution) Wait(ctx context.Context) (api.Output, error) {
 		switch event.Snapshot.State {
 		case execution.StateCompleted:
 			if event.Snapshot.Output == nil {
-				return api.Output{}, errors.New("Wire server returned a completed execution without output")
+				return Output{}, errors.New("Wire server returned a completed execution without output")
 			}
 
 			return output, nil
@@ -180,7 +179,7 @@ func (e *Execution) release(ctx context.Context) error {
 
 // waitAndRelease is the adapter's one-shot invocation lifecycle. Release itself
 // cancels running work and waits for teardown; a separate Cancel RPC is redundant.
-func (e *Execution) waitAndRelease(ctx context.Context) (api.Output, error) {
+func (e *Execution) waitAndRelease(ctx context.Context) (Output, error) {
 	output, waitErr := e.Wait(ctx)
 
 	// The ID is known: a failed release is retained on this handle and does

@@ -33,9 +33,13 @@ func TestNewRuntimePreservesUnavailableStatus(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = connection.Close() })
 
-	_, err = client.NewRuntime(testContext(t), connection)
+	remote, err := client.NewRuntime(testContext(t), connection)
 	if status.Code(err) != codes.Unavailable {
 		t.Fatalf("NewRuntime changed unavailable transport status: %v", err)
+	}
+
+	if remote != nil {
+		t.Fatalf("NewRuntime returned a non-nil runtime on failure: %T", remote)
 	}
 }
 

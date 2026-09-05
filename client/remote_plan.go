@@ -22,7 +22,7 @@ func (p *remotePlan) Params() []string {
 	return p.plan.Parameters()
 }
 
-func (p *remotePlan) NewSession(ctx context.Context, options ...api.SessionOption) (api.Session, error) {
+func (p *remotePlan) NewSession(ctx context.Context, options ...api.SessionOption) (Session, error) {
 	if p == nil || p.plan == nil {
 		return nil, ErrClosed
 	}

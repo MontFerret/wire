@@ -12,30 +12,44 @@ import (
 	"google.golang.org/grpc"
 )
 
-// Client owns one logical Wire connection while borrowing its gRPC transport.
-type Client struct {
-	runtimeClient   wirev1.RuntimeServiceClient
-	planClient      wirev1.PlanServiceClient
-	sessionClient   wirev1.SessionServiceClient
-	executionClient wirev1.ExecutionServiceClient
-	debugClient     wirev1.DebugServiceClient
+type (
+	// Runtime is the canonical api.Runtime contract, re-exported for remote use.
+	// NewRuntime returns a private Wire implementation of this interface.
+	Runtime = api.Runtime
 
-	connectionID    string
-	info            RuntimeInfo
-	stream          wirev1.RuntimeService_ConnectClient
-	streamCancel    context.CancelFunc
-	streamDone      chan struct{}
-	streamMu        sync.Mutex
-	streamErr       error
-	lifecycleCtx    context.Context
-	lifecycleCancel context.CancelFunc
+	// Session is the canonical api.Session contract for reusable normal sessions.
+	// NewRuntime's plan adapters return private implementations of this interface.
+	Session = api.Session
 
-	closeOnce sync.Once
-	closeDone chan struct{}
-	closeMu   sync.Mutex
-	closeErr  error
-	closing   bool
-}
+	// Output aliases api.Output, defined by github.com/MontFerret/api/result.
+	// Wire preserves its content type and encoded bytes without interpretation.
+	Output = api.Output
+
+	// Client owns one logical Wire connection while borrowing its gRPC transport.
+	Client struct {
+		runtimeClient   wirev1.RuntimeServiceClient
+		planClient      wirev1.PlanServiceClient
+		sessionClient   wirev1.SessionServiceClient
+		executionClient wirev1.ExecutionServiceClient
+		debugClient     wirev1.DebugServiceClient
+
+		connectionID    string
+		info            RuntimeInfo
+		stream          wirev1.RuntimeService_ConnectClient
+		streamCancel    context.CancelFunc
+		streamDone      chan struct{}
+		streamMu        sync.Mutex
+		streamErr       error
+		lifecycleCtx    context.Context
+		lifecycleCancel context.CancelFunc
+
+		closeOnce sync.Once
+		closeDone chan struct{}
+		closeMu   sync.Mutex
+		closeErr  error
+		closing   bool
+	}
+)
 
 // New opens one logical Wire connection over a caller-owned gRPC connection.
 // The construction context bounds the Connect handshake; Close owns the
@@ -127,10 +141,10 @@ func (c *Client) RuntimeInfo() RuntimeInfo {
 // Run compiles and executes source once, returning the runtime's encoded output.
 // It releases the Plan and Execution resources it creates before returning and
 // joins operation and release errors.
-func (c *Client) Run(ctx context.Context, src api.Source, parameters Parameters, options RunOptions) (api.Output, error) {
+func (c *Client) Run(ctx context.Context, src api.Source, parameters Parameters, options RunOptions) (Output, error) {
 	plan, err := c.Compile(ctx, src, options.Compile)
 	if err != nil {
-		return api.Output{}, err
+		return Output{}, err
 	}
 
 	output, runErr := plan.Run(ctx, parameters, options.Execute)
