@@ -34,10 +34,3 @@ func (s *contractSession) Close() error {
 
 	return nil
 }
-
-func (s *contractSession) counts() (int, int) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	return s.runCalls, s.closeCalls
-}
