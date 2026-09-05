@@ -6,13 +6,6 @@ import (
 )
 
 type (
-	// Identity describes optional host-supplied identity for a hosted runtime.
-	Identity struct {
-		Name       string
-		Version    string
-		InstanceID string
-	}
-
 	// State describes the lifecycle state in an execution Snapshot.
 	State uint8
 

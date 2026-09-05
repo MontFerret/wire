@@ -1,0 +1,47 @@
+syntax = "proto3";
+
+package ferret.wire.v1;
+
+import "ferret/wire/v1/plan.proto";
+import "ferret/wire/v1/runtime.proto";
+import "ferret/wire/v1/value.proto";
+
+option go_package = "github.com/MontFerret/wire/gen/ferret/wire/v1;wirev1";
+
+// SessionService owns reusable Unified API execution sessions.
+service SessionService {
+  // CreateSession creates one durable api.Session from a reusable Plan.
+  rpc CreateSession(CreateSessionRequest) returns (CreateSessionResponse);
+  // ReleaseSession cancels active runs, releases their Execution resources,
+  // and closes the hosted api.Session exactly once.
+  rpc ReleaseSession(ReleaseSessionRequest) returns (ReleaseSessionResponse);
+}
+
+message SessionId {
+  // value is opaque and valid only within the owning logical connection.
+  string value = 1;
+}
+
+message Session {
+  SessionId id = 1;
+}
+
+message CreateSessionRequest {
+  ConnectionId connection_id = 1;
+  PlanId plan_id = 2;
+  Parameters parameters = 3;
+  // output_content_type requests a runtime-supported encoded output codec;
+  // empty preserves the runtime default.
+  string output_content_type = 4;
+}
+
+message CreateSessionResponse {
+  Session session = 1;
+}
+
+message ReleaseSessionRequest {
+  ConnectionId connection_id = 1;
+  SessionId session_id = 2;
+}
+
+message ReleaseSessionResponse {}

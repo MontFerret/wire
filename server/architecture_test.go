@@ -37,9 +37,9 @@ func TestPackageDependencyDirection(t *testing.T) {
 		directory string
 		forbidden []string
 	}{
-		{directory: "client", forbidden: []string{"github.com/MontFerret/wire/server"}},
-		{directory: "server", forbidden: []string{"github.com/MontFerret/wire/client"}},
-		{directory: "pkg", forbidden: []string{"github.com/MontFerret/wire/client", "github.com/MontFerret/wire/server"}},
+		{directory: "client", forbidden: []string{"github.com/MontFerret/ferret", "github.com/MontFerret/wire/server"}},
+		{directory: "server", forbidden: []string{"github.com/MontFerret/ferret", "github.com/MontFerret/wire/client"}},
+		{directory: "pkg", forbidden: []string{"github.com/MontFerret/ferret", "github.com/MontFerret/wire/client", "github.com/MontFerret/wire/server"}},
 	}
 
 	for _, check := range checks {
@@ -77,7 +77,7 @@ func TestSharedSnapshotsContainNoResourceIdentity(t *testing.T) {
 		"execution": reflect.TypeFor[execution.Snapshot](),
 		"debugger":  reflect.TypeFor[wiredebugger.Snapshot](),
 	} {
-		for _, field := range []string{"ConnectionID", "PlanID", "ExecutionID", "DebugSessionID"} {
+		for _, field := range []string{"ConnectionID", "PlanID", "SessionID", "ExecutionID", "DebugSessionID"} {
 			if _, exists := snapshot.FieldByName(field); exists {
 				t.Errorf("%s snapshot exposes server-private field %s", name, field)
 			}

@@ -10,18 +10,16 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-type (
-	// Error is a decoded Wire RPC failure. Category is set only when the server
-	// transmitted an ErrorDetail; transport-native statuses leave it zero.
-	// Internal transport causes remain available through Unwrap without exposing
-	// protocol resource identifiers.
-	Error struct {
-		Category    failure.Category
-		Message     string
-		Diagnostics diagnostics.Diagnostics
-		cause       error
-	}
-)
+// Error is a decoded Wire RPC failure. Category is set only when the server
+// transmitted an ErrorDetail; transport-native statuses leave it zero.
+// Internal transport causes remain available through Unwrap without exposing
+// protocol resource identifiers.
+type Error struct {
+	Category    failure.Category
+	Message     string
+	Diagnostics diagnostics.Diagnostics
+	cause       error
+}
 
 var (
 	// ErrClosed reports an operation attempted through a closed Client or resource
@@ -55,6 +53,7 @@ func decodeError(err error) error {
 	if err == nil {
 		return nil
 	}
+
 	var existing *Error
 	if errors.As(err, &existing) {
 		return err
@@ -137,6 +136,8 @@ func convertErrorCategory(value wirev1.ErrorCategory, zeroAllowed bool) (failure
 		return failure.CategoryBreakpointNotFound, nil
 	case wirev1.ErrorCategory_ERROR_CATEGORY_INTERNAL_RUNTIME_FAILURE:
 		return failure.CategoryInternalRuntime, nil
+	case wirev1.ErrorCategory_ERROR_CATEGORY_SESSION_NOT_FOUND:
+		return failure.CategorySessionNotFound, nil
 	}
 
 	return 0, fmt.Errorf("Wire server returned an invalid error category: %d", value)

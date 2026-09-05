@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/MontFerret/api"
 	"github.com/MontFerret/api/debugger"
 	"github.com/MontFerret/wire/server/internal/panicboundary"
 	"github.com/google/uuid"
@@ -56,11 +55,7 @@ func (d *Debugger) Create(ctx *Context, input OpenDebugInput) (DebugSessionRecor
 
 	defer plan.finishChildCreation()
 
-	options := []api.SessionOption{api.WithParams(cloneParameters(input.Parameters))}
-	if input.OutputContentType != "" {
-		options = append(options, api.WithOutputContentType(input.OutputContentType))
-	}
-
+	options := apiSessionOptions(input.Parameters, input.OutputContentType)
 	runtimeDebugger, err := panicboundary.Call(func() (debugger.Session, error) {
 		return plan.plan.NewDebugSession(ctx, options...)
 	})

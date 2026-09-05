@@ -27,6 +27,7 @@ const (
 	CategoryInternalRuntime
 	CategoryWatcherLagged
 	CategoryBreakpointNotFound
+	CategorySessionNotFound
 )
 
 // Error returns the sanitized terminal failure message.

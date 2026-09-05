@@ -7,8 +7,18 @@ import (
 	"github.com/MontFerret/wire/server/internal/core"
 )
 
-func (s *Server) Execute(ctx context.Context, request *wirev1.ExecuteRequest) (*wirev1.ExecuteResponse, error) {
-	operation, cancel, err := s.operationContext(ctx, request.GetConnectionId())
+// ExecutionService adapts the execution RPC contract to its core owners.
+type ExecutionService struct {
+	wirev1.UnimplementedExecutionServiceServer
+	executor   *core.Executor
+	lifecycle  *core.Lifecycle
+	operations *operationContextFactory
+}
+
+var _ wirev1.ExecutionServiceServer = (*ExecutionService)(nil)
+
+func (s *ExecutionService) Execute(ctx context.Context, request *wirev1.ExecuteRequest) (*wirev1.ExecuteResponse, error) {
+	operation, cancel, err := s.operations.New(ctx, request.GetConnectionId())
 	if err != nil {
 		return nil, err
 	}
@@ -37,8 +47,32 @@ func (s *Server) Execute(ctx context.Context, request *wirev1.ExecuteRequest) (*
 	return &wirev1.ExecuteResponse{Execution: converted}, nil
 }
 
-func (s *Server) CancelExecution(ctx context.Context, request *wirev1.CancelExecutionRequest) (*wirev1.CancelExecutionResponse, error) {
-	operation, cancel, err := s.operationContext(ctx, request.GetConnectionId())
+func (s *ExecutionService) RunSession(
+	ctx context.Context,
+	request *wirev1.RunSessionRequest,
+) (*wirev1.RunSessionResponse, error) {
+	operation, cancel, err := s.operations.New(ctx, request.GetConnectionId())
+	if err != nil {
+		return nil, err
+	}
+
+	defer cancel()
+
+	snapshot, err := s.executor.RunSession(operation, core.SessionID(request.GetSessionId().GetValue()))
+	if err != nil {
+		return nil, rpcError(err)
+	}
+
+	converted, err := execution(snapshot)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+
+	return &wirev1.RunSessionResponse{Execution: converted}, nil
+}
+
+func (s *ExecutionService) CancelExecution(ctx context.Context, request *wirev1.CancelExecutionRequest) (*wirev1.CancelExecutionResponse, error) {
+	operation, cancel, err := s.operations.New(ctx, request.GetConnectionId())
 	if err != nil {
 		return nil, err
 	}
@@ -55,8 +89,8 @@ func (s *Server) CancelExecution(ctx context.Context, request *wirev1.CancelExec
 	return &wirev1.CancelExecutionResponse{}, nil
 }
 
-func (s *Server) ReleaseExecution(ctx context.Context, request *wirev1.ReleaseExecutionRequest) (*wirev1.ReleaseExecutionResponse, error) {
-	operation, cancel, err := s.operationContext(ctx, request.GetConnectionId())
+func (s *ExecutionService) ReleaseExecution(ctx context.Context, request *wirev1.ReleaseExecutionRequest) (*wirev1.ReleaseExecutionResponse, error) {
+	operation, cancel, err := s.operations.New(ctx, request.GetConnectionId())
 	if err != nil {
 		return nil, err
 	}
@@ -70,8 +104,8 @@ func (s *Server) ReleaseExecution(ctx context.Context, request *wirev1.ReleaseEx
 	return &wirev1.ReleaseExecutionResponse{}, nil
 }
 
-func (s *Server) WatchExecution(request *wirev1.WatchExecutionRequest, stream wirev1.ExecutionService_WatchExecutionServer) error {
-	operation, cancel, err := s.operationContext(stream.Context(), request.GetConnectionId())
+func (s *ExecutionService) WatchExecution(request *wirev1.WatchExecutionRequest, stream wirev1.ExecutionService_WatchExecutionServer) error {
+	operation, cancel, err := s.operations.New(stream.Context(), request.GetConnectionId())
 	if err != nil {
 		return err
 	}
@@ -131,16 +165,4 @@ func (s *Server) WatchExecution(request *wirev1.WatchExecutionRequest, stream wi
 			}
 		}
 	}
-}
-
-func subscriptionError(errors <-chan error) error {
-	select {
-	case err, ok := <-errors:
-		if ok && err != nil {
-			return rpcError(err)
-		}
-	default:
-	}
-
-	return nil
 }

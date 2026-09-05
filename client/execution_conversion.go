@@ -8,6 +8,17 @@ import (
 	"github.com/MontFerret/wire/pkg/execution"
 )
 
+func executionOutput(snapshot execution.Snapshot) api.Output {
+	if snapshot.Output == nil {
+		return api.Output{}
+	}
+
+	return api.Output{
+		ContentType: snapshot.Output.ContentType,
+		Content:     append([]byte(nil), snapshot.Output.Content...),
+	}
+}
+
 func convertOutput(value *wirev1.Output) *api.Output {
 	if value == nil {
 		return nil

@@ -1,0 +1,37 @@
+syntax = "proto3";
+
+package ferret.wire.v1;
+
+import "ferret/wire/v1/execution.proto";
+import "ferret/wire/v1/runtime.proto";
+import "ferret/wire/v1/source.proto";
+import "ferret/wire/v1/value.proto";
+
+option go_package = "github.com/MontFerret/wire/gen/ferret/wire/v1;wirev1";
+
+// RuntimeService owns logical connections and direct hosted Runtime operations.
+service RuntimeService {
+  // Run publishes a one-shot invocation of the hosted api.Runtime.Run.
+  rpc Run(RunRequest) returns (RunResponse);
+  // Servers apply finite host-configured limits to messages and logical resources.
+  // Connect creates the logical ownership scope for all resources created with
+  // the returned connection ID. The stream remains open for that scope's life.
+  rpc Connect(ConnectRequest) returns (stream ConnectResponse);
+  // CloseConnection commits deterministic cleanup of one logical connection.
+  // After cleanup, the connection ID and every owned resource ID are stale.
+  rpc CloseConnection(CloseConnectionRequest) returns (CloseConnectionResponse);
+}
+
+message RunRequest {
+  ConnectionId connection_id = 1;
+  Source source = 2;
+  Parameters parameters = 3;
+  // output_content_type requests a runtime-supported encoded output codec;
+  // empty preserves the runtime default.
+  string output_content_type = 4;
+}
+
+message RunResponse {
+  // execution is present and already in RUNNING state.
+  Execution execution = 1;
+}

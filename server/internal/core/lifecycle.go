@@ -9,21 +9,24 @@ import (
 type Lifecycle struct {
 	connections *ConnectionRegistry
 	plans       *PlanRegistry
+	sessions    *SessionRegistry
 	executions  *ExecutionRegistry
-	sessions    *DebugSessionRegistry
+	debug       *DebugSessionRegistry
 }
 
 func NewLifecycle(
 	connections *ConnectionRegistry,
 	plans *PlanRegistry,
+	sessions *SessionRegistry,
 	executions *ExecutionRegistry,
-	sessions *DebugSessionRegistry,
+	debug *DebugSessionRegistry,
 ) *Lifecycle {
 	return &Lifecycle{
 		connections: connections,
 		plans:       plans,
-		executions:  executions,
 		sessions:    sessions,
+		executions:  executions,
+		debug:       debug,
 	}
 }
 
@@ -52,10 +55,56 @@ func (l *Lifecycle) settleExecution(execution *Execution) {
 		}
 
 		l.executions.remove(execution)
+		if execution.sessionID != "" {
+			l.sessions.finishExecution(execution.owner, execution.sessionID, execution.id)
+		}
+
 		execution.release.Finish(err)
 	}()
 
 	err = execution.Close(context.Background())
+}
+
+func (l *Lifecycle) ReleaseSession(ctx *Context, id SessionID) error {
+	return l.releaseSession(ctx, ctx.connectionID(), id)
+}
+
+func (l *Lifecycle) releaseSession(waiter context.Context, owner ConnectionID, id SessionID) error {
+	session, started, err := l.sessions.beginClose(owner, id)
+	if err != nil {
+		return err
+	}
+
+	if started {
+		go l.settleSession(session)
+	}
+
+	return session.waitRelease(waiter)
+}
+
+// settleSession is the terminal boundary of a committed, detached release.
+// As with the other settle operations, a Wire orchestration panic must settle
+// release waiters and registry bookkeeping. It is not an external API panic;
+// only calls into the hosted implementation use panicboundary.
+func (l *Lifecycle) settleSession(session *Session) {
+	var err error
+	defer func() {
+		if recover() != nil {
+			err = errors.Join(err, internalError(errors.New("session release panicked")))
+		}
+
+		l.sessions.remove(session)
+		session.finishRelease(err)
+	}()
+
+	session.waitChildCreations()
+
+	for _, id := range l.executions.listBySession(session.owner, session.id) {
+		releaseErr := l.releaseExecution(context.Background(), session.owner, id)
+		err = errors.Join(err, ignoreMissingResource(releaseErr, ErrorKindExecutionNotFound))
+	}
+
+	err = errors.Join(err, session.Close(context.Background()))
 }
 
 func (l *Lifecycle) ReleaseDebugSession(ctx *Context, id DebugSessionID) error {
@@ -63,7 +112,7 @@ func (l *Lifecycle) ReleaseDebugSession(ctx *Context, id DebugSessionID) error {
 }
 
 func (l *Lifecycle) releaseDebugSession(waiter context.Context, owner ConnectionID, id DebugSessionID) error {
-	session, started, err := l.sessions.beginClose(owner, id)
+	session, started, err := l.debug.beginClose(owner, id)
 	if err != nil {
 		return err
 	}
@@ -82,7 +131,7 @@ func (l *Lifecycle) settleDebugSession(session *DebugSession) {
 			err = errors.Join(err, internalError(errors.New("debug session release panicked")))
 		}
 
-		l.sessions.remove(session)
+		l.debug.remove(session)
 		session.release.Finish(err)
 	}()
 
@@ -125,6 +174,11 @@ func (l *Lifecycle) settlePlan(plan *Plan) {
 	}
 
 	for _, id := range l.sessions.listByPlan(plan.owner, plan.id) {
+		releaseErr := l.releaseSession(context.Background(), plan.owner, id)
+		err = errors.Join(err, ignoreMissingResource(releaseErr, ErrorKindSessionNotFound))
+	}
+
+	for _, id := range l.debug.listByPlan(plan.owner, plan.id) {
 		releaseErr := l.releaseDebugSession(context.Background(), plan.owner, id)
 		err = errors.Join(err, ignoreMissingResource(releaseErr, ErrorKindDebugSessionNotFound))
 	}
@@ -165,6 +219,11 @@ func (l *Lifecycle) settleConnection(connection *Connection) {
 	}
 
 	for _, id := range l.sessions.listByOwner(owner) {
+		releaseErr := l.releaseSession(context.Background(), owner, id)
+		err = errors.Join(err, ignoreMissingResource(releaseErr, ErrorKindSessionNotFound))
+	}
+
+	for _, id := range l.debug.listByOwner(owner) {
 		releaseErr := l.releaseDebugSession(context.Background(), owner, id)
 		err = errors.Join(err, ignoreMissingResource(releaseErr, ErrorKindDebugSessionNotFound))
 	}

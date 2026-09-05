@@ -3,8 +3,6 @@ package core
 import (
 	"context"
 	"errors"
-	wireexecution "github.com/MontFerret/wire/pkg/execution"
-	"github.com/MontFerret/wire/pkg/failure"
 	"reflect"
 	"strings"
 	"sync"
@@ -13,6 +11,8 @@ import (
 
 	"github.com/MontFerret/api"
 	"github.com/MontFerret/api/debugger"
+	wireexecution "github.com/MontFerret/wire/pkg/execution"
+	"github.com/MontFerret/wire/pkg/failure"
 	"github.com/MontFerret/wire/server/internal/panicboundary"
 )
 
@@ -34,9 +34,11 @@ func TestHostRejectsNilRuntimeAndDoesNotCloseBorrowedRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if _, err := host.OpenConnection(); err != nil {
 		t.Fatal(err)
 	}
+
 	if err := host.Close(testContext(t)); err != nil {
 		t.Fatal(err)
 	}
@@ -85,6 +87,7 @@ func TestCompileExecuteRetainsReusableAPIPlanAndSessionOptions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if !reflect.DeepEqual(compiled.Parameters, []string{"input"}) {
 		t.Fatalf("unexpected parameters: %#v", compiled.Parameters)
 	}
@@ -131,9 +134,11 @@ func TestCompileExecuteRetainsReusableAPIPlanAndSessionOptions(t *testing.T) {
 	if len(options) != 2 {
 		t.Fatalf("expected two reusable sessions, got %d", len(options))
 	}
+
 	if !reflect.DeepEqual(options[0].params, inputs[0].Parameters) || options[0].contentType != "" {
 		t.Fatalf("unexpected first options: %#v", options[0])
 	}
+
 	if !reflect.DeepEqual(options[1].params, inputs[1].Parameters) || options[1].contentType != "application/x-wire" {
 		t.Fatalf("unexpected second options: %#v", options[1])
 	}
@@ -185,6 +190,7 @@ func TestCompileDelegatesDebugSelectionAndClosesAbandonedPlan(t *testing.T) {
 	if len(sources) != 1 || sources[0] != (api.Source{Name: "debug.fql", Content: "RETURN 1"}) || !debug[0] {
 		t.Fatalf("unexpected compile delegation: %#v %#v", sources, debug)
 	}
+
 	if err := connection.ReleasePlan(testContext(t), plan.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -199,6 +205,7 @@ func TestCompileDelegatesDebugSelectionAndClosesAbandonedPlan(t *testing.T) {
 	if len(sources) != 2 || sources[1] != (api.Source{Name: "anonymous", Content: "RETURN 2"}) || debug[1] {
 		t.Fatalf("unexpected anonymous source delegation: %#v %#v", sources, debug)
 	}
+
 	if err := connection.ReleasePlan(testContext(t), anonymous.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -243,17 +250,18 @@ func TestCompileForwardsOptionalOptimizationLevel(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	levels := []*api.OptimizationLevel{
-		nil,
-		optimizationLevel(api.OptimizationNone),
-		optimizationLevel(api.OptimizationBasic),
-		optimizationLevel(api.OptimizationFull),
-		optimizationLevel(api.OptimizationAggressive),
+	levels := []planOptions{
+		{},
+		{optimizationLevel: api.OptimizationNone, hasOptimizationLevel: true},
+		{optimizationLevel: api.OptimizationBasic, hasOptimizationLevel: true},
+		{optimizationLevel: api.OptimizationFull, hasOptimizationLevel: true},
+		{optimizationLevel: api.OptimizationAggressive, hasOptimizationLevel: true},
 	}
 	for index, level := range levels {
 		compiled, compileErr := connection.Compile(context.Background(), CompileInput{
-			Source:            api.Source{Content: "RETURN 1"},
-			OptimizationLevel: level,
+			Source:               api.Source{Content: "RETURN 1"},
+			OptimizationLevel:    level.optimizationLevel,
+			HasOptimizationLevel: level.hasOptimizationLevel,
 		})
 		if compileErr != nil {
 			t.Fatalf("compile %d failed: %v", index, compileErr)
@@ -269,22 +277,10 @@ func TestCompileForwardsOptionalOptimizationLevel(t *testing.T) {
 		t.Fatalf("recorded %d optimization values, want %d", len(got), len(levels))
 	}
 	for index, want := range levels {
-		if want == nil {
-			if got[index] != nil {
-				t.Fatalf("unspecified optimization forwarded as %v", *got[index])
-			}
-
-			continue
-		}
-
-		if got[index] == nil || *got[index] != *want {
-			t.Fatalf("optimization %d = %v, want %v", index, got[index], *want)
+		if got[index] != want {
+			t.Fatalf("optimization %d = %+v, want %+v", index, got[index], want)
 		}
 	}
-}
-
-func optimizationLevel(value api.OptimizationLevel) *api.OptimizationLevel {
-	return &value
 }
 
 func TestCompilePanicsAreSanitizedAndCloseReturnedPlansOnce(t *testing.T) {
@@ -741,6 +737,7 @@ func testLimits() fixtureLimits {
 	return fixtureLimits{
 		MaxConnections:                4,
 		MaxPlansPerConnection:         4,
+		MaxSessionsPerConnection:      4,
 		MaxExecutionsPerConnection:    4,
 		MaxDebugSessionsPerConnection: 4,
 		MaxWatchersPerResource:        4,

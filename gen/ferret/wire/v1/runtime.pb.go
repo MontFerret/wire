@@ -35,6 +35,7 @@ const (
 	ErrorCategory_ERROR_CATEGORY_INTERNAL_RUNTIME_FAILURE ErrorCategory = 10
 	ErrorCategory_ERROR_CATEGORY_WATCHER_LAGGED           ErrorCategory = 11
 	ErrorCategory_ERROR_CATEGORY_BREAKPOINT_NOT_FOUND     ErrorCategory = 15
+	ErrorCategory_ERROR_CATEGORY_SESSION_NOT_FOUND        ErrorCategory = 16
 )
 
 // Enum value maps for ErrorCategory.
@@ -51,6 +52,7 @@ var (
 		10: "ERROR_CATEGORY_INTERNAL_RUNTIME_FAILURE",
 		11: "ERROR_CATEGORY_WATCHER_LAGGED",
 		15: "ERROR_CATEGORY_BREAKPOINT_NOT_FOUND",
+		16: "ERROR_CATEGORY_SESSION_NOT_FOUND",
 	}
 	ErrorCategory_value = map[string]int32{
 		"ERROR_CATEGORY_UNSPECIFIED":              0,
@@ -64,6 +66,7 @@ var (
 		"ERROR_CATEGORY_INTERNAL_RUNTIME_FAILURE": 10,
 		"ERROR_CATEGORY_WATCHER_LAGGED":           11,
 		"ERROR_CATEGORY_BREAKPOINT_NOT_FOUND":     15,
+		"ERROR_CATEGORY_SESSION_NOT_FOUND":        16,
 	}
 )
 
@@ -842,7 +845,7 @@ const file_ferret_wire_v1_runtime_proto_rawDesc = "" +
 	"\aFailure\x129\n" +
 	"\bcategory\x18\x01 \x01(\x0e2\x1d.ferret.wire.v1.ErrorCategoryR\bcategory\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12D\n" +
-	"\x0ediagnostic_set\x18\x04 \x01(\v2\x1d.ferret.wire.v1.DiagnosticSetR\rdiagnosticSetJ\x04\b\x03\x10\x04R\vdiagnostics*\x84\x05\n" +
+	"\x0ediagnostic_set\x18\x04 \x01(\v2\x1d.ferret.wire.v1.DiagnosticSetR\rdiagnosticSetJ\x04\b\x03\x10\x04R\vdiagnostics*\xaa\x05\n" +
 	"\rErrorCategory\x12\x1e\n" +
 	"\x1aERROR_CATEGORY_UNSPECIFIED\x10\x00\x12&\n" +
 	"\"ERROR_CATEGORY_COMPILATION_FAILURE\x10\x02\x12$\n" +
@@ -855,10 +858,8 @@ const file_ferret_wire_v1_runtime_proto_rawDesc = "" +
 	"'ERROR_CATEGORY_INTERNAL_RUNTIME_FAILURE\x10\n" +
 	"\x12!\n" +
 	"\x1dERROR_CATEGORY_WATCHER_LAGGED\x10\v\x12'\n" +
-	"#ERROR_CATEGORY_BREAKPOINT_NOT_FOUND\x10\x0f\"\x04\b\x01\x10\x01\"\x04\b\t\x10\t\"\x04\b\f\x10\f\"\x04\b\r\x10\r\"\x04\b\x0e\x10\x0e*\x1eERROR_CATEGORY_INVALID_REQUEST*%ERROR_CATEGORY_UNSUPPORTED_CAPABILITY*\x18ERROR_CATEGORY_CANCELLED*(ERROR_CATEGORY_VALUE_REFERENCE_NOT_FOUND*!ERROR_CATEGORY_RESOURCE_EXHAUSTED2\xc2\x01\n" +
-	"\x0eRuntimeService\x12L\n" +
-	"\aConnect\x12\x1e.ferret.wire.v1.ConnectRequest\x1a\x1f.ferret.wire.v1.ConnectResponse0\x01\x12b\n" +
-	"\x0fCloseConnection\x12&.ferret.wire.v1.CloseConnectionRequest\x1a'.ferret.wire.v1.CloseConnectionResponseB6Z4github.com/MontFerret/wire/gen/ferret/wire/v1;wirev1b\x06proto3"
+	"#ERROR_CATEGORY_BREAKPOINT_NOT_FOUND\x10\x0f\x12$\n" +
+	" ERROR_CATEGORY_SESSION_NOT_FOUND\x10\x10\"\x04\b\x01\x10\x01\"\x04\b\t\x10\t\"\x04\b\f\x10\f\"\x04\b\r\x10\r\"\x04\b\x0e\x10\x0e*\x1eERROR_CATEGORY_INVALID_REQUEST*%ERROR_CATEGORY_UNSUPPORTED_CAPABILITY*\x18ERROR_CATEGORY_CANCELLED*(ERROR_CATEGORY_VALUE_REFERENCE_NOT_FOUND*!ERROR_CATEGORY_RESOURCE_EXHAUSTEDB6Z4github.com/MontFerret/wire/gen/ferret/wire/v1;wirev1b\x06proto3"
 
 var (
 	file_ferret_wire_v1_runtime_proto_rawDescOnce sync.Once
@@ -904,12 +905,8 @@ var file_ferret_wire_v1_runtime_proto_depIdxs = []int32{
 	10, // 8: ferret.wire.v1.DiagnosticSet.diagnostics:type_name -> ferret.wire.v1.Diagnostic
 	0,  // 9: ferret.wire.v1.Failure.category:type_name -> ferret.wire.v1.ErrorCategory
 	11, // 10: ferret.wire.v1.Failure.diagnostic_set:type_name -> ferret.wire.v1.DiagnosticSet
-	5,  // 11: ferret.wire.v1.RuntimeService.Connect:input_type -> ferret.wire.v1.ConnectRequest
-	6,  // 12: ferret.wire.v1.RuntimeService.CloseConnection:input_type -> ferret.wire.v1.CloseConnectionRequest
-	4,  // 13: ferret.wire.v1.RuntimeService.Connect:output_type -> ferret.wire.v1.ConnectResponse
-	7,  // 14: ferret.wire.v1.RuntimeService.CloseConnection:output_type -> ferret.wire.v1.CloseConnectionResponse
-	13, // [13:15] is the sub-list for method output_type
-	11, // [11:13] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for method output_type
+	11, // [11:11] is the sub-list for method input_type
 	11, // [11:11] is the sub-list for extension type_name
 	11, // [11:11] is the sub-list for extension extendee
 	0,  // [0:11] is the sub-list for field type_name
@@ -929,7 +926,7 @@ func file_ferret_wire_v1_runtime_proto_init() {
 			NumEnums:      1,
 			NumMessages:   13,
 			NumExtensions: 0,
-			NumServices:   1,
+			NumServices:   0,
 		},
 		GoTypes:           file_ferret_wire_v1_runtime_proto_goTypes,
 		DependencyIndexes: file_ferret_wire_v1_runtime_proto_depIdxs,

@@ -5,6 +5,21 @@ protobuf sources under `proto/ferret/wire/v1` are normative; this document
 records why every retained symbol belongs at this boundary and why removed
 symbols do not.
 
+## Service declaration and compatibility
+
+`RuntimeService` is declared in `runtime_service.proto`. Its shared connection,
+output, and failure messages remain in `runtime.proto`; this separation lets
+`Run` reference the existing Execution message without an import cycle.
+The service's full name is unchanged. Existing Connect and CloseConnection
+paths, message names, field numbers, and streaming contracts are preserved.
+Generate clients from the updated inputs to obtain `RuntimeService.Run`,
+with `RunRequest` and `RunResponse`.
+
+Buf retains its FILE policy, with only SERVICE_NO_DELETE ignored for the old
+`runtime.proto` declaration location. PACKAGE_SERVICE_NO_DELETE and the normal
+RPC deletion, signature, and streaming checks remain active, so this file move
+does not permit deleting or changing the service contract.
+
 ## Classification taxonomy
 
 | Class | Meaning |
@@ -27,24 +42,32 @@ transport, but their IDs and resources cannot be mixed.
 
 ```text
 Connection
+├── direct Runtime Execution
 └── reusable Plan
-    ├── asynchronous Execution
+    ├── direct Execution
+    ├── durable Session
+    │   └── one active Execution
     └── DebugSession
         └── debugger.Session
 ```
 
 IDs are opaque, server-issued, and scoped to the owning connection. Releasing a
-resource makes its ID stale. Releasing a Plan settles its executions and debug
-sessions before closing the Plan. Closing a connection or losing its Connect
+resource makes its ID stale. Releasing a normal Session rejects new runs,
+settles its active Execution, and closes its hosted `api.Session`. Releasing a
+Plan settles direct executions, normal sessions, and debug sessions before
+closing the Plan. Closing a connection or losing its Connect
 stream first prevents new children, waits for in-flight creation, then settles
-executions, debug sessions, and plans. Wire borrows the configured `api.Runtime`
+executions, normal sessions, debug sessions, and plans. Wire borrows the configured `api.Runtime`
 and listener and never closes either.
 
 `Compile` and `CompileDebug` create reusable Plans. Each `Execute` creates a new
-`api.Session`; each `CreateDebugSession` creates a new `debugger.Session` from a
-debug Plan. Cancellation or `Terminate` changes runtime state but does not
-release the remote resource. `ReleaseExecution`, `ReleaseDebugSession`, and
-`ReleasePlan` are the ownership operations.
+temporary `api.Session`. `CreateSession` instead constructs one durable
+`api.Session`; each sequential `RunSession` creates a distinct Execution that
+invokes the same hosted session. `RuntimeService.Run` creates a connection-owned
+Execution that calls the borrowed `api.Runtime.Run` directly. Each
+`CreateDebugSession` creates a new `debugger.Session` from a debug Plan.
+Cancellation or `Terminate` changes runtime state but does not release the
+remote resource. The corresponding Release RPCs are the ownership operations.
 
 ## State, watches, and debugger references
 
@@ -112,7 +135,10 @@ and field. Rows that list several fields classify each listed field.
 
 | Symbol | Class | Fields or contract |
 | --- | --- | --- |
-| service `RuntimeService` | B/C | Logical connection lifecycle over gRPC. |
+| service `RuntimeService` | A/B/C | Logical connection lifecycle and direct hosted Runtime invocation. |
+| RPC `Run` | A/B/C | Creates one connection-owned Execution that invokes hosted `api.Runtime.Run`. |
+| `RunRequest` | A/B/C | `connection_id=1`, `source=2`, optional `parameters=3`, optional requested `output_content_type=4`. |
+| `RunResponse` | B/C | Required running `execution=1`. |
 | RPC `Connect` | B/C | `ConnectRequest` to streaming `ConnectResponse`; creates and signals one logical connection. |
 | RPC `CloseConnection` | B/C | Explicit connection teardown and empty acknowledgement. |
 | `ConnectionId` | B | `value=1`, opaque and non-empty. |
@@ -122,7 +148,7 @@ and field. Rows that list several fields classify each listed field.
 | `ConnectResponse` | B/C | `connection_id=3`, `protocol=4`, optional `runtime_identity=5`; sent once. |
 | `CloseConnectionRequest` | B/C | `connection_id=1`. |
 | `CloseConnectionResponse` | C | Empty acknowledgement. |
-| enum `ErrorCategory` | A/B/C | `UNSPECIFIED=0`; compilation `2`, execution `3`; Plan `4`, Execution `5`, DebugSession `6`, Connection `7` not found; invalid state `8`; internal runtime boundary `10`; watcher lag `11`; breakpoint not found `15`. |
+| enum `ErrorCategory` | A/B/C | `UNSPECIFIED=0`; compilation `2`, execution `3`; Plan `4`, Execution `5`, DebugSession `6`, Connection `7`, Session `16` not found; invalid state `8`; internal runtime boundary `10`; watcher lag `11`; breakpoint not found `15`. |
 | `ErrorDetail` | C | `category=1`; separate gRPC status detail for non-native Wire categories. |
 | `DiagnosticAnnotation` | A/C | `range=1`, `message=2`, `primary=3`. |
 | `Diagnostic` | A/C | `kind=1`, `message=2`, `hint=3`, `note=4`, `source=7`, ordered `annotations=8`. |
@@ -173,8 +199,9 @@ and field. Rows that list several fields classify each listed field.
 
 | Symbol | Class | Fields or contract |
 | --- | --- | --- |
-| service `ExecutionService` | A/B/C | Creates, controls, releases, and watches remote sessions. |
+| service `ExecutionService` | A/B/C | Creates, controls, releases, and watches asynchronous operations. |
 | RPC `Execute` | A/B/C | Creates one asynchronous session and immediately returns its running snapshot. |
+| RPC `RunSession` | A/B/C | Creates one Execution for a durable Session run; overlapping runs are invalid state. |
 | RPC `CancelExecution` | A/B/C | Requests cancellation; does not release. |
 | RPC `ReleaseExecution` | B/C | Commits cancellation and cleanup. |
 | RPC `WatchExecution` | B/C | Non-owning ordered snapshot stream. |
@@ -184,11 +211,27 @@ and field. Rows that list several fields classify each listed field.
 | `WatchExecutionResponse` | B/C | Positive monotonic `sequence=2`, complete `execution=8`. |
 | `ExecuteRequest` | A/B/C | `connection_id=1`, `plan_id=2`, optional `parameters=3`, optional requested `output_content_type=4`. |
 | `ExecuteResponse` | B/C | Required running `execution=1`. |
+| `RunSessionRequest` | A/B/C | `connection_id=1`, `session_id=2`. |
+| `RunSessionResponse` | B/C | Required running `execution=1`. |
 | `CancelExecutionRequest` | B/C | `connection_id=1`, `execution_id=2`. |
 | `CancelExecutionResponse` | C | Empty acknowledgement. |
 | `ReleaseExecutionRequest` | B/C | `connection_id=1`, `execution_id=2`. |
 | `ReleaseExecutionResponse` | C | Empty acknowledgement. |
 | `WatchExecutionRequest` | B/C | `connection_id=1`, `execution_id=2`. |
+
+### Normal sessions
+
+| Symbol | Class | Fields or contract |
+| --- | --- | --- |
+| service `SessionService` | A/B/C | Creates and releases durable normal Unified API sessions. |
+| RPC `CreateSession` | A/B/C | Calls `api.Plan.NewSession` once and retains the result. |
+| RPC `ReleaseSession` | B/C | Rejects new runs, settles child Executions, then closes the hosted Session. |
+| `SessionId` | B | `value=1`, opaque and scoped to the owning connection. |
+| `Session` | A/B/C | `id=1`. |
+| `CreateSessionRequest` | A/B/C | `connection_id=1`, `plan_id=2`, optional `parameters=3`, optional requested `output_content_type=4`. |
+| `CreateSessionResponse` | B/C | Required `session=1`. |
+| `ReleaseSessionRequest` | B/C | `connection_id=1`, `session_id=2`. |
+| `ReleaseSessionResponse` | C | Empty acknowledgement. |
 
 ### Debugger
 
@@ -247,7 +290,8 @@ and field. Rows that list several fields classify each listed field.
 - `Capability`, `RuntimeInfo`, `ConnectionOpened`, `ResourceKind`, and
   `DiagnosticSpan` messages/enums are absent.
 - Wire does not expose runtime construction, host policies, DAP/LSP concepts,
-  listener security, bytecode nodes, or a direct `api.Runtime.Run` shortcut.
+  listener security, or bytecode nodes. Direct Runtime execution is an
+  asynchronous Wire resource rather than a shortcut on `RuntimeService`.
 
 ### E: historical artifacts
 
@@ -287,8 +331,7 @@ taxonomy, a Unified API declaration of accepted parameter values, runtime
 introspection/versioning, or capability negotiation. Host-supplied
 `RuntimeIdentity` is not presented as API introspection.
 
-A broad client redesign, native Ferret consumer migration, bytecode/node
+A broad lower-level client redesign, native Ferret consumer migration, bytecode/node
 protocols, distributed execution, and advanced negotiated capabilities remain
-separate work. The current client changes only the canonical source, stepping,
-diagnostics, numeric validation, and created-event surface required by this v1
-contract.
+separate work. The Universal API adapter deliberately composes the same Wire
+resources and does not add reconnection, leases, or transport construction.

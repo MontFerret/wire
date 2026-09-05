@@ -4,14 +4,17 @@ package ferret.wire.v1;
 
 import "ferret/wire/v1/plan.proto";
 import "ferret/wire/v1/runtime.proto";
+import "ferret/wire/v1/session.proto";
 import "ferret/wire/v1/value.proto";
 
 option go_package = "github.com/MontFerret/wire/gen/ferret/wire/v1;wirev1";
 
-// ExecutionService owns asynchronous sessions created from reusable plans.
+// ExecutionService owns asynchronous runtime and session invocations.
 service ExecutionService {
   // Execute publishes an asynchronous execution of an existing reusable plan.
   rpc Execute(ExecuteRequest) returns (ExecuteResponse);
+  // RunSession publishes one execution of an existing reusable Session.
+  rpc RunSession(RunSessionRequest) returns (RunSessionResponse);
   // CancelExecution requests cancellation without releasing the execution.
   rpc CancelExecution(CancelExecutionRequest) returns (CancelExecutionResponse);
   // ReleaseExecution commits cancellation and cleanup. The execution ID then becomes stale.
@@ -66,6 +69,16 @@ message ExecuteRequest {
 }
 
 message ExecuteResponse {
+  // execution is present and already in RUNNING state.
+  Execution execution = 1;
+}
+
+message RunSessionRequest {
+  ConnectionId connection_id = 1;
+  SessionId session_id = 2;
+}
+
+message RunSessionResponse {
   // execution is present and already in RUNNING state.
   Execution execution = 1;
 }

@@ -9,33 +9,11 @@ import (
 	"github.com/MontFerret/wire/pkg/debugger"
 )
 
-type (
-	// DebugEvents receives published debug snapshots until the terminal event or
-	// stream cancellation.
-	DebugEvents struct {
-		stream wirev1.DebugService_WatchDebugClient
-		cancel context.CancelFunc
-	}
-)
-
-// Watch opens an ordered event stream tied to both ctx and the Client's
-// logical lifecycle. It begins with the latest state published by the server.
-func (d *DebugSession) Watch(ctx context.Context) (*DebugEvents, error) {
-	if err := d.checkOpen(); err != nil {
-		return nil, err
-	}
-
-	watchCtx, cancel := d.client.watchContext(ctx)
-	stream, err := d.client.debugClient.WatchDebug(watchCtx, &wirev1.WatchDebugRequest{
-		ConnectionId: d.client.connectionProto(), DebugSessionId: &wirev1.DebugSessionId{Value: d.id},
-	})
-	if err != nil {
-		cancel()
-
-		return nil, decodeError(err)
-	}
-
-	return &DebugEvents{stream: stream, cancel: cancel}, nil
+// DebugEvents receives published debug snapshots until the terminal event or
+// stream cancellation.
+type DebugEvents struct {
+	stream wirev1.DebugService_WatchDebugClient
+	cancel context.CancelFunc
 }
 
 // Recv blocks for the next ordered debug event. It releases the local stream
@@ -64,6 +42,7 @@ func (events *DebugEvents) Recv() (debugger.Event, error) {
 
 		return debugger.Event{}, err
 	}
+
 	if event.Snapshot.State.Terminal() {
 		events.cancel()
 	}

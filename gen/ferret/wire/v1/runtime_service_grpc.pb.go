@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.2
 // - protoc             (unknown)
-// source: ferret/wire/v1/runtime.proto
+// source: ferret/wire/v1/runtime_service.proto
 
 package wirev1
 
@@ -19,6 +19,7 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
+	RuntimeService_Run_FullMethodName             = "/ferret.wire.v1.RuntimeService/Run"
 	RuntimeService_Connect_FullMethodName         = "/ferret.wire.v1.RuntimeService/Connect"
 	RuntimeService_CloseConnection_FullMethodName = "/ferret.wire.v1.RuntimeService/CloseConnection"
 )
@@ -27,8 +28,10 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
-// RuntimeService owns logical Wire connections independently of the physical transport.
+// RuntimeService owns logical connections and direct hosted Runtime operations.
 type RuntimeServiceClient interface {
+	// Run publishes a one-shot invocation of the hosted api.Runtime.Run.
+	Run(ctx context.Context, in *RunRequest, opts ...grpc.CallOption) (*RunResponse, error)
 	// Servers apply finite host-configured limits to messages and logical resources.
 	// Connect creates the logical ownership scope for all resources created with
 	// the returned connection ID. The stream remains open for that scope's life.
@@ -44,6 +47,16 @@ type runtimeServiceClient struct {
 
 func NewRuntimeServiceClient(cc grpc.ClientConnInterface) RuntimeServiceClient {
 	return &runtimeServiceClient{cc}
+}
+
+func (c *runtimeServiceClient) Run(ctx context.Context, in *RunRequest, opts ...grpc.CallOption) (*RunResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RunResponse)
+	err := c.cc.Invoke(ctx, RuntimeService_Run_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *runtimeServiceClient) Connect(ctx context.Context, in *ConnectRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ConnectResponse], error) {
@@ -79,8 +92,10 @@ func (c *runtimeServiceClient) CloseConnection(ctx context.Context, in *CloseCon
 // All implementations must embed UnimplementedRuntimeServiceServer
 // for forward compatibility.
 //
-// RuntimeService owns logical Wire connections independently of the physical transport.
+// RuntimeService owns logical connections and direct hosted Runtime operations.
 type RuntimeServiceServer interface {
+	// Run publishes a one-shot invocation of the hosted api.Runtime.Run.
+	Run(context.Context, *RunRequest) (*RunResponse, error)
 	// Servers apply finite host-configured limits to messages and logical resources.
 	// Connect creates the logical ownership scope for all resources created with
 	// the returned connection ID. The stream remains open for that scope's life.
@@ -98,6 +113,9 @@ type RuntimeServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedRuntimeServiceServer struct{}
 
+func (UnimplementedRuntimeServiceServer) Run(context.Context, *RunRequest) (*RunResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Run not implemented")
+}
 func (UnimplementedRuntimeServiceServer) Connect(*ConnectRequest, grpc.ServerStreamingServer[ConnectResponse]) error {
 	return status.Error(codes.Unimplemented, "method Connect not implemented")
 }
@@ -123,6 +141,24 @@ func RegisterRuntimeServiceServer(s grpc.ServiceRegistrar, srv RuntimeServiceSer
 		t.testEmbeddedByValue()
 	}
 	s.RegisterService(&RuntimeService_ServiceDesc, srv)
+}
+
+func _RuntimeService_Run_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RunRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RuntimeServiceServer).Run(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RuntimeService_Run_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RuntimeServiceServer).Run(ctx, req.(*RunRequest))
+	}
+	return interceptor(ctx, in, info, handler)
 }
 
 func _RuntimeService_Connect_Handler(srv interface{}, stream grpc.ServerStream) error {
@@ -162,6 +198,10 @@ var RuntimeService_ServiceDesc = grpc.ServiceDesc{
 	HandlerType: (*RuntimeServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
+			MethodName: "Run",
+			Handler:    _RuntimeService_Run_Handler,
+		},
+		{
 			MethodName: "CloseConnection",
 			Handler:    _RuntimeService_CloseConnection_Handler,
 		},
@@ -173,5 +213,5 @@ var RuntimeService_ServiceDesc = grpc.ServiceDesc{
 			ServerStreams: true,
 		},
 	},
-	Metadata: "ferret/wire/v1/runtime.proto",
+	Metadata: "ferret/wire/v1/runtime_service.proto",
 }

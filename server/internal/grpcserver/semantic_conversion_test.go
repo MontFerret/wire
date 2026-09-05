@@ -104,6 +104,7 @@ func TestFailureCategoryMapsEverySharedValue(t *testing.T) {
 		{shared: wirefailure.CategoryInternalRuntime, want: wirev1.ErrorCategory_ERROR_CATEGORY_INTERNAL_RUNTIME_FAILURE},
 		{shared: wirefailure.CategoryWatcherLagged, want: wirev1.ErrorCategory_ERROR_CATEGORY_WATCHER_LAGGED},
 		{shared: wirefailure.CategoryBreakpointNotFound, want: wirev1.ErrorCategory_ERROR_CATEGORY_BREAKPOINT_NOT_FOUND},
+		{shared: wirefailure.CategorySessionNotFound, want: wirev1.ErrorCategory_ERROR_CATEGORY_SESSION_NOT_FOUND},
 	}
 
 	for _, test := range tests {

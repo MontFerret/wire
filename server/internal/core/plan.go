@@ -8,30 +8,17 @@ import (
 	"github.com/MontFerret/wire/server/internal/lifecycle"
 )
 
-type (
-	Plan struct {
-		mu             sync.Mutex
-		id             PlanID
-		owner          ConnectionID
-		plan           api.Plan
-		parameters     []string
-		debuggable     bool
-		closing        bool
-		childCreations sync.WaitGroup
-		release        lifecycle.Close
-	}
-
-	CompileInput struct {
-		Source            api.Source
-		Debuggable        bool
-		OptimizationLevel *api.OptimizationLevel
-	}
-
-	PlanSnapshot struct {
-		ID         PlanID
-		Parameters []string
-	}
-)
+type Plan struct {
+	mu             sync.Mutex
+	id             PlanID
+	owner          ConnectionID
+	plan           api.Plan
+	parameters     []string
+	debuggable     bool
+	closing        bool
+	childCreations sync.WaitGroup
+	release        lifecycle.Close
+}
 
 func (p *Plan) snapshot() PlanSnapshot {
 	return PlanSnapshot{ID: p.id, Parameters: append([]string(nil), p.parameters...)}

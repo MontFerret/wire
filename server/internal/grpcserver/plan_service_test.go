@@ -13,40 +13,34 @@ func TestOptimizationLevelMapsPortableValuesAndPreservesRuntimeDefault(t *testin
 	tests := []struct {
 		name    string
 		options *wirev1.CompileOptions
-		want    *api.OptimizationLevel
+		want    api.OptimizationLevel
+		present bool
 	}{
 		{name: "missing options"},
 		{name: "unspecified", options: &wirev1.CompileOptions{}},
-		{name: "none", options: compileOptions(wirev1.OptimizationLevel_OPTIMIZATION_LEVEL_NONE), want: apiOptimization(api.OptimizationNone)},
-		{name: "basic", options: compileOptions(wirev1.OptimizationLevel_OPTIMIZATION_LEVEL_BASIC), want: apiOptimization(api.OptimizationBasic)},
-		{name: "full", options: compileOptions(wirev1.OptimizationLevel_OPTIMIZATION_LEVEL_FULL), want: apiOptimization(api.OptimizationFull)},
-		{name: "aggressive", options: compileOptions(wirev1.OptimizationLevel_OPTIMIZATION_LEVEL_AGGRESSIVE), want: apiOptimization(api.OptimizationAggressive)},
+		{name: "none", options: compileOptions(wirev1.OptimizationLevel_OPTIMIZATION_LEVEL_NONE), want: api.OptimizationNone, present: true},
+		{name: "basic", options: compileOptions(wirev1.OptimizationLevel_OPTIMIZATION_LEVEL_BASIC), want: api.OptimizationBasic, present: true},
+		{name: "full", options: compileOptions(wirev1.OptimizationLevel_OPTIMIZATION_LEVEL_FULL), want: api.OptimizationFull, present: true},
+		{name: "aggressive", options: compileOptions(wirev1.OptimizationLevel_OPTIMIZATION_LEVEL_AGGRESSIVE), want: api.OptimizationAggressive, present: true},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			got, err := optimizationLevel(test.options)
+			got, present, err := optimizationLevel(test.options)
 			if err != nil {
 				t.Fatal(err)
 			}
 
-			if test.want == nil {
-				if got != nil {
-					t.Fatalf("optimization = %v, want runtime default", *got)
-				}
-
-				return
+			if got != test.want || present != test.present {
+				t.Fatalf("optimization = (%v, %v), want (%v, %v)", got, present, test.want, test.present)
 			}
 
-			if got == nil || *got != *test.want {
-				t.Fatalf("optimization = %v, want %v", got, *test.want)
-			}
 		})
 	}
 }
 
 func TestOptimizationLevelRejectsUnknownValue(t *testing.T) {
-	_, err := optimizationLevel(compileOptions(wirev1.OptimizationLevel(99)))
+	_, _, err := optimizationLevel(compileOptions(wirev1.OptimizationLevel(99)))
 	var domain *core.DomainError
 	if !errors.As(err, &domain) || domain.Kind != core.ErrorKindInvalidRequest {
 		t.Fatalf("unexpected invalid optimization result: %v", err)
@@ -55,8 +49,4 @@ func TestOptimizationLevelRejectsUnknownValue(t *testing.T) {
 
 func compileOptions(level wirev1.OptimizationLevel) *wirev1.CompileOptions {
 	return &wirev1.CompileOptions{OptimizationLevel: level}
-}
-
-func apiOptimization(level api.OptimizationLevel) *api.OptimizationLevel {
-	return &level
 }

@@ -9,16 +9,31 @@ clients. It owns one logical Wire connection while borrowing the caller's
 Remote resources are exposed as opaque, typed handles:
 
 ```text
-Client
+Runtime (implements api.Runtime)
+└── private Universal API adapters
+    ├── api.Plan
+    │   ├── api.Session
+    │   └── debugger.Session
+    └── temporary Execution handles
+
+Client (lower-level Wire facade)
 └── Plan
     ├── Execution
     └── DebugSession
 ```
 
+`NewRuntime(ctx, conn)` is the Universal API-first entry point. `Runtime` owns
+one logical `Client`, while the returned Plan, normal Session, and debugger
+adapters remain private implementation types behind their Universal API
+interfaces. `Runtime.Run` uses `RuntimeService.Run` to call the hosted
+`api.Runtime.Run` directly. A normal Session is created remotely once and each sequential `Run` uses a hidden
+Execution that is watched and released before returning. Closing any adapter
+uses the 30-second detached cleanup bound; closing Runtime never closes `conn`.
+
 `Client` compiles plans. A `Plan` executes its compiled program and creates
 debug sessions. Execution and debugger operations live on their respective
-handles. The protocol still carries connection, plan, execution, and
-debug-session IDs, but the facade retains and propagates them privately.
+handles. The protocol still carries connection, plan, normal-session,
+execution, and debug-session IDs, but the facade retains and propagates them privately.
 Callers cannot manually combine a handle with another client's connection.
 Breakpoint IDs and debug value references remain visible because callers pass
 them back to debugger operations; they do not expose connection or handle
@@ -29,6 +44,7 @@ Debugger inspection uses the canonical Unified API types directly:
 
 ```go
 SetBreakpoint(context.Context, source.Location) (debugger.Breakpoint, error)
+SetBreakpointAt(context.Context, source.Location, debugger.BreakpointOptions) (debugger.Breakpoint, error)
 DeleteBreakpoint(context.Context, debugger.BreakpointID) error
 Frames(context.Context) ([]debugger.Frame, error)
 FrameLocals(context.Context, int) ([]debugger.Variable, error)
@@ -48,10 +64,9 @@ depth, stop reason, hit breakpoint IDs, output, and failure.
 `source.Location.SourceName` is a semantic source identifier and is never
 interpreted as a filesystem path by the client.
 
-The protocol accepts explicit breakpoint binding options. The temporary client
-facade continues to call `SetBreakpoint` with no explicit option, so the server
-uses the Unified API default binding behavior. Exposing the option through a
-redesigned client API is deferred.
+The protocol and lower-level facade accept explicit breakpoint binding options
+through `SetBreakpointAt`. `SetBreakpoint` remains the default-binding
+convenience.
 
 Compilation and one-shot execution accept `api.Source` directly. Its `Name`
 and `Content` map to the protocol `Source` message.
@@ -82,16 +97,63 @@ output, err := execution.Wait(ctx)
 ```
 
 Plan metadata is immutable. `Parameters` returns a defensive copy.
-`CompileOptions.Debuggable` temporarily chooses the protocol's `CompileDebug`
-operation instead of `Compile`; the `Plan` retains that choice locally so
-`Debuggable` remains compatible without adding debug capability to the remote
-Plan resource.
+`CompileOptions.Debuggable` chooses the protocol's `CompileDebug` operation
+instead of `Compile`. `CompileOptions.PlanOptions` accepts the same
+`api.PlanOption` callbacks as the Universal API adapter:
+
+```go
+options := client.CompileOptions{
+    PlanOptions: []api.PlanOption{api.WithOptimizationLevel(api.OptimizationNone)},
+}
+```
+
+Omitting the optimization option preserves the hosted runtime default; supplying
+it transports the explicit level, including `api.OptimizationNone`. Presence
+tracking stays private. Both entry points apply non-nil callbacks exactly once,
+in order, before dispatch. The last valid setting wins; callback errors are
+joined and prevent dispatch, as does caller cancellation before or after option
+application.
 
 The metadata facade maps `APIIdentity` and `WireVersion` from the handshake's
 protocol name and version and maps optional host runtime identity directly to
 `*execution.Identity` from `pkg/execution`.
 Legacy Ferret-version and capability fields remain empty rather than
 fabricating values not carried by the protocol.
+
+### Allocation and cancellation
+
+The Universal API adapter checks cancellation before sending an allocation
+request, including after option callbacks. Only the acquisition RPC is detached
+from caller cancellation, with an internal 30-second deadline. If its resource
+handle arrives after cancellation, the adapter releases that handle before
+returning the caller's cancellation. Execution waiting uses the original caller
+context; releasing the temporary Execution also cancels unfinished work.
+
+A lost reply or a reply without a usable resource ID cannot be reclaimed by ID.
+The adapter immediately closes the narrowest known owner: a Plan for an unknown
+normal or debug Session, a Session for its unknown Execution, or the logical
+Runtime for a root Plan or direct Runtime Execution. Successful narrow cleanup
+preserves resources outside that subtree. Confirmed creation rejections and
+local validation errors do not trigger this invalidation.
+
+Each automatic release attempt has a fresh 30-second bound. For an unknown
+child, a failed or expired parent release advances to the next known ancestor:
+Session, then Plan, then logical Runtime. Successful reclamation stops that
+escalation. If connection release fails, cancelling its Connect stream supplies
+the final lifetime signal.
+
+A handle with a known ID follows ordinary release policy, including when it
+arrives after caller cancellation or belongs to a one-shot invocation. A failed
+release is retained and returned without automatically invalidating its Session,
+Plan, or Runtime. If release never reached the server, the hosted child can
+remain until the caller explicitly closes its ancestor; a durable Session can
+therefore remain busy. If only the release acknowledgement was lost after
+server cleanup, the same durable Session can run again.
+
+Operation and cleanup errors remain joined. The caller-owned physical transport
+and other logical clients on it remain open. These bounds limit client waiting;
+the hosted implementation must still honor its cancellation and Close contracts.
+
 
 ## Convenience execution
 
@@ -146,6 +208,12 @@ with a fresh 30-second deadline for each release, so resources created by
 allowing a stalled cleanup call to block forever. Execution and cleanup errors
 are joined rather than replacing one another.
 
+Universal API resource-allocation RPCs use the same bounded detached context.
+This prevents a cancellation race from discarding the only opaque handle after
+the server has published a resource. The original caller context is checked
+after allocation; a resource that raced cancellation is cancelled and released
+before the adapter returns the caller-visible cancellation.
+
 ## Snapshots and events
 
 Handles represent identity, ownership, and operations; they are not mutable
@@ -178,7 +246,8 @@ ancestor starts closing.
 
 ## Closing resources
 
-`Plan`, `Execution`, and `DebugSession` expose `Close(context.Context) error`.
+The lower-level `Plan`, `Execution`, and `DebugSession` expose
+`Close(context.Context) error`.
 Close maps to the corresponding protocol release operation; it is never driven
 by finalizers or garbage collection.
 
@@ -224,6 +293,7 @@ Convenience APIs join operation and cleanup errors so `errors.Is` and
 The client package is limited to:
 
 - logical Connect lifecycle;
+- a complete remote `api.Runtime` adapter;
 - typed plan, execution, debugger, and event operations;
 - private connection and resource-ID propagation;
 - explicit parameter conversion;
@@ -234,9 +304,8 @@ Parameter conversion deliberately accepts only the portable Wire subset:
 null, booleans, signed integers, finite doubles, strings, bytes, `[]any`, and
 `map[string]any`. Exact signed `int64` and floating-point values remain distinct;
 NaN and infinities are rejected even when nested. Duration, datetime, regexp,
-and custom values are rejected locally. A broad client redesign, including a
-smaller metadata surface and explicit compile and breakpoint options, is
-deferred.
+and custom values are rejected locally. Further lower-level client redesign is
+separate from the Universal API adapter.
 
 Closing the Client never closes the caller-owned gRPC connection. The facade
 does not construct runtimes or transports. Its convenience execution methods

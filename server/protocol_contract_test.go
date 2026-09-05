@@ -65,6 +65,10 @@ func TestProtocolDescriptorsReserveRemovedV1Surface(t *testing.T) {
 			reserved: []protoreflect.Name{"plan_id"},
 		},
 		{
+			message: wirev1.File_ferret_wire_v1_session_proto.Messages().ByName("CreateSessionRequest"),
+			fields:  []protoreflect.Name{"connection_id", "plan_id", "parameters", "output_content_type"},
+		},
+		{
 			message:  wirev1.File_ferret_wire_v1_execution_proto.Messages().ByName("WatchExecutionResponse"),
 			fields:   []protoreflect.Name{"sequence", "execution"},
 			numbers:  []protoreflect.FieldNumber{1, 3, 4, 5, 6, 7},
@@ -151,8 +155,13 @@ func TestProtocolDescriptorsReserveRemovedV1Surface(t *testing.T) {
 			t.Errorf("ErrorCategory does not reserve value name %s", name)
 		}
 	}
+
 	if errorCategory.Values().ByName("ERROR_CATEGORY_VALUE_REFERENCE_NOT_FOUND") != nil {
 		t.Error("ErrorCategory still declares the removed value-reference category")
+	}
+
+	if sessionNotFound := errorCategory.Values().ByName("ERROR_CATEGORY_SESSION_NOT_FOUND"); sessionNotFound == nil || sessionNotFound.Number() != 16 {
+		t.Error("ErrorCategory does not expose SESSION_NOT_FOUND at value 16")
 	}
 
 	location := wirev1.File_ferret_wire_v1_source_proto.Messages().ByName("Location")
@@ -193,6 +202,7 @@ func TestProtocolDescriptorsReserveRemovedV1Surface(t *testing.T) {
 	if next := breakpointMode.Values().ByName("BREAKPOINT_BINDING_MODE_NEXT_EXECUTABLE_IN_SOURCE"); next == nil || next.Number() != 1 {
 		t.Error("BreakpointBindingMode does not expose source-neutral default at value 1")
 	}
+
 	if !breakpointMode.ReservedNames().Has("BREAKPOINT_BINDING_MODE_NEXT_EXECUTABLE_IN_FILE") ||
 		breakpointMode.Values().ByName("BREAKPOINT_BINDING_MODE_NEXT_EXECUTABLE_IN_FILE") != nil {
 		t.Error("BreakpointBindingMode does not reserve the removed file-specific name")
@@ -219,13 +229,54 @@ func TestProtocolDescriptorsReserveRemovedV1Surface(t *testing.T) {
 		t.Error("SetBreakpointRequest does not reserve the old SourceLocation field tag")
 	}
 
-	runtimeMethods := wirev1.File_ferret_wire_v1_runtime_proto.Services().ByName("RuntimeService").Methods()
-	if runtimeMethods.ByName("Run") != nil {
-		t.Error("RuntimeService exposes the removed Runtime.Run shortcut")
+	runtimeMethods := wirev1.File_ferret_wire_v1_runtime_service_proto.Services().ByName("RuntimeService").Methods()
+	if runtimeMethods.ByName("Run") == nil {
+		t.Error("RuntimeService is missing the hosted Runtime.Run operation")
+	}
+
+	if wirev1.RuntimeService_Run_FullMethodName != "/ferret.wire.v1.RuntimeService/Run" ||
+		wirev1.RuntimeService_Connect_FullMethodName != "/ferret.wire.v1.RuntimeService/Connect" ||
+		wirev1.RuntimeService_CloseConnection_FullMethodName != "/ferret.wire.v1.RuntimeService/CloseConnection" {
+		t.Error("RuntimeService RPC paths changed")
+	}
+
+	if runtimeMethods.Len() != 3 || !runtimeMethods.ByName("Connect").IsStreamingServer() ||
+		runtimeMethods.ByName("Run").IsStreamingServer() || runtimeMethods.ByName("Run").IsStreamingClient() {
+		t.Error("RuntimeService RPC or streaming contract changed")
+	}
+
+	runMessages := wirev1.File_ferret_wire_v1_runtime_service_proto.Messages()
+	for name, number := range map[protoreflect.Name]protoreflect.FieldNumber{
+		"connection_id": 1, "source": 2, "parameters": 3, "output_content_type": 4,
+	} {
+		field := runMessages.ByName("RunRequest").Fields().ByName(name)
+		if field == nil || field.Number() != number {
+			t.Errorf("RunRequest.%s does not use field %d", name, number)
+		}
+	}
+
+	runExecution := runMessages.ByName("RunResponse").Fields().ByName("execution")
+	if runExecution == nil || runExecution.Number() != 1 || runExecution.Message().FullName() != "ferret.wire.v1.Execution" {
+		t.Error("RunResponse does not preserve the Execution response")
 	}
 	planMethods := wirev1.File_ferret_wire_v1_plan_proto.Services().ByName("PlanService").Methods()
 	if planMethods.ByName("Compile") == nil || planMethods.ByName("CompileDebug") == nil {
 		t.Error("PlanService does not expose distinct normal and debug compilation")
+	}
+	sessionMethods := wirev1.File_ferret_wire_v1_session_proto.Services().ByName("SessionService").Methods()
+	for _, required := range []protoreflect.Name{"CreateSession", "ReleaseSession"} {
+		if sessionMethods.ByName(required) == nil {
+			t.Errorf("SessionService is missing RPC %s", required)
+		}
+	}
+	executionMethods := wirev1.File_ferret_wire_v1_execution_proto.Services().ByName("ExecutionService").Methods()
+	if executionMethods.Len() != 5 {
+		t.Error("ExecutionService retained a direct Runtime invocation RPC")
+	}
+	for _, required := range []protoreflect.Name{"Execute", "RunSession"} {
+		if executionMethods.ByName(required) == nil {
+			t.Errorf("ExecutionService is missing RPC %s", required)
+		}
 	}
 	debugMethods := wirev1.File_ferret_wire_v1_debug_proto.Services().ByName("DebugService").Methods()
 	for _, required := range []protoreflect.Name{"StepOver", "StepIn", "StepOut"} {
@@ -253,6 +304,7 @@ func TestProtocolSourcesContainNoNativeMetadataOrFakeCapabilities(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if len(files) == 0 {
 		t.Fatal("protocol sources are missing")
 	}

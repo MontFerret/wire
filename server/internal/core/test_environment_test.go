@@ -3,124 +3,16 @@ package core
 import (
 	"context"
 
-	"github.com/MontFerret/api"
 	"github.com/MontFerret/api/debugger"
 	"github.com/MontFerret/api/source"
 )
 
-type (
-	testHost struct {
-		connections *ConnectionRegistry
-		plans       *PlanRegistry
-		executions  *ExecutionRegistry
-		sessions    *DebugSessionRegistry
-		compiler    *Compiler
-		executor    *Executor
-		debugger    *Debugger
-		lifecycle   *Lifecycle
-	}
-
-	testEnvironment struct {
-		*Connection
-		host          *testHost
-		plans         testPlanRegistry
-		executions    testExecutionRegistry
-		debugSessions testDebugSessionRegistry
-	}
-
-	testPlanRegistry struct {
-		registry *PlanRegistry
-		owner    ConnectionID
-	}
-
-	testExecutionRegistry struct {
-		registry *ExecutionRegistry
-		owner    ConnectionID
-	}
-
-	testDebugSessionRegistry struct {
-		registry *DebugSessionRegistry
-		owner    ConnectionID
-	}
-
-	fixtureLimits struct {
-		MaxConnections                int
-		MaxPlansPerConnection         int
-		MaxExecutionsPerConnection    int
-		MaxDebugSessionsPerConnection int
-		MaxWatchersPerResource        int
-		MaxBreakpointsPerDebugSession int
-	}
-)
-
-func newTestHost(runtime api.Runtime, limits fixtureLimits) (*testHost, error) {
-	connections := NewConnectionRegistry(limits.MaxConnections)
-	plans := NewPlanRegistry(limits.MaxPlansPerConnection)
-	executions := NewExecutionRegistry(limits.MaxExecutionsPerConnection, limits.MaxWatchersPerResource)
-	sessions := NewDebugSessionRegistry(
-		limits.MaxDebugSessionsPerConnection,
-		limits.MaxWatchersPerResource,
-		limits.MaxBreakpointsPerDebugSession,
-	)
-	compiler, err := NewCompiler(runtime, plans)
-	if err != nil {
-		return nil, err
-	}
-
-	return &testHost{
-		connections: connections,
-		plans:       plans,
-		executions:  executions,
-		sessions:    sessions,
-		compiler:    compiler,
-		executor:    NewExecutor(plans, executions),
-		debugger:    NewDebugger(plans, sessions),
-		lifecycle:   NewLifecycle(connections, plans, executions, sessions),
-	}, nil
-}
-
-func (h *testHost) OpenConnection() (*testEnvironment, error) {
-	connection := NewConnection()
-	if err := h.connections.Register(connection); err != nil {
-		return nil, err
-	}
-
-	return &testEnvironment{
-		Connection: connection,
-		host:       h,
-		plans: testPlanRegistry{
-			registry: h.plans,
-			owner:    connection.ID(),
-		},
-		executions: testExecutionRegistry{
-			registry: h.executions,
-			owner:    connection.ID(),
-		},
-		debugSessions: testDebugSessionRegistry{
-			registry: h.sessions,
-			owner:    connection.ID(),
-		},
-	}, nil
-}
-
-func (h *testHost) CloseConnection(ctx context.Context, id ConnectionID) error {
-	return h.lifecycle.CloseConnection(ctx, id)
-}
-
-func (h *testHost) Close(ctx context.Context) error {
-	return h.lifecycle.Close(ctx)
-}
-
-func (r testPlanRegistry) lookup(id PlanID) (*Plan, error) {
-	return r.registry.get(r.owner, id)
-}
-
-func (r testExecutionRegistry) lookup(id ExecutionID) (*Execution, error) {
-	return r.registry.get(r.owner, id)
-}
-
-func (r testDebugSessionRegistry) lookup(id DebugSessionID) (*DebugSession, error) {
-	return r.registry.get(r.owner, id)
+type testEnvironment struct {
+	*Connection
+	host          *testHost
+	plans         testPlanRegistry
+	executions    testExecutionRegistry
+	debugSessions testDebugSessionRegistry
 }
 
 func (e *testEnvironment) operation(ctx context.Context) (*Context, context.CancelFunc) {
@@ -139,6 +31,34 @@ func (e *testEnvironment) Execute(ctx context.Context, input ExecuteInput) (Exec
 	defer cancel()
 
 	return e.host.executor.Execute(operation, input)
+}
+
+func (e *testEnvironment) CreateSession(ctx context.Context, input CreateSessionInput) (SessionID, error) {
+	operation, cancel := e.operation(ctx)
+	defer cancel()
+
+	return e.host.executor.CreateSession(operation, input)
+}
+
+func (e *testEnvironment) RunSession(ctx context.Context, id SessionID) (ExecutionRecord, error) {
+	operation, cancel := e.operation(ctx)
+	defer cancel()
+
+	return e.host.executor.RunSession(operation, id)
+}
+
+func (e *testEnvironment) Run(ctx context.Context, input RunInput) (ExecutionRecord, error) {
+	operation, cancel := e.operation(ctx)
+	defer cancel()
+
+	return e.host.executor.Run(operation, input)
+}
+
+func (e *testEnvironment) ReleaseSession(ctx context.Context, id SessionID) error {
+	operation, cancel := e.operation(ctx)
+	defer cancel()
+
+	return e.host.lifecycle.ReleaseSession(operation, id)
 }
 
 func (e *testEnvironment) CancelExecution(id ExecutionID) (ExecutionRecord, error) {
@@ -196,6 +116,7 @@ func (e *testEnvironment) WatchDebug(id DebugSessionID) (DebugSubscription, erro
 	if err != nil {
 		return DebugSubscription{}, err
 	}
+
 	defer cancel()
 
 	return session.Watch()
@@ -206,6 +127,7 @@ func (e *testEnvironment) StartDebug(ctx context.Context, id DebugSessionID) (De
 	if err != nil {
 		return DebugSessionRecord{}, err
 	}
+
 	defer cancel()
 
 	return session.Start(operation)
@@ -216,6 +138,7 @@ func (e *testEnvironment) ContinueDebug(ctx context.Context, id DebugSessionID) 
 	if err != nil {
 		return DebugSessionRecord{}, err
 	}
+
 	defer cancel()
 
 	return session.Continue(operation)
@@ -226,6 +149,7 @@ func (e *testEnvironment) StopDebug(ctx context.Context, id DebugSessionID) (Deb
 	if err != nil {
 		return DebugSessionRecord{}, err
 	}
+
 	defer cancel()
 
 	return session.Stop(operation)
@@ -240,6 +164,7 @@ func (e *testEnvironment) SetBreakpoint(
 	if err != nil {
 		return debugger.Breakpoint{}, err
 	}
+
 	defer cancel()
 
 	return session.SetBreakpoint(operation, location)
@@ -250,6 +175,7 @@ func (e *testEnvironment) Frames(ctx context.Context, id DebugSessionID) ([]debu
 	if err != nil {
 		return nil, err
 	}
+
 	defer cancel()
 
 	return session.Frames(operation)
@@ -264,6 +190,7 @@ func (e *testEnvironment) FrameLocals(
 	if err != nil {
 		return nil, err
 	}
+
 	defer cancel()
 
 	return session.FrameLocals(operation, frame)
@@ -278,6 +205,7 @@ func (e *testEnvironment) Variables(
 	if err != nil {
 		return nil, err
 	}
+
 	defer cancel()
 
 	return session.Variables(operation, reference)
@@ -293,6 +221,7 @@ func (e *testEnvironment) EvaluateFrame(
 	if err != nil {
 		return debugger.Value{}, err
 	}
+
 	defer cancel()
 
 	return session.EvaluateFrame(operation, frame, expression)

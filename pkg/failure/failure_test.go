@@ -40,6 +40,7 @@ func TestFailureCategoriesAreDistinctAndNonZero(t *testing.T) {
 		failure.CategoryInternalRuntime,
 		failure.CategoryWatcherLagged,
 		failure.CategoryBreakpointNotFound,
+		failure.CategorySessionNotFound,
 	}
 
 	seen := make(map[failure.Category]struct{}, len(categories))
