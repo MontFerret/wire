@@ -4,10 +4,10 @@ import (
 	"fmt"
 )
 
-// ServerLimits bounds all client-controlled resource and message classes.
+// Limits bounds all client-controlled resource and message classes.
 // A custom value replaces the complete default set and every field must be
 // positive.
-type ServerLimits struct {
+type Limits struct {
 	MaxConnections                int
 	MaxPlansPerConnection         int
 	MaxSessionsPerConnection      int
@@ -19,9 +19,9 @@ type ServerLimits struct {
 	MaxOutboundMessageBytes       int
 }
 
-// DefaultServerLimits returns the secure finite limits used by NewServer.
-func DefaultServerLimits() ServerLimits {
-	return ServerLimits{
+// DefaultLimits returns the secure finite limits used by NewServer.
+func DefaultLimits() Limits {
+	return Limits{
 		MaxConnections:                64,
 		MaxPlansPerConnection:         128,
 		MaxSessionsPerConnection:      128,
@@ -34,7 +34,7 @@ func DefaultServerLimits() ServerLimits {
 	}
 }
 
-func (limits ServerLimits) validate() error {
+func (limits Limits) validate() error {
 	values := []struct {
 		name  string
 		value int

@@ -27,9 +27,9 @@ type Server struct {
 }
 
 // NewServer adapts a caller-configured runtime without taking ownership
-// or creating a listener. Limits default to DefaultServerLimits.
-func NewServer(runtime api.Runtime, options ...ServerOption) (*Server, error) {
-	configured := serverOptions{limits: DefaultServerLimits()}
+// or creating a listener. Limits default to DefaultLimits.
+func NewServer(runtime api.Runtime, options ...Option) (*Server, error) {
+	configured := config{limits: DefaultLimits()}
 	for _, option := range options {
 		if option == nil {
 			return nil, errors.New("server option must not be nil")

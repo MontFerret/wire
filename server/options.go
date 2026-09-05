@@ -7,47 +7,47 @@ import (
 )
 
 type (
-	// ServerOption configures a Server without transferring host ownership.
-	ServerOption interface {
-		apply(*serverOptions) error
+	// Option configures a Server without transferring host ownership.
+	Option interface {
+		apply(*config) error
 	}
 
-	serverOptionFunc func(*serverOptions) error
+	serverOptionFunc func(*config) error
 
-	serverOptions struct {
+	config struct {
 		runtimeIdentity execution.Identity
-		limits          ServerLimits
+		limits          Limits
 	}
 )
 
-func (option serverOptionFunc) apply(options *serverOptions) error {
-	return option(options)
+func (option serverOptionFunc) apply(cfg *config) error {
+	return option(cfg)
 }
 
 // WithRuntimeIdentity publishes optional host application identity during the
 // Connect handshake. Name is required; Wire does not derive identity from the
 // process or environment.
-func WithRuntimeIdentity(identity execution.Identity) ServerOption {
-	return serverOptionFunc(func(options *serverOptions) error {
+func WithRuntimeIdentity(identity execution.Identity) Option {
+	return serverOptionFunc(func(cfg *config) error {
 		if identity.Name == "" {
 			return errors.New("runtime identity name is required")
 		}
 
-		options.runtimeIdentity = identity
+		cfg.runtimeIdentity = identity
 
 		return nil
 	})
 }
 
-// WithServerLimits replaces the complete default limit set. NewServer rejects
+// WithLimits replaces the complete default limit set. NewServer rejects
 // the option when any resource or message limit is not positive.
-func WithServerLimits(limits ServerLimits) ServerOption {
-	return serverOptionFunc(func(options *serverOptions) error {
+func WithLimits(limits Limits) Option {
+	return serverOptionFunc(func(cfg *config) error {
 		if err := limits.validate(); err != nil {
 			return err
 		}
 
-		options.limits = limits
+		cfg.limits = limits
 
 		return nil
 	})

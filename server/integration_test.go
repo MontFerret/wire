@@ -328,9 +328,9 @@ func TestMessageLimitsRemainAtTheGRPCBoundary(t *testing.T) {
 	runtime := &apiRuntimeSpy{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 		return plan, nil
 	}}
-	limits := server.DefaultServerLimits()
+	limits := server.DefaultLimits()
 	limits.MaxOutboundMessageBytes = 1024
-	env := newIntegrationEnv(t, runtime, server.WithServerLimits(limits))
+	env := newIntegrationEnv(t, runtime, server.WithLimits(limits))
 
 	streamCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -370,7 +370,7 @@ func TestMessageLimitsRemainAtTheGRPCBoundary(t *testing.T) {
 	}
 }
 
-func newIntegrationEnv(t testing.TB, runtime api.Runtime, options ...server.ServerOption) *integrationEnv {
+func newIntegrationEnv(t testing.TB, runtime api.Runtime, options ...server.Option) *integrationEnv {
 	t.Helper()
 	server, err := server.NewServer(runtime, options...)
 	if err != nil {
