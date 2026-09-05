@@ -14,33 +14,25 @@ import (
 	"github.com/MontFerret/wire/server/internal/panicboundary"
 )
 
-type (
-	OpenDebugInput struct {
-		PlanID            PlanID
-		Parameters        map[string]any
-		OutputContentType string
-	}
-
-	DebugSession struct {
-		// operationMu serializes state-dependent operations and command commits.
-		// The active runtime resume and close paths intentionally do not hold it
-		// so pause and cancellation can reach the controller.
-		operationMu sync.Mutex
-		// stateMu protects only Wire-visible state and never spans a runtime call.
-		stateMu     sync.Mutex
-		id          DebugSessionID
-		owner       ConnectionID
-		planID      PlanID
-		controller  *DebugController
-		ctx         context.Context
-		cancel      context.CancelCauseFunc
-		state       debugSessionState
-		breakpoints *breakpointSet
-		events      *eventStream[wiredebugger.Event]
-		close       lifecycle.Close
-		release     lifecycle.Close
-	}
-)
+type DebugSession struct {
+	// operationMu serializes state-dependent operations and command commits.
+	// The active runtime resume and close paths intentionally do not hold it
+	// so pause and cancellation can reach the controller.
+	operationMu sync.Mutex
+	// stateMu protects only Wire-visible state and never spans a runtime call.
+	stateMu     sync.Mutex
+	id          DebugSessionID
+	owner       ConnectionID
+	planID      PlanID
+	controller  *DebugController
+	ctx         context.Context
+	cancel      context.CancelCauseFunc
+	state       debugSessionState
+	breakpoints *breakpointSet
+	events      *eventStream[wiredebugger.Event]
+	close       lifecycle.Close
+	release     lifecycle.Close
+}
 
 func newDebugSession(
 	id DebugSessionID,
@@ -105,6 +97,7 @@ func (d *DebugSession) Pause(ctx context.Context) (DebugSessionRecord, error) {
 
 		return DebugSessionRecord{}, invalidState("debug session is not running", nil)
 	}
+
 	d.stateMu.Unlock()
 
 	if err := d.controller.Pause(); err != nil {
@@ -449,6 +442,7 @@ func (d *DebugSession) finishCommand(event *debugger.Event, commandErr error) {
 			location := event.Location
 			d.state.location = &location
 		}
+
 		d.state.depth = event.Depth
 
 		switch event.Reason {
@@ -555,6 +549,7 @@ func (d *DebugSession) poisonAfterRuntimePanic(operation string, err error) erro
 		d.state.failure = failureFromError(failure.CategoryInternalRuntime, err)
 		d.publishLocked(wiredebugger.EventFailed, true)
 	}
+
 	d.stateMu.Unlock()
 
 	d.beginClose()
@@ -607,6 +602,7 @@ func (d *DebugSession) settleClose() {
 		d.state.terminate()
 		d.publishLocked(wiredebugger.EventTerminated, true)
 	}
+
 	d.stateMu.Unlock()
 	d.operationMu.Unlock()
 

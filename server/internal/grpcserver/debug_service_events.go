@@ -5,8 +5,8 @@ import (
 	"github.com/MontFerret/wire/server/internal/core"
 )
 
-func (s *Server) WatchDebug(request *wirev1.WatchDebugRequest, stream wirev1.DebugService_WatchDebugServer) error {
-	operation, cancel, err := s.operationContext(stream.Context(), request.GetConnectionId())
+func (s *DebugService) WatchDebug(request *wirev1.WatchDebugRequest, stream wirev1.DebugService_WatchDebugServer) error {
+	operation, cancel, err := s.operations.New(stream.Context(), request.GetConnectionId())
 	if err != nil {
 		return err
 	}

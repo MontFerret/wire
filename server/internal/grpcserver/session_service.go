@@ -7,14 +7,25 @@ import (
 	"github.com/MontFerret/wire/server/internal/core"
 )
 
-func (s *Server) CreateSession(
+// SessionService adapts the session RPC contract to its core owners.
+type SessionService struct {
+	wirev1.UnimplementedSessionServiceServer
+	executor   *core.Executor
+	lifecycle  *core.Lifecycle
+	operations *operationContextFactory
+}
+
+var _ wirev1.SessionServiceServer = (*SessionService)(nil)
+
+func (s *SessionService) CreateSession(
 	ctx context.Context,
 	request *wirev1.CreateSessionRequest,
 ) (*wirev1.CreateSessionResponse, error) {
-	operation, cancel, err := s.operationContext(ctx, request.GetConnectionId())
+	operation, cancel, err := s.operations.New(ctx, request.GetConnectionId())
 	if err != nil {
 		return nil, err
 	}
+
 	defer cancel()
 
 	parameters, err := decodeParameters(request.GetParameters())
@@ -36,14 +47,15 @@ func (s *Server) CreateSession(
 	}}, nil
 }
 
-func (s *Server) ReleaseSession(
+func (s *SessionService) ReleaseSession(
 	ctx context.Context,
 	request *wirev1.ReleaseSessionRequest,
 ) (*wirev1.ReleaseSessionResponse, error) {
-	operation, cancel, err := s.operationContext(ctx, request.GetConnectionId())
+	operation, cancel, err := s.operations.New(ctx, request.GetConnectionId())
 	if err != nil {
 		return nil, err
 	}
+
 	defer cancel()
 
 	if err := s.lifecycle.ReleaseSession(operation, core.SessionID(request.GetSessionId().GetValue())); err != nil {

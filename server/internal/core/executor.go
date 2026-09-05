@@ -9,27 +9,13 @@ import (
 	"github.com/google/uuid"
 )
 
-type (
-	// Executor owns durable session and asynchronous execution creation.
-	Executor struct {
-		runtime    api.Runtime
-		plans      *PlanRegistry
-		sessions   *SessionRegistry
-		executions *ExecutionRegistry
-	}
-
-	RunInput struct {
-		Source            api.Source
-		Parameters        map[string]any
-		OutputContentType string
-	}
-
-	CreateSessionInput struct {
-		PlanID            PlanID
-		Parameters        map[string]any
-		OutputContentType string
-	}
-)
+// Executor owns durable session and asynchronous execution creation.
+type Executor struct {
+	runtime    api.Runtime
+	plans      *PlanRegistry
+	sessions   *SessionRegistry
+	executions *ExecutionRegistry
+}
 
 func NewExecutor(
 	runtime api.Runtime,
@@ -46,6 +32,7 @@ func (e *Executor) Execute(ctx *Context, input ExecuteInput) (ExecutionRecord, e
 	if err := connection.beginOperation(); err != nil {
 		return ExecutionRecord{}, err
 	}
+
 	defer connection.finishOperation()
 
 	if err := ctx.Err(); err != nil {
@@ -120,6 +107,7 @@ func (e *Executor) CreateSession(ctx *Context, input CreateSessionInput) (Sessio
 	if err := connection.beginOperation(); err != nil {
 		return "", err
 	}
+
 	defer connection.finishOperation()
 
 	if err := ctx.Err(); err != nil {
@@ -142,10 +130,12 @@ func (e *Executor) CreateSession(ctx *Context, input CreateSessionInput) (Sessio
 	if err != nil {
 		return "", err
 	}
+
 	defer plan.finishChildCreation()
 
+	options := apiSessionOptions(input.Parameters, input.OutputContentType)
 	hostedSession, err := panicboundary.Call(func() (api.Session, error) {
-		return plan.plan.NewSession(ctx, apiSessionOptions(input.Parameters, input.OutputContentType)...)
+		return plan.plan.NewSession(ctx, options...)
 	})
 	if err != nil {
 		var closeErr error
@@ -206,6 +196,7 @@ func (e *Executor) RunSession(ctx *Context, id SessionID) (ExecutionRecord, erro
 	if err := connection.beginOperation(); err != nil {
 		return ExecutionRecord{}, err
 	}
+
 	defer connection.finishOperation()
 
 	if err := ctx.Err(); err != nil {
@@ -233,6 +224,7 @@ func (e *Executor) RunSession(ctx *Context, id SessionID) (ExecutionRecord, erro
 	if err != nil {
 		return ExecutionRecord{}, err
 	}
+
 	defer plan.finishChildCreation()
 
 	executionID := ExecutionID(uuid.NewString())
@@ -240,6 +232,7 @@ func (e *Executor) RunSession(ctx *Context, id SessionID) (ExecutionRecord, erro
 	if err != nil {
 		return ExecutionRecord{}, err
 	}
+
 	defer session.finishExecutionCreation()
 
 	committed := false
@@ -295,6 +288,7 @@ func (e *Executor) Run(ctx *Context, input RunInput) (ExecutionRecord, error) {
 	if err := connection.beginOperation(); err != nil {
 		return ExecutionRecord{}, err
 	}
+
 	defer connection.finishOperation()
 
 	if err := ctx.Err(); err != nil {
@@ -357,8 +351,9 @@ func (e *Executor) Run(ctx *Context, input RunInput) (ExecutionRecord, error) {
 }
 
 func (e *Executor) run(ctx context.Context, input RunInput) (api.Output, error) {
+	options := apiSessionOptions(input.Parameters, input.OutputContentType)
 	output, err := panicboundary.Call(func() (api.Output, error) {
-		return e.runtime.Run(ctx, input.Source, apiSessionOptions(input.Parameters, input.OutputContentType)...)
+		return e.runtime.Run(ctx, input.Source, options...)
 	})
 
 	return output, runtimePanicError("run hosted runtime", err)

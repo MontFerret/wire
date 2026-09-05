@@ -8,14 +8,18 @@ import (
 	"github.com/MontFerret/wire/server/internal/core"
 )
 
-type compileRequest interface {
-	GetConnectionId() *wirev1.ConnectionId
-	GetSource() *wirev1.Source
-	GetOptions() *wirev1.CompileOptions
+// PlanService adapts the plan RPC contract to its core owners.
+type PlanService struct {
+	wirev1.UnimplementedPlanServiceServer
+	compiler   *core.Compiler
+	lifecycle  *core.Lifecycle
+	operations *operationContextFactory
 }
 
-func (s *Server) Compile(ctx context.Context, request *wirev1.CompileRequest) (*wirev1.CompileResponse, error) {
-	compiled, err := s.compile(ctx, request, false)
+var _ wirev1.PlanServiceServer = (*PlanService)(nil)
+
+func (s *PlanService) Compile(ctx context.Context, request *wirev1.CompileRequest) (*wirev1.CompileResponse, error) {
+	compiled, err := s.compile(ctx, request.GetConnectionId(), request.GetSource(), request.GetOptions(), false)
 	if err != nil {
 		return nil, err
 	}
@@ -23,8 +27,8 @@ func (s *Server) Compile(ctx context.Context, request *wirev1.CompileRequest) (*
 	return &wirev1.CompileResponse{Plan: compiled}, nil
 }
 
-func (s *Server) CompileDebug(ctx context.Context, request *wirev1.CompileDebugRequest) (*wirev1.CompileDebugResponse, error) {
-	compiled, err := s.compile(ctx, request, true)
+func (s *PlanService) CompileDebug(ctx context.Context, request *wirev1.CompileDebugRequest) (*wirev1.CompileDebugResponse, error) {
+	compiled, err := s.compile(ctx, request.GetConnectionId(), request.GetSource(), request.GetOptions(), true)
 	if err != nil {
 		return nil, err
 	}
@@ -32,23 +36,29 @@ func (s *Server) CompileDebug(ctx context.Context, request *wirev1.CompileDebugR
 	return &wirev1.CompileDebugResponse{Plan: compiled}, nil
 }
 
-func (s *Server) compile(ctx context.Context, request compileRequest, debug bool) (*wirev1.Plan, error) {
-	operation, cancel, err := s.operationContext(ctx, request.GetConnectionId())
+func (s *PlanService) compile(
+	ctx context.Context,
+	connectionID *wirev1.ConnectionId,
+	source *wirev1.Source,
+	options *wirev1.CompileOptions,
+	debug bool,
+) (*wirev1.Plan, error) {
+	operation, cancel, err := s.operations.New(ctx, connectionID)
 	if err != nil {
 		return nil, err
 	}
 
 	defer cancel()
 
-	optimization, present, err := optimizationLevel(request.GetOptions())
+	optimization, present, err := optimizationLevel(options)
 	if err != nil {
 		return nil, rpcError(err)
 	}
 
 	snapshot, err := s.compiler.Compile(operation, core.CompileInput{
 		Source: api.Source{
-			Name:    request.GetSource().GetName(),
-			Content: request.GetSource().GetContent(),
+			Name:    source.GetName(),
+			Content: source.GetContent(),
 		},
 		Debuggable:           debug,
 		OptimizationLevel:    optimization,
@@ -61,33 +71,8 @@ func (s *Server) compile(ctx context.Context, request compileRequest, debug bool
 	return plan(snapshot), nil
 }
 
-func optimizationLevel(options *wirev1.CompileOptions) (api.OptimizationLevel, bool, error) {
-	value := wirev1.OptimizationLevel_OPTIMIZATION_LEVEL_UNSPECIFIED
-	if options != nil {
-		value = options.GetOptimizationLevel()
-	}
-
-	var level api.OptimizationLevel
-	switch value {
-	case wirev1.OptimizationLevel_OPTIMIZATION_LEVEL_UNSPECIFIED:
-		return 0, false, nil
-	case wirev1.OptimizationLevel_OPTIMIZATION_LEVEL_NONE:
-		level = api.OptimizationNone
-	case wirev1.OptimizationLevel_OPTIMIZATION_LEVEL_BASIC:
-		level = api.OptimizationBasic
-	case wirev1.OptimizationLevel_OPTIMIZATION_LEVEL_FULL:
-		level = api.OptimizationFull
-	case wirev1.OptimizationLevel_OPTIMIZATION_LEVEL_AGGRESSIVE:
-		level = api.OptimizationAggressive
-	default:
-		return 0, false, &core.DomainError{Kind: core.ErrorKindInvalidRequest, Message: "optimization level is invalid"}
-	}
-
-	return level, true, nil
-}
-
-func (s *Server) ReleasePlan(ctx context.Context, request *wirev1.ReleasePlanRequest) (*wirev1.ReleasePlanResponse, error) {
-	operation, cancel, err := s.operationContext(ctx, request.GetConnectionId())
+func (s *PlanService) ReleasePlan(ctx context.Context, request *wirev1.ReleasePlanRequest) (*wirev1.ReleasePlanResponse, error) {
+	operation, cancel, err := s.operations.New(ctx, request.GetConnectionId())
 	if err != nil {
 		return nil, err
 	}

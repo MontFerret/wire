@@ -12,40 +12,30 @@ import (
 	"google.golang.org/grpc"
 )
 
-type (
-	// Client owns one logical Wire connection while borrowing its gRPC transport.
-	Client struct {
-		runtimeClient   wirev1.RuntimeServiceClient
-		planClient      wirev1.PlanServiceClient
-		sessionClient   wirev1.SessionServiceClient
-		executionClient wirev1.ExecutionServiceClient
-		debugClient     wirev1.DebugServiceClient
+// Client owns one logical Wire connection while borrowing its gRPC transport.
+type Client struct {
+	runtimeClient   wirev1.RuntimeServiceClient
+	planClient      wirev1.PlanServiceClient
+	sessionClient   wirev1.SessionServiceClient
+	executionClient wirev1.ExecutionServiceClient
+	debugClient     wirev1.DebugServiceClient
 
-		connectionID    string
-		info            RuntimeInfo
-		stream          wirev1.RuntimeService_ConnectClient
-		streamCancel    context.CancelFunc
-		streamDone      chan struct{}
-		streamMu        sync.Mutex
-		streamErr       error
-		lifecycleCtx    context.Context
-		lifecycleCancel context.CancelFunc
+	connectionID    string
+	info            RuntimeInfo
+	stream          wirev1.RuntimeService_ConnectClient
+	streamCancel    context.CancelFunc
+	streamDone      chan struct{}
+	streamMu        sync.Mutex
+	streamErr       error
+	lifecycleCtx    context.Context
+	lifecycleCancel context.CancelFunc
 
-		closeOnce sync.Once
-		closeDone chan struct{}
-		closeMu   sync.Mutex
-		closeErr  error
-		closing   bool
-	}
-
-	// RunOptions composes plan compilation and execution options for Client.Run.
-	RunOptions struct {
-		// Compile controls construction of the temporary plan.
-		Compile CompileOptions
-		// Execute controls the temporary execution and its encoded output.
-		Execute ExecuteOptions
-	}
-)
+	closeOnce sync.Once
+	closeDone chan struct{}
+	closeMu   sync.Mutex
+	closeErr  error
+	closing   bool
+}
 
 // New opens one logical Wire connection over a caller-owned gRPC connection.
 // The construction context bounds the Connect handshake; Close owns the
@@ -60,6 +50,7 @@ func New(ctx context.Context, connection grpc.ClientConnInterface) (*Client, err
 	stream, err := runtimeClient.Connect(streamCtx, &wirev1.ConnectRequest{})
 	if err != nil {
 		streamCancel()
+
 		return nil, decodeError(err)
 	}
 
@@ -94,6 +85,7 @@ func New(ctx context.Context, connection grpc.ClientConnInterface) (*Client, err
 	if response.GetConnectionId().GetValue() == "" || response.GetProtocol() == nil ||
 		response.GetProtocol().GetName() == "" || response.GetProtocol().GetVersion() == "" {
 		streamCancel()
+
 		return nil, errors.New("Wire server returned an invalid Connect handshake")
 	}
 
@@ -185,6 +177,7 @@ func (c *Client) monitorConnect() {
 	} else if !errors.Is(err, io.EOF) {
 		c.streamErr = decodeError(err)
 	}
+
 	c.streamMu.Unlock()
 
 	c.lifecycleCancel()

@@ -2,54 +2,16 @@ package client
 
 import (
 	"context"
-	"errors"
 
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
 )
 
-type (
-	// DebugSessionOptions controls encoded debug completion output.
-	DebugSessionOptions struct {
-		OutputContentType string
-	}
-
-	// DebugSession is one remote Unified API debugger session owned by its Plan.
-	DebugSession struct {
-		client *Client
-		plan   *Plan
-		id     string
-		close  *closeState
-	}
-)
-
-// NewDebugSession creates a Unified API debug session for a plan compiled with
-// CompileOptions.Debuggable.
-func (p *Plan) NewDebugSession(ctx context.Context, parameters Parameters, options DebugSessionOptions) (*DebugSession, error) {
-	if err := p.checkOpen(); err != nil {
-		return nil, err
-	}
-
-	converted, err := encodeParameters(parameters)
-	if err != nil {
-		return nil, err
-	}
-
-	response, err := p.client.debugClient.CreateDebugSession(ctx, &wirev1.CreateDebugSessionRequest{
-		ConnectionId:      p.client.connectionProto(),
-		PlanId:            &wirev1.PlanId{Value: p.id},
-		Parameters:        converted,
-		OutputContentType: options.OutputContentType,
-	})
-	if err != nil {
-		return nil, allocationRPCError(err)
-	}
-
-	value := response.GetSession()
-	if value == nil || value.GetId().GetValue() == "" {
-		return nil, &allocationError{cause: errors.New("Wire server returned an invalid debug session")}
-	}
-
-	return &DebugSession{client: p.client, plan: p, id: value.GetId().GetValue(), close: &closeState{}}, nil
+// DebugSession is one remote Unified API debugger session owned by its Plan.
+type DebugSession struct {
+	client *Client
+	plan   *Plan
+	id     string
+	close  *closeState
 }
 
 // Start begins a newly created debug session. Watch publishes the running and
@@ -146,6 +108,26 @@ func (d *DebugSession) Stop(ctx context.Context) error {
 	return decodeError(err)
 }
 
+// Watch opens an ordered event stream tied to both ctx and the Client's
+// logical lifecycle. It begins with the latest state published by the server.
+func (d *DebugSession) Watch(ctx context.Context) (*DebugEvents, error) {
+	if err := d.checkOpen(); err != nil {
+		return nil, err
+	}
+
+	watchCtx, cancel := d.client.watchContext(ctx)
+	stream, err := d.client.debugClient.WatchDebug(watchCtx, &wirev1.WatchDebugRequest{
+		ConnectionId: d.client.connectionProto(), DebugSessionId: &wirev1.DebugSessionId{Value: d.id},
+	})
+	if err != nil {
+		cancel()
+
+		return nil, decodeError(err)
+	}
+
+	return &DebugEvents{stream: stream, cancel: cancel}, nil
+}
+
 // Close terminates and releases the remote debug session. Concurrent and
 // repeated calls observe one retained release result.
 func (d *DebugSession) Close(ctx context.Context) error {
@@ -173,16 +155,12 @@ func (d *DebugSession) release(ctx context.Context) error {
 		return err
 	}
 
-	return d.client.releaseDebugSession(ctx, d.id)
-}
-
-func (c *Client) releaseDebugSession(ctx context.Context, id string) error {
-	if err := c.checkOpen(); err != nil {
+	if err := d.client.checkOpen(); err != nil {
 		return err
 	}
 
-	_, err := c.debugClient.ReleaseDebugSession(ctx, &wirev1.ReleaseDebugSessionRequest{
-		ConnectionId: c.connectionProto(), DebugSessionId: &wirev1.DebugSessionId{Value: id},
+	_, err := d.client.debugClient.ReleaseDebugSession(ctx, &wirev1.ReleaseDebugSessionRequest{
+		ConnectionId: d.client.connectionProto(), DebugSessionId: &wirev1.DebugSessionId{Value: d.id},
 	})
 
 	return decodeError(err)

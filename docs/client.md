@@ -98,11 +98,21 @@ output, err := execution.Wait(ctx)
 
 Plan metadata is immutable. `Parameters` returns a defensive copy.
 `CompileOptions.Debuggable` chooses the protocol's `CompileDebug` operation
-instead of `Compile`. `CompileOptions.HasOptimizationLevel` controls whether
-`OptimizationLevel` is supplied. False preserves the hosted runtime default;
-true transports the specified Universal API level, including the zero value
-`api.OptimizationNone`. Universal API callers express the same distinction by
-omitting or supplying `api.WithOptimizationLevel`.
+instead of `Compile`. `CompileOptions.PlanOptions` accepts the same
+`api.PlanOption` callbacks as the Universal API adapter:
+
+```go
+options := client.CompileOptions{
+    PlanOptions: []api.PlanOption{api.WithOptimizationLevel(api.OptimizationNone)},
+}
+```
+
+Omitting the optimization option preserves the hosted runtime default; supplying
+it transports the explicit level, including `api.OptimizationNone`. Presence
+tracking stays private. Both entry points apply non-nil callbacks exactly once,
+in order, before dispatch. The last valid setting wins; callback errors are
+joined and prevent dispatch, as does caller cancellation before or after option
+application.
 
 The metadata facade maps `APIIdentity` and `WireVersion` from the handshake's
 protocol name and version and maps optional host runtime identity directly to
@@ -126,9 +136,20 @@ Runtime for a root Plan or direct Runtime Execution. Successful narrow cleanup
 preserves resources outside that subtree. Confirmed creation rejections and
 local validation errors do not trigger this invalidation.
 
-Each automatic release attempt has a fresh 30-second bound. If a parent release
-fails or expires, cleanup escalates to the logical Runtime; if connection
-release fails, cancelling its Connect stream supplies the final lifetime signal.
+Each automatic release attempt has a fresh 30-second bound. For an unknown
+child, a failed or expired parent release advances to the next known ancestor:
+Session, then Plan, then logical Runtime. Successful reclamation stops that
+escalation. If connection release fails, cancelling its Connect stream supplies
+the final lifetime signal.
+
+A handle with a known ID follows ordinary release policy, including when it
+arrives after caller cancellation or belongs to a one-shot invocation. A failed
+release is retained and returned without automatically invalidating its Session,
+Plan, or Runtime. If release never reached the server, the hosted child can
+remain until the caller explicitly closes its ancestor; a durable Session can
+therefore remain busy. If only the release acknowledgement was lost after
+server cleanup, the same durable Session can run again.
+
 Operation and cleanup errors remain joined. The caller-owned physical transport
 and other logical clients on it remain open. These bounds limit client waiting;
 the hosted implementation must still honor its cancellation and Close contracts.

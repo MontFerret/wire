@@ -14,13 +14,15 @@ import (
 // the Connect stream and unrelated RPCs alone. Tests control delivery explicitly.
 type allocationResponseGate struct {
 	grpc.ClientConnInterface
-	mu        sync.Mutex
-	method    string
-	outcome   string
-	committed chan struct{}
-	deliver   chan struct{}
-	calls     map[string]int
-	failures  map[string]error
+	mu               sync.Mutex
+	method           string
+	outcome          string
+	committed        chan struct{}
+	deliver          chan struct{}
+	calls            map[string]int
+	failures         map[string]error
+	responseFailures map[string]error
+	methods          []string
 }
 
 func (g *allocationResponseGate) arm(method, outcome string) {
@@ -36,20 +38,31 @@ func (g *allocationResponseGate) arm(method, outcome string) {
 func (g *allocationResponseGate) Invoke(ctx context.Context, method string, request, response any, options ...grpc.CallOption) error {
 	g.mu.Lock()
 	g.calls[method]++
+	g.methods = append(g.methods, method)
 	failure := g.failures[method]
+	responseFailure := g.responseFailures[method]
 	matched := method == g.method
 	outcome, committed, deliver := g.outcome, g.committed, g.deliver
 	if matched {
 		g.method = ""
 	}
+
 	g.mu.Unlock()
 	if failure != nil {
 		return failure
 	}
 
 	err := g.ClientConnInterface.Invoke(ctx, method, request, response, options...)
-	if err != nil || !matched {
+	if err != nil {
 		return err
+	}
+
+	if responseFailure != nil {
+		return responseFailure
+	}
+
+	if !matched {
+		return nil
 	}
 
 	close(committed)
@@ -87,4 +100,22 @@ func (g *allocationResponseGate) fail(method string, err error) {
 	defer g.mu.Unlock()
 
 	g.failures[method] = err
+}
+
+func (g *allocationResponseGate) failResponse(method string, err error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	if g.responseFailures == nil {
+		g.responseFailures = make(map[string]error)
+	}
+
+	g.responseFailures[method] = err
+}
+
+func (g *allocationResponseGate) methodSequence() []string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	return append([]string(nil), g.methods...)
 }

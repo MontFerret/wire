@@ -53,7 +53,7 @@ func (r *Runtime) Run(ctx context.Context, src api.Source, options ...api.Sessio
 	})
 	cancel()
 	if err != nil {
-		return api.Output{}, r.client.reclaimAllocation(ctx, err, nil)
+		return api.Output{}, r.client.reclaimAllocation(ctx, err)
 	}
 
 	return execution.waitAndRelease(ctx)
@@ -93,18 +93,14 @@ func (r *Runtime) compile(
 		return nil, err
 	}
 
-	plan, err := r.client.Compile(creationCtx, src, CompileOptions{
-		Debuggable:           debuggable,
-		OptimizationLevel:    configured.optimizationLevel,
-		HasOptimizationLevel: configured.hasOptimizationLevel,
-	})
+	plan, err := r.client.compileConfigured(creationCtx, src, debuggable, configured)
 	cancel()
 	if err != nil {
-		return nil, r.client.reclaimAllocation(ctx, err, nil)
+		return nil, r.client.reclaimAllocation(ctx, err)
 	}
 
 	if ctxErr := ctx.Err(); ctxErr != nil {
-		closeErr := r.client.closeAllocation(ctx, plan.Close, nil)
+		closeErr := boundedCleanup(ctx, convenienceCleanupTimeout, plan.Close)
 
 		return nil, errors.Join(ctxErr, closeErr)
 	}

@@ -32,6 +32,28 @@ Runtime implementations must never depend on Wire. Wire must not absorb DAP, LSP
 transport-security, or host-configuration semantics for downstream
 convenience.
 
+## gRPC service composition
+
+`grpcserver.Server` constructs and registers five dedicated implementations.
+It contains only those service instances and owns no RPC handlers. Each service
+embeds its corresponding generated service base and adapts one protocol domain.
+
+| Service | Core dependencies beyond request-context preparation |
+| --- | --- |
+| RuntimeService | RuntimeInfo, ConnectionRegistry, Executor, Lifecycle |
+| PlanService | Compiler, Lifecycle |
+| SessionService | Executor, Lifecycle |
+| ExecutionService | Executor, Lifecycle |
+| DebugService | Debugger, Lifecycle |
+
+A shared private `operationContextFactory` owns only the connection registry.
+It resolves the logical connection, maps lookup errors, and constructs the core
+operation context; each handler cancels that context when it finishes.
+Services retain their own resource lookup, validation, and domain adaptation.
+Stateless conversion, error mapping, recovery, and subscription functions remain
+shared transport infrastructure. DebugService groups its cohesive lifecycle,
+commands, inspection, and events across focused files.
+
 ## Execution and host boundaries
 
 Normal results cross Wire through the Unified API encoded output abstraction:
@@ -81,7 +103,8 @@ retains the panic value and stack for diagnostics. Ordinary returned errors pass
 through unchanged, and neither panic values nor stacks cross the sanitized
 protocol boundary.
 
-The panic boundary covers only the external method invocation. Wire validation,
+Session-option preparation occurs before entering the panic boundary, which
+covers only the external method invocation. Wire validation,
 registries, state transitions, snapshot construction, event publication,
 bookkeeping, and lifecycle orchestration remain outside it. A panic in
 Wire-owned code is a programming defect and follows the existing server or
@@ -187,11 +210,16 @@ combines the unary or stream context with the resolved logical connection.
 The client adapter uses the same ownership tree to reclaim allocations whose
 responses are lost. Unknown Session IDs invalidate their Plan; unknown
 Session-owned Execution IDs invalidate their Session; unknown root allocations
-invalidate the logical Runtime. A failed narrow release escalates to logical
-connection cleanup, including Connect-stream cancellation when release cannot
-be acknowledged. Acquisition and automatic release waits each have a 30-second
-bound. Successful narrow cleanup preserves siblings outside its subtree and
-never closes the borrowed physical transport. See [Client Handles](client.md)
+invalidate the logical Runtime. For an unknown child, a failed narrow release
+advances to the next known ancestor before logical connection cleanup:
+Session → Plan → Runtime. Connection cleanup includes Connect-stream
+cancellation when release cannot be acknowledged. Known-ID release failures
+retain and return the cleanup error without automatic ancestor invalidation.
+An undelivered release can leave the hosted child until explicit ancestor
+cleanup; a lost acknowledgement after committed cleanup permits Session reuse.
+Acquisition and automatic release waits each have a 30-second bound. Successful
+narrow cleanup preserves siblings outside its subtree and never closes the
+borrowed physical transport. See [Client Handles](client.md)
 for the cancellation contract.
 
 ```text

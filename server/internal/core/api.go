@@ -3,6 +3,7 @@ package core
 import (
 	"errors"
 	"fmt"
+	"reflect"
 
 	"github.com/MontFerret/api"
 	"github.com/MontFerret/wire/server/internal/panicboundary"
@@ -43,4 +44,18 @@ func runtimePanicError(operation string, err error) error {
 	}
 
 	return internalError(fmt.Errorf("%s: %w", operation, err))
+}
+
+func isNil(value any) bool {
+	if value == nil {
+		return true
+	}
+
+	reflected := reflect.ValueOf(value)
+	switch reflected.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return reflected.IsNil()
+	default:
+		return false
+	}
 }

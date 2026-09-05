@@ -153,7 +153,9 @@ defer func() {
 plan, err := wireClient.Compile(
     ctx,
     api.NewSource("example.fql", "RETURN {input: @input}"),
-    client.CompileOptions{},
+    client.CompileOptions{
+        PlanOptions: []api.PlanOption{api.WithOptimizationLevel(api.OptimizationBasic)},
+    },
 )
 if err != nil {
     log.Fatal(err)

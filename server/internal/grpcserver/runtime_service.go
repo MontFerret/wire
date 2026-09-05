@@ -8,7 +8,19 @@ import (
 	"github.com/MontFerret/wire/server/internal/core"
 )
 
-func (s *Server) Connect(_ *wirev1.ConnectRequest, stream wirev1.RuntimeService_ConnectServer) error {
+// RuntimeService adapts the runtime RPC contract to its core owners.
+type RuntimeService struct {
+	wirev1.UnimplementedRuntimeServiceServer
+	info        core.RuntimeInfo
+	connections *core.ConnectionRegistry
+	executor    *core.Executor
+	lifecycle   *core.Lifecycle
+	operations  *operationContextFactory
+}
+
+var _ wirev1.RuntimeServiceServer = (*RuntimeService)(nil)
+
+func (s *RuntimeService) Connect(_ *wirev1.ConnectRequest, stream wirev1.RuntimeService_ConnectServer) error {
 	connection := core.NewConnection()
 	if err := s.connections.Register(connection); err != nil {
 		return rpcError(err)
@@ -36,7 +48,7 @@ func (s *Server) Connect(_ *wirev1.ConnectRequest, stream wirev1.RuntimeService_
 	}
 }
 
-func (s *Server) CloseConnection(ctx context.Context, request *wirev1.CloseConnectionRequest) (*wirev1.CloseConnectionResponse, error) {
+func (s *RuntimeService) CloseConnection(ctx context.Context, request *wirev1.CloseConnectionRequest) (*wirev1.CloseConnectionResponse, error) {
 	err := s.lifecycle.CloseConnection(ctx, core.ConnectionID(request.GetConnectionId().GetValue()))
 	if err != nil {
 		return nil, rpcError(err)
@@ -45,14 +57,15 @@ func (s *Server) CloseConnection(ctx context.Context, request *wirev1.CloseConne
 	return &wirev1.CloseConnectionResponse{}, nil
 }
 
-func (s *Server) Run(
+func (s *RuntimeService) Run(
 	ctx context.Context,
 	request *wirev1.RunRequest,
 ) (*wirev1.RunResponse, error) {
-	operation, cancel, err := s.operationContext(ctx, request.GetConnectionId())
+	operation, cancel, err := s.operations.New(ctx, request.GetConnectionId())
 	if err != nil {
 		return nil, err
 	}
+
 	defer cancel()
 
 	parameters, err := decodeParameters(request.GetParameters())

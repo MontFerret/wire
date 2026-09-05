@@ -218,3 +218,38 @@ func (f *runtimeAllocationFixture) assertAllClosed() {
 		}
 	}
 }
+
+func (f *runtimeAllocationFixture) assertNarrowParentClosed() {
+	f.t.Helper()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if f.operation.name != "session run" {
+		f.plans[0].mu.Lock()
+		closes := f.plans[0].closeCalls
+		f.plans[0].mu.Unlock()
+		if closes != 1 {
+			f.t.Fatalf("narrow reclamation did not close its hosted Plan: closes=%d", closes)
+		}
+	}
+
+	switch f.operation.name {
+	case "session run":
+		if _, closes := f.sessions[0].counts(); closes != 1 {
+			f.t.Fatalf("narrow reclamation did not close its hosted Session: closes=%d", closes)
+		}
+	case "session":
+		if _, closes := f.sessions[len(f.sessions)-1].counts(); closes != 1 {
+			f.t.Fatalf("Plan reclamation did not close the unknown hosted Session: closes=%d", closes)
+		}
+	case "debug session":
+		f.debuggers[0].mu.Lock()
+		closes := f.debuggers[0].closeCalls
+		f.debuggers[0].mu.Unlock()
+		if closes != 1 {
+			f.t.Fatalf("Plan reclamation did not close the unknown hosted debugger: closes=%d", closes)
+		}
+	default:
+		f.t.Fatalf("narrow-parent assertion cannot inspect %s", f.operation.name)
+	}
+}

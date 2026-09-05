@@ -10,24 +10,22 @@ import (
 	"github.com/MontFerret/wire/server/internal/panicboundary"
 )
 
-type (
-	// Session owns one durable Unified API session and admits one execution at a time.
-	Session struct {
-		mu             sync.Mutex
-		id             SessionID
-		owner          ConnectionID
-		planID         PlanID
-		session        api.Session
-		ctx            context.Context
-		cancel         context.CancelCauseFunc
-		closing        bool
-		poisoned       bool
-		active         ExecutionID
-		childCreations sync.WaitGroup
-		close          lifecycle.Close
-		release        lifecycle.Close
-	}
-)
+// Session owns one durable Unified API session and admits one execution at a time.
+type Session struct {
+	mu             sync.Mutex
+	id             SessionID
+	owner          ConnectionID
+	planID         PlanID
+	session        api.Session
+	ctx            context.Context
+	cancel         context.CancelCauseFunc
+	closing        bool
+	poisoned       bool
+	active         ExecutionID
+	childCreations sync.WaitGroup
+	close          lifecycle.Close
+	release        lifecycle.Close
+}
 
 func newSession(
 	id SessionID,
@@ -100,6 +98,7 @@ func (s *Session) finishExecution(id ExecutionID) {
 	if s.active == id {
 		s.active = ""
 	}
+
 	s.mu.Unlock()
 }
 

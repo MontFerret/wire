@@ -8,8 +8,8 @@ import (
 	"github.com/MontFerret/wire/server/internal/core"
 )
 
-func (s *Server) Frames(ctx context.Context, request *wirev1.FramesRequest) (*wirev1.FramesResponse, error) {
-	operation, cancel, err := s.operationContext(ctx, request.GetConnectionId())
+func (s *DebugService) Frames(ctx context.Context, request *wirev1.FramesRequest) (*wirev1.FramesResponse, error) {
+	operation, cancel, err := s.operations.New(ctx, request.GetConnectionId())
 	if err != nil {
 		return nil, err
 	}
@@ -39,8 +39,8 @@ func (s *Server) Frames(ctx context.Context, request *wirev1.FramesRequest) (*wi
 	return &wirev1.FramesResponse{Frames: result}, nil
 }
 
-func (s *Server) FrameLocals(ctx context.Context, request *wirev1.FrameLocalsRequest) (*wirev1.FrameLocalsResponse, error) {
-	operation, cancel, err := s.operationContext(ctx, request.GetConnectionId())
+func (s *DebugService) FrameLocals(ctx context.Context, request *wirev1.FrameLocalsRequest) (*wirev1.FrameLocalsResponse, error) {
+	operation, cancel, err := s.operations.New(ctx, request.GetConnectionId())
 	if err != nil {
 		return nil, err
 	}
@@ -70,8 +70,8 @@ func (s *Server) FrameLocals(ctx context.Context, request *wirev1.FrameLocalsReq
 	return &wirev1.FrameLocalsResponse{Variables: result}, nil
 }
 
-func (s *Server) Variables(ctx context.Context, request *wirev1.VariablesRequest) (*wirev1.VariablesResponse, error) {
-	operation, cancel, err := s.operationContext(ctx, request.GetConnectionId())
+func (s *DebugService) Variables(ctx context.Context, request *wirev1.VariablesRequest) (*wirev1.VariablesResponse, error) {
+	operation, cancel, err := s.operations.New(ctx, request.GetConnectionId())
 	if err != nil {
 		return nil, err
 	}
@@ -106,8 +106,8 @@ func (s *Server) Variables(ctx context.Context, request *wirev1.VariablesRequest
 	return &wirev1.VariablesResponse{Variables: result}, nil
 }
 
-func (s *Server) EvaluateFrame(ctx context.Context, request *wirev1.EvaluateFrameRequest) (*wirev1.EvaluateFrameResponse, error) {
-	operation, cancel, err := s.operationContext(ctx, request.GetConnectionId())
+func (s *DebugService) EvaluateFrame(ctx context.Context, request *wirev1.EvaluateFrameRequest) (*wirev1.EvaluateFrameResponse, error) {
+	operation, cancel, err := s.operations.New(ctx, request.GetConnectionId())
 	if err != nil {
 		return nil, err
 	}

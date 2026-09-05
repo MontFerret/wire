@@ -12,34 +12,26 @@ import (
 	"github.com/MontFerret/wire/server/internal/panicboundary"
 )
 
-type (
-	Execution struct {
-		mu          sync.Mutex
-		id          ExecutionID
-		owner       ConnectionID
-		planID      PlanID
-		sessionID   SessionID
-		plan        api.Plan
-		operation   func(context.Context) (api.Output, error)
-		ctx         context.Context
-		cancel      context.CancelCauseFunc
-		parameters  map[string]any
-		contentType string
-		state       wireexecution.State
-		output      *api.Output
-		failure     *failure.Failure
-		events      *eventStream[wireexecution.Event]
-		done        chan struct{}
-		close       lifecycle.Close
-		release     lifecycle.Close
-	}
-
-	ExecuteInput struct {
-		PlanID            PlanID
-		Parameters        map[string]any
-		OutputContentType string
-	}
-)
+type Execution struct {
+	mu          sync.Mutex
+	id          ExecutionID
+	owner       ConnectionID
+	planID      PlanID
+	sessionID   SessionID
+	plan        api.Plan
+	operation   func(context.Context) (api.Output, error)
+	ctx         context.Context
+	cancel      context.CancelCauseFunc
+	parameters  map[string]any
+	contentType string
+	state       wireexecution.State
+	output      *api.Output
+	failure     *failure.Failure
+	events      *eventStream[wireexecution.Event]
+	done        chan struct{}
+	close       lifecycle.Close
+	release     lifecycle.Close
+}
 
 func newExecution(
 	id ExecutionID,
@@ -103,8 +95,9 @@ func (e *Execution) run() {
 		return
 	}
 
+	options := apiSessionOptions(e.parameters, e.contentType)
 	session, err := panicboundary.Call(func() (api.Session, error) {
-		return e.plan.NewSession(e.ctx, apiSessionOptions(e.parameters, e.contentType)...)
+		return e.plan.NewSession(e.ctx, options...)
 	})
 	if err != nil {
 		if !isNil(session) {

@@ -55,8 +55,9 @@ func (d *Debugger) Create(ctx *Context, input OpenDebugInput) (DebugSessionRecor
 
 	defer plan.finishChildCreation()
 
+	options := apiSessionOptions(input.Parameters, input.OutputContentType)
 	runtimeDebugger, err := panicboundary.Call(func() (debugger.Session, error) {
-		return plan.plan.NewDebugSession(ctx, apiSessionOptions(input.Parameters, input.OutputContentType)...)
+		return plan.plan.NewDebugSession(ctx, options...)
 	})
 	if err != nil {
 		var panicErr *panicboundary.Error

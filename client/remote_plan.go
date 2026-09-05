@@ -50,7 +50,7 @@ func (p *remotePlan) NewSession(ctx context.Context, options ...api.SessionOptio
 	}
 
 	if ctxErr := ctx.Err(); ctxErr != nil {
-		closeErr := p.plan.client.closeAllocation(ctx, session.Close, p.plan.Close)
+		closeErr := boundedCleanup(ctx, convenienceCleanupTimeout, session.Close)
 
 		return nil, errors.Join(ctxErr, closeErr)
 	}
@@ -89,7 +89,7 @@ func (p *remotePlan) NewDebugSession(
 	}
 
 	if ctxErr := ctx.Err(); ctxErr != nil {
-		closeErr := p.plan.client.closeAllocation(ctx, session.Close, p.plan.Close)
+		closeErr := boundedCleanup(ctx, convenienceCleanupTimeout, session.Close)
 
 		return nil, errors.Join(ctxErr, closeErr)
 	}
