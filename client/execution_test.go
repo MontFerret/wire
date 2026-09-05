@@ -273,10 +273,10 @@ func TestExecutionWaitRejectsIncompleteTerminalSnapshots(t *testing.T) {
 	}
 }
 
-func openTestExecution(t *testing.T, server *clientTestServer) (*Client, *Plan, *Execution) {
+func openTestExecution(t *testing.T, server *clientTestServer) (*connectionHandle, *planHandle, *executionHandle) {
 	t.Helper()
 	client := openTestClient(t, startClientTestServer(t, server))
-	plan, err := client.Compile(testClientContext(t), api.Source{Content: "RETURN 1"}, CompileOptions{})
+	plan, err := client.compileConfigured(testClientContext(t), api.Source{Content: "RETURN 1"}, false, runtimePlanOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -286,7 +286,7 @@ func openTestExecution(t *testing.T, server *clientTestServer) (*Client, *Plan, 
 		}
 	})
 
-	execution, err := plan.Execute(testClientContext(t), nil, ExecuteOptions{})
+	execution, err := startTestPlanExecution(testClientContext(t), plan, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

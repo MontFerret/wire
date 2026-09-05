@@ -2,20 +2,65 @@ package client_test
 
 import (
 	"context"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"os"
+	"path/filepath"
+	"runtime"
+	"slices"
+	"strings"
+	"testing"
 
 	"github.com/MontFerret/api"
-	"github.com/MontFerret/api/result"
 	"github.com/MontFerret/wire/client"
 	"google.golang.org/grpc"
 )
 
-// Function types require identical parameter and result types, so these checks
-// reject new defined types even when they satisfy the same interfaces.
-var (
-	_ func() client.Runtime = (func() api.Runtime)(nil)
-	_ func() client.Session = (func() api.Session)(nil)
-	_ func() client.Output  = (func() api.Output)(nil)
-	_ func() client.Output  = (func() result.Output)(nil)
+// The constructor returns the canonical interface, including a nil interface
+// on failure, without requiring a Wire resource type in consumer code.
+var _ func(context.Context, grpc.ClientConnInterface) (api.Runtime, error) = client.New
 
-	_ func(context.Context, grpc.ClientConnInterface) (client.Runtime, error) = client.NewRuntime
-)
+func TestNewRejectsMissingTransport(t *testing.T) {
+	remote, err := client.New(t.Context(), nil)
+	if err == nil || remote != nil {
+		t.Fatalf("New(nil) = %v, %v; want nil runtime and an error", remote, err)
+	}
+}
+
+func TestPublicSurface(t *testing.T) {
+	_, filename, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("cannot locate client sources")
+	}
+
+	root := filepath.Dir(filename)
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var exported []string
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".go") || strings.HasSuffix(entry.Name(), "_test.go") {
+			continue
+		}
+
+		file, err := parser.ParseFile(token.NewFileSet(), filepath.Join(root, entry.Name()), nil, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		for name := range file.Scope.Objects {
+			if ast.IsExported(name) {
+				exported = append(exported, name)
+			}
+		}
+	}
+
+	slices.Sort(exported)
+	want := []string{"ErrClosed", "ErrExecutionCancelled", "Error", "New"}
+	if !slices.Equal(exported, want) {
+		t.Fatalf("public client surface = %v, want %v", exported, want)
+	}
+}

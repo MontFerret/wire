@@ -11,7 +11,7 @@ import (
 // The logical connection is the final owner, and its Connect stream supplies
 // the lifetime signal when connection release cannot be acknowledged.
 // Known-handle release failures must never enter this allocation-only path.
-func (c *Client) reclaimAllocation(ctx context.Context, err error, parents ...func(context.Context) error) error {
+func (c *connectionHandle) reclaimAllocation(ctx context.Context, err error, parents ...func(context.Context) error) error {
 	var uncertain *allocationError
 	if !errors.As(err, &uncertain) {
 		return errors.Join(ctx.Err(), err)

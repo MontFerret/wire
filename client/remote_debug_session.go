@@ -11,7 +11,7 @@ import (
 )
 
 type remoteDebugSession struct {
-	session *DebugSession
+	session *debugSessionHandle
 	ctx     context.Context
 	cancel  context.CancelFunc
 
@@ -22,7 +22,7 @@ type remoteDebugSession struct {
 
 var _ debugger.Session = (*remoteDebugSession)(nil)
 
-func newRemoteDebugSession(session *DebugSession) *remoteDebugSession {
+func newRemoteDebugSession(session *debugSessionHandle) *remoteDebugSession {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &remoteDebugSession{

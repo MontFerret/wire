@@ -10,7 +10,7 @@ import (
 
 func BenchmarkRuntimeAdapterDurableSession(b *testing.B) {
 	env := newIntegrationEnv(b, &contractRuntime{})
-	remote, err := client.NewRuntime(testContext(b), env.conn)
+	remote, err := client.New(testContext(b), env.conn)
 	if err != nil {
 		b.Fatal(err)
 	}

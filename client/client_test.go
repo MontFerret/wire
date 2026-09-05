@@ -33,9 +33,14 @@ type (
 		wirev1.UnimplementedRuntimeServiceServer
 		wirev1.UnimplementedPlanServiceServer
 		wirev1.UnimplementedExecutionServiceServer
+		wirev1.UnimplementedSessionServiceServer
 
 		mu                    sync.Mutex
+		handshake             *wirev1.ConnectResponse
+		connectErr            error
+		connectDone           chan struct{}
 		plans                 int
+		sessions              int
 		executions            int
 		calls                 []string
 		compileErr            error
@@ -56,10 +61,23 @@ type (
 )
 
 func (s *clientTestServer) Connect(_ *wirev1.ConnectRequest, stream wirev1.RuntimeService_ConnectServer) error {
-	if err := stream.Send(&wirev1.ConnectResponse{
-		ConnectionId: &wirev1.ConnectionId{Value: "connection"},
-		Protocol:     &wirev1.ProtocolInfo{Name: "ferret.wire", Version: "v1"},
-	}); err != nil {
+	if s.connectDone != nil {
+		defer close(s.connectDone)
+	}
+
+	if s.connectErr != nil {
+		return s.connectErr
+	}
+
+	response := s.handshake
+	if response == nil {
+		response = &wirev1.ConnectResponse{
+			ConnectionId: &wirev1.ConnectionId{Value: "connection"},
+			Protocol:     &wirev1.ProtocolInfo{Name: "ferret.wire", Version: "v1"},
+		}
+	}
+
+	if err := stream.Send(response); err != nil {
 		return err
 	}
 
@@ -127,22 +145,48 @@ func (s *clientTestServer) ReleasePlan(ctx context.Context, request *wirev1.Rele
 	return &wirev1.ReleasePlanResponse{}, nil
 }
 
-func (s *clientTestServer) Execute(_ context.Context, request *wirev1.ExecuteRequest) (*wirev1.ExecuteResponse, error) {
+func (s *clientTestServer) Run(_ context.Context, request *wirev1.RunRequest) (*wirev1.RunResponse, error) {
+	value, err := s.startExecution("run", request.GetConnectionId().GetValue(), "", request.GetOutputContentType())
+
+	return &wirev1.RunResponse{Execution: value}, err
+}
+
+func (s *clientTestServer) RunSession(_ context.Context, request *wirev1.RunSessionRequest) (*wirev1.RunSessionResponse, error) {
+	value, err := s.startExecution("run-session", request.GetConnectionId().GetValue(), request.GetSessionId().GetValue(), "")
+
+	return &wirev1.RunSessionResponse{Execution: value}, err
+}
+
+func (s *clientTestServer) startExecution(operation, connectionID, parentID, contentType string) (*wirev1.Execution, error) {
 	s.mu.Lock()
-	s.calls = append(s.calls, call("execute", request.GetConnectionId().GetValue(), request.GetPlanId().GetValue()))
-	s.lastOutputContentType = request.GetOutputContentType()
-	err := s.executeErr
-	if err == nil {
-		s.executions++
-	}
-	executionID := fmt.Sprintf("execution-%d", s.executions)
-	s.mu.Unlock()
+	defer s.mu.Unlock()
 
-	if err != nil {
-		return nil, err
+	s.calls = append(s.calls, call(operation, connectionID, parentID))
+	s.lastOutputContentType = contentType
+	if s.executeErr != nil {
+		return nil, s.executeErr
 	}
 
-	return &wirev1.ExecuteResponse{Execution: executionSnapshotProto(executionID, wirev1.ExecutionState_EXECUTION_STATE_RUNNING, nil, nil)}, nil
+	s.executions++
+
+	return executionSnapshotProto(fmt.Sprintf("execution-%d", s.executions), wirev1.ExecutionState_EXECUTION_STATE_RUNNING, nil, nil), nil
+}
+
+func (s *clientTestServer) CreateSession(_ context.Context, request *wirev1.CreateSessionRequest) (*wirev1.CreateSessionResponse, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.sessions++
+	s.calls = append(s.calls, call("new-session", request.GetConnectionId().GetValue(), request.GetPlanId().GetValue()))
+	id := fmt.Sprintf("session-%d", s.sessions)
+
+	return &wirev1.CreateSessionResponse{Session: &wirev1.Session{Id: &wirev1.SessionId{Value: id}}}, nil
+}
+
+func (s *clientTestServer) ReleaseSession(_ context.Context, request *wirev1.ReleaseSessionRequest) (*wirev1.ReleaseSessionResponse, error) {
+	s.record("release-session", request.GetConnectionId().GetValue(), request.GetSessionId().GetValue())
+
+	return &wirev1.ReleaseSessionResponse{}, nil
 }
 
 func (s *clientTestServer) ReleaseExecution(ctx context.Context, request *wirev1.ReleaseExecutionRequest) (*wirev1.ReleaseExecutionResponse, error) {
@@ -223,43 +267,38 @@ func assertCleanupDeadline(t *testing.T, kind string, deadline time.Time) {
 	}
 }
 
-func TestClientRunOwnsCreatedResources(t *testing.T) {
+func TestRuntimeRunOwnsItsExecution(t *testing.T) {
 	t.Run("success and options", func(t *testing.T) {
 		server := &clientTestServer{watchScripts: []executionWatchScript{{events: []*wirev1.WatchExecutionResponse{
 			executionCompletedEvent("execution-1", "application/json", []byte(`{"value":1}`)),
 		}}}}
-		client := openTestClient(t, startClientTestServer(t, server))
+		client := openTestRuntime(t, startClientTestServer(t, server))
 
-		output, err := client.Run(testClientContext(t), api.Source{Content: "RETURN 1"}, nil, RunOptions{
-			Compile: CompileOptions{Debuggable: true},
-			Execute: ExecuteOptions{OutputContentType: "application/json"},
-		})
+		output, err := client.Run(testClientContext(t), api.Source{Content: "RETURN 1"}, api.WithOutputContentType("application/json"))
 		if err != nil || string(output.Content) != `{"value":1}` {
-			t.Fatalf("unexpected Client.Run result: %#v, %v", output, err)
+			t.Fatalf("unexpected Runtime.Run result: %#v, %v", output, err)
 		}
 
 		calls, _, releaseExecutionCalls, releasePlanCalls := server.callSnapshot()
 		want := []string{
-			call("compile", "connection", ""),
-			call("execute", "connection", "plan-1"),
+			call("run", "connection", ""),
 			call("watch", "connection", "execution-1"),
 			call("release-execution", "connection", "execution-1"),
-			call("release-plan", "connection", "plan-1"),
 		}
 		server.mu.Lock()
 		debuggable := server.lastCompileDebuggable
 		contentType := server.lastOutputContentType
 		server.mu.Unlock()
-		if !slices.Equal(calls, want) || !debuggable || contentType != "application/json" || releaseExecutionCalls != 1 || releasePlanCalls != 1 {
-			t.Fatalf("Client.Run orchestration: calls=%v debug=%v content=%q releases=%d/%d", calls, debuggable, contentType, releaseExecutionCalls, releasePlanCalls)
+		if !slices.Equal(calls, want) || debuggable || contentType != "application/json" || releaseExecutionCalls != 1 || releasePlanCalls != 0 {
+			t.Fatalf("Runtime.Run orchestration: calls=%v debug=%v content=%q releases=%d/%d", calls, debuggable, contentType, releaseExecutionCalls, releasePlanCalls)
 		}
 	})
 
 	t.Run("compile failure creates nothing", func(t *testing.T) {
 		server := &clientTestServer{compileErr: status.Error(codes.InvalidArgument, "compile failed")}
-		client := openTestClient(t, startClientTestServer(t, server))
+		client := openTestRuntime(t, startClientTestServer(t, server))
 
-		_, err := client.Run(testClientContext(t), api.Source{Content: "invalid"}, nil, RunOptions{})
+		_, err := client.Compile(testClientContext(t), api.Source{Content: "invalid"})
 		var wireErr *Error
 		if !errors.As(err, &wireErr) || wireErr.Message != "compile failed" {
 			t.Fatalf("unexpected compile failure: %v", err)
@@ -270,22 +309,20 @@ func TestClientRunOwnsCreatedResources(t *testing.T) {
 		}
 	})
 
-	t.Run("execute failure releases plan", func(t *testing.T) {
+	t.Run("run rejection creates no resources", func(t *testing.T) {
 		server := &clientTestServer{executeErr: status.Error(codes.InvalidArgument, "execute failed")}
-		client := openTestClient(t, startClientTestServer(t, server))
+		client := openTestRuntime(t, startClientTestServer(t, server))
 
-		_, err := client.Run(testClientContext(t), api.Source{Content: "RETURN 1"}, nil, RunOptions{})
+		_, err := client.Run(testClientContext(t), api.Source{Content: "RETURN 1"})
 		var wireErr *Error
 		if !errors.As(err, &wireErr) || wireErr.Message != "execute failed" {
 			t.Fatalf("unexpected execute failure: %v", err)
 		}
 		calls, watchCalls, releaseExecutionCalls, releasePlanCalls := server.callSnapshot()
 		want := []string{
-			call("compile", "connection", ""),
-			call("execute", "connection", "plan-1"),
-			call("release-plan", "connection", "plan-1"),
+			call("run", "connection", ""),
 		}
-		if !slices.Equal(calls, want) || watchCalls != 0 || releaseExecutionCalls != 0 || releasePlanCalls != 1 {
+		if !slices.Equal(calls, want) || watchCalls != 0 || releaseExecutionCalls != 0 || releasePlanCalls != 0 {
 			t.Fatalf("execute failure cleanup: %v", calls)
 		}
 	})
@@ -297,36 +334,38 @@ func TestClientRunOwnsCreatedResources(t *testing.T) {
 			block:   true,
 			entered: entered,
 		}}}
-		client := openTestClient(t, startClientTestServer(t, server))
+		client := openTestRuntime(t, startClientTestServer(t, server))
 		ctx, cancel := context.WithCancel(context.Background())
 		result := make(chan error, 1)
 		go func() {
-			_, err := client.Run(ctx, api.Source{Content: "RETURN 1"}, nil, RunOptions{})
+			_, err := client.Run(ctx, api.Source{Content: "RETURN 1"})
 			result <- err
 		}()
 		select {
 		case <-entered:
 		case <-time.After(10 * time.Second):
-			t.Fatal("Client.Run did not begin waiting")
+			t.Fatal("Runtime.Run did not begin waiting")
 		}
 
 		cancel()
 		select {
 		case err := <-result:
 			if !errors.Is(err, context.Canceled) {
-				t.Fatalf("Client.Run lost caller cancellation: %v", err)
+				t.Fatalf("Runtime.Run lost caller cancellation: %v", err)
 			}
 		case <-time.After(10 * time.Second):
-			t.Fatal("Client.Run cleanup did not settle")
+			t.Fatal("Runtime.Run cleanup did not settle")
 		}
 		_, _, releaseExecutionCalls, releasePlanCalls := server.callSnapshot()
-		if releaseExecutionCalls != 1 || releasePlanCalls != 1 {
-			t.Fatalf("cancelled Client.Run cleanup: execution=%d plan=%d", releaseExecutionCalls, releasePlanCalls)
+		if releaseExecutionCalls != 1 || releasePlanCalls != 0 {
+			t.Fatalf("cancelled Runtime.Run cleanup: execution=%d plan=%d", releaseExecutionCalls, releasePlanCalls)
 		}
 
 		executionDeadline, planDeadline := server.releaseDeadlineSnapshot()
 		assertCleanupDeadline(t, "execution", executionDeadline)
-		assertCleanupDeadline(t, "plan", planDeadline)
+		if !planDeadline.IsZero() {
+			t.Fatal("direct run released a plan")
+		}
 	})
 
 	t.Run("stream failure still cleans up", func(t *testing.T) {
@@ -334,16 +373,16 @@ func TestClientRunOwnsCreatedResources(t *testing.T) {
 			events: []*wirev1.WatchExecutionResponse{executionStartedEvent("execution-1")},
 			err:    status.Error(codes.Unavailable, "watch transport failed"),
 		}}}
-		client := openTestClient(t, startClientTestServer(t, server))
+		client := openTestRuntime(t, startClientTestServer(t, server))
 
-		_, err := client.Run(testClientContext(t), api.Source{Content: "RETURN 1"}, nil, RunOptions{})
+		_, err := client.Run(testClientContext(t), api.Source{Content: "RETURN 1"})
 		var wireErr *Error
 		if !errors.As(err, &wireErr) || status.Code(err) != codes.Unavailable || wireErr.Message != "watch transport failed" {
-			t.Fatalf("Client.Run lost the stream failure: %v", err)
+			t.Fatalf("Runtime.Run lost the stream failure: %v", err)
 		}
 		_, _, releaseExecutionCalls, releasePlanCalls := server.callSnapshot()
-		if releaseExecutionCalls != 1 || releasePlanCalls != 1 {
-			t.Fatalf("stream-failed Client.Run cleanup: execution=%d plan=%d", releaseExecutionCalls, releasePlanCalls)
+		if releaseExecutionCalls != 1 || releasePlanCalls != 0 {
+			t.Fatalf("stream-failed Runtime.Run cleanup: execution=%d plan=%d", releaseExecutionCalls, releasePlanCalls)
 		}
 	})
 
@@ -356,26 +395,25 @@ func TestClientRunOwnsCreatedResources(t *testing.T) {
 				}),
 			}}},
 			releaseExecutionErr: status.Error(codes.Internal, "execution cleanup failed"),
-			releasePlanErr:      status.Error(codes.Unavailable, "plan cleanup failed"),
 		}
-		client := openTestClient(t, startClientTestServer(t, server))
+		client := openTestRuntime(t, startClientTestServer(t, server))
 
-		output, err := client.Run(testClientContext(t), api.Source{Content: "RETURN 1"}, nil, RunOptions{})
+		output, err := client.Run(testClientContext(t), api.Source{Content: "RETURN 1"})
 		var terminalFailure *failure.Failure
 		if string(output.Content) != "partial" || !errors.As(err, &terminalFailure) || terminalFailure.Message != "execution failed" ||
-			!strings.Contains(err.Error(), "execution cleanup failed") || !strings.Contains(err.Error(), "plan cleanup failed") {
-			t.Fatalf("Client.Run did not preserve all errors: %#v, %v", output, err)
+			!strings.Contains(err.Error(), "execution cleanup failed") {
+			t.Fatalf("Runtime.Run did not preserve all errors: %#v, %v", output, err)
 		}
 		_, _, releaseExecutionCalls, releasePlanCalls := server.callSnapshot()
-		if releaseExecutionCalls != 1 || releasePlanCalls != 1 {
-			t.Fatalf("failed Client.Run cleanup: execution=%d plan=%d", releaseExecutionCalls, releasePlanCalls)
+		if releaseExecutionCalls != 1 || releasePlanCalls != 0 {
+			t.Fatalf("failed Runtime.Run cleanup: execution=%d plan=%d", releaseExecutionCalls, releasePlanCalls)
 		}
 	})
 }
 
-func openTestClient(t *testing.T, connection grpc.ClientConnInterface) *Client {
+func openTestClient(t *testing.T, connection grpc.ClientConnInterface) *connectionHandle {
 	t.Helper()
-	client, err := New(testClientContext(t), connection)
+	client, err := newConnection(testClientContext(t), connection)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -395,6 +433,7 @@ func startClientTestServer(t *testing.T, implementation *clientTestServer) *grpc
 	wirev1.RegisterRuntimeServiceServer(server, implementation)
 	wirev1.RegisterPlanServiceServer(server, implementation)
 	wirev1.RegisterExecutionServiceServer(server, implementation)
+	wirev1.RegisterSessionServiceServer(server, implementation)
 	serveDone := make(chan error, 1)
 	go func() { serveDone <- server.Serve(listener) }()
 
@@ -429,4 +468,20 @@ func startClientTestServer(t *testing.T, implementation *clientTestServer) *grpc
 	})
 
 	return connection
+}
+
+func openTestRuntime(t *testing.T, connection grpc.ClientConnInterface) api.Runtime {
+	t.Helper()
+	runtime, err := New(testClientContext(t), connection)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() {
+		if err := runtime.Close(); err != nil {
+			t.Errorf("runtime cleanup failed: %v", err)
+		}
+	})
+
+	return runtime
 }

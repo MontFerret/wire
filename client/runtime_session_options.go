@@ -7,12 +7,12 @@ import (
 )
 
 type runtimeSessionOptions struct {
-	parameters        Parameters
+	parameters        map[string]any
 	outputContentType string
 }
 
 func applyRuntimeSessionOptions(options []api.SessionOption) (runtimeSessionOptions, error) {
-	configured := runtimeSessionOptions{parameters: make(Parameters)}
+	configured := runtimeSessionOptions{parameters: make(map[string]any)}
 	var result error
 	for _, option := range options {
 		if option == nil {

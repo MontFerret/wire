@@ -1,147 +1,112 @@
-# Client Handles
+# Client API
 
-The handwritten `client` package is a domain facade over the generated gRPC
-clients. It owns one logical Wire connection while borrowing the caller's
-`grpc.ClientConnInterface`.
+`client.New(ctx, conn)` returns a remote implementation of `api.Runtime`.
+The caller configures the endpoint, credentials, TLS, dialer, and transport
+limits on the supplied `grpc.ClientConnInterface` and retains its ownership.
+There is no second handwritten Wire resource API.
 
 ## Resource model
 
-Remote resources are exposed as opaque, typed handles:
-
 ```text
-Runtime (= api.Runtime; private Wire implementation)
-└── private Universal API adapters
-    ├── api.Plan
-    │   ├── Session (= api.Session)
-    │   └── debugger.Session
-    └── temporary Execution handles
-
-Client (lower-level Wire facade)
-└── Plan
-    ├── Execution
-    └── DebugSession
+api.Runtime
+└── api.Plan
+    ├── api.Session
+    └── api/debugger.Session
 ```
 
-`NewRuntime(ctx, conn)` is the Universal API-first entry point. It returns
-`Runtime`, an alias of `api.Runtime`, backed by a private `remoteRuntime` that
-owns one logical `Client`. The returned Plan, normal Session, and debugger
-adapters also remain private behind their Universal API interfaces.
-The runtime adapter's `Run` uses `RuntimeService.Run` to call the hosted
-`api.Runtime.Run` directly. A normal Session is created remotely once and each sequential `Run` uses a hidden
-Execution that is watched and released before returning. Closing any adapter
-uses the 30-second detached cleanup bound; closing Runtime never closes `conn`.
+All implementations remain private. Sources, options, output, diagnostics,
+breakpoints, locations, frames, variables, reasons, and debugger events use
+their canonical Universal API types directly. `client` exports only `New`,
+`Error`, `ErrClosed`, and `ErrExecutionCancelled`.
 
-The client re-exports three canonical types for ordinary remote-runtime use:
+`Runtime.Run` invokes the hosted `api.Runtime.Run` directly, once per call.
+`Compile` and `CompileDebug` create reusable plans through the corresponding
+hosted methods. `Plan.Params` returns a defensive copy. Each `NewSession`
+creates one durable hosted session with the supplied semantic options;
+sequential `Session.Run` calls reuse it. A concurrent run on that session is
+rejected until the previous invocation's temporary execution has been released.
+Distinct sessions and plans may execute concurrently.
 
-| Alias | Canonical contract | Ordinary use |
-| --- | --- | --- |
-| `client.Runtime` | `api.Runtime` | Store or pass the runtime returned by `NewRuntime`. |
-| `client.Session` | `api.Session` | Store or pass reusable normal sessions created by a plan. |
-| `client.Output` | `api.Output`, defined in `api/result` | Consume encoded execution results. |
+Each runtime/session invocation privately acquires, watches, and releases an
+execution. Output remains `api.Output`: its content type and encoded bytes are
+copied without interpretation. No IDs, RPC handles, execution snapshots, or
+connection metadata are exposed by the returned API interfaces.
 
-These are true Go aliases: ownership and type identity stay in
-`github.com/MontFerret/api` and its canonical subpackages. Source construction,
-options, diagnostics, debugger inspection values, and shared Wire snapshots
-continue to use their owning packages. The existing `client.Plan` and
-`client.DebugSession` names denote lower-level Wire handles; the Universal API
-workflow returns `api.Plan` and `api/debugger.Session` instead.
+## Options and parameters
 
-`client.Runtime` was previously an exported concrete adapter. Explicit
-`*client.Runtime` declarations must become `client.Runtime`; inferred
-`remote, err := client.NewRuntime(ctx, conn)` calls remain unchanged. Constructor
-failures return a nil interface and the existing error.
+Use `api.WithOptimizationLevel` for plan compilation and `api.WithParam`,
+`api.WithParams`, and `api.WithOutputContentType` for direct runs and session
+creation. There are no Wire-specific semantic option structs.
 
-`Client` compiles plans. A `Plan` executes its compiled program and creates
-debug sessions. Execution and debugger operations live on their respective
-handles. The protocol still carries connection, plan, normal-session,
-execution, and debug-session IDs, but the facade retains and propagates them privately.
-Callers cannot manually combine a handle with another client's connection.
-Breakpoint IDs and debug value references remain visible because callers pass
-them back to debugger operations; they do not expose connection or handle
-ownership. A positive value reference is usable only while that debug session
-remains in its current stopped state; zero and stale references are rejected.
+Omitting optimization preserves the hosted default; an explicit
+`api.OptimizationNone` transports the zero level. Non-nil callbacks run exactly
+once in order. Later settings override earlier ones, callback errors are
+joined, and failed options prevent dispatch. Cancellation is checked before
+callbacks and again before allocation.
 
-Debugger inspection uses the canonical Unified API types directly:
+Parameter conversion accepts only Wire's portable subset: null, booleans,
+signed integers, unsigned integers fitting `int64`, finite floats, strings,
+bytes, `[]any`, and `map[string]any`. Integer and floating-point values remain
+distinct. Empty parameter names, excessive nesting, non-finite numbers,
+duration, datetime, regexp, and unsupported custom values are rejected locally.
+The Universal API does not declare a portable parameter subset; this remains
+a transport constraint, documented without introducing a parallel public type.
 
-```go
-SetBreakpoint(context.Context, source.Location) (debugger.Breakpoint, error)
-SetBreakpointAt(context.Context, source.Location, debugger.BreakpointOptions) (debugger.Breakpoint, error)
-DeleteBreakpoint(context.Context, debugger.BreakpointID) error
-Frames(context.Context) ([]debugger.Frame, error)
-FrameLocals(context.Context, int) ([]debugger.Variable, error)
-Variables(context.Context, debugger.ValueReference) ([]debugger.Variable, error)
-EvaluateFrame(context.Context, int, string) (debugger.Value, error)
-StepOver(context.Context) error
-StepIn(context.Context) error
-StepOut(context.Context) error
-```
+## Example
 
-The slice index returned by `Frames` is the index accepted by `FrameLocals`
-and `EvaluateFrame`; Wire does not expose or transmit a second frame-identity
-type. Breakpoints preserve requested and resolved locations, spans, point and
-function IDs, binding mode, and bound state. Frames preserve their function ID,
-variables preserve mutable and parameter flags, and debug snapshots preserve
-depth, stop reason, hit breakpoint IDs, output, and failure.
-`source.Location.SourceName` is a semantic source identifier and is never
-interpreted as a filesystem path by the client.
-
-The protocol and lower-level facade accept explicit breakpoint binding options
-through `SetBreakpointAt`. `SetBreakpoint` remains the default-binding
-convenience.
-
-Compilation and one-shot execution accept `api.Source` directly. Its `Name`
-and `Content` map to the protocol `Source` message.
+Transport construction is separate from runtime use. This function accepts
+any local or remote Universal API runtime, borrowing it while owning the plan
+and session it creates:
 
 ```go
-src := api.NewSource("query.fql", "RETURN @input")
-plan, err := wireClient.Compile(ctx, src, client.CompileOptions{})
-if err != nil {
-	return err
-}
-defer func() {
-	if closeErr := plan.Close(context.Background()); closeErr != nil {
-		log.Printf("close plan: %v", closeErr)
-	}
-}()
+func runQuery(ctx context.Context, runtime api.Runtime) (out api.Output, err error) {
+    plan, err := runtime.Compile(ctx, api.NewSource("query.fql", "RETURN @input"))
+    if err != nil {
+        return api.Output{}, err
+    }
+    defer func() { err = errors.Join(err, plan.Close()) }()
 
-execution, err := plan.Execute(ctx, parameters, client.ExecuteOptions{})
-if err != nil {
-	return err
-}
-defer func() {
-	if closeErr := execution.Close(context.Background()); closeErr != nil {
-		log.Printf("close execution: %v", closeErr)
-	}
-}()
+    session, err := plan.NewSession(ctx, api.WithParam("input", "hello"))
+    if err != nil {
+        return api.Output{}, err
+    }
+    defer func() { err = errors.Join(err, session.Close()) }()
 
-output, err := execution.Wait(ctx)
-```
-
-Plan metadata is immutable. `Parameters` returns a defensive copy.
-`CompileOptions.Debuggable` chooses the protocol's `CompileDebug` operation
-instead of `Compile`. `CompileOptions.PlanOptions` accepts the same
-`api.PlanOption` callbacks as the Universal API adapter:
-
-```go
-options := client.CompileOptions{
-    PlanOptions: []api.PlanOption{api.WithOptimizationLevel(api.OptimizationNone)},
+    return session.Run(ctx)
 }
 ```
 
-Omitting the optimization option preserves the hosted runtime default; supplying
-it transports the explicit level, including `api.OptimizationNone`. Presence
-tracking stays private. Both entry points apply non-nil callbacks exactly once,
-in order, before dispatch. The last valid setting wins; callback errors are
-joined and prevent dispatch, as does caller cancellation before or after option
-application.
+Create the remote runtime with `client.New(ctx, conn)` and close it after its
+resources. Closing it never closes `conn`. Constructor failure returns a nil
+`api.Runtime` interface and the decoded error.
 
-The metadata facade maps `APIIdentity` and `WireVersion` from the handshake's
-protocol name and version and maps optional host runtime identity directly to
-`*execution.Identity` from `pkg/execution`.
-Legacy Ferret-version and capability fields remain empty rather than
-fabricating values not carried by the protocol.
+## Debugger
 
-### Allocation and cancellation
+`CompileDebug` followed by `Plan.NewDebugSession` returns
+`api/debugger.Session`. `Start`, `Continue`, `StepIn`, `StepOver`, and `StepOut`
+return canonical debugger events at the next stop or completion. The private
+adapter serializes these commands and consumes Wire watches internally.
+
+`Pause`, breakpoint operations, `Frames`, `Locals`, `FrameLocals`, `Variables`,
+`Evaluate`, and `EvaluateFrame` retain their canonical signatures. Operations
+without a caller context use the debugger's lifetime context; closing the
+debugger cancels its pending work. Cancelling a resume command closes the
+debugger and joins any cleanup error with caller cancellation.
+
+Frame slice order defines the zero-based index for frame-local and evaluation
+operations. Breakpoint IDs and value references remain public because they are
+canonical debugger concepts; they do not identify Wire ownership scopes.
+Positive references are usable only at the current stopped state; zero and
+stale references are rejected. Source names are semantic identifiers, never
+interpreted as local paths.
+
+Breakpoints preserve requested/resolved locations, spans, binding mode,
+point/function IDs, and bound state. Events preserve stop reason, depth, hit
+breakpoint IDs, output, and failure. Runtime-error stops carry the failure in
+`debugger.Event.Error`; failed debugger commands return an error. Completion
+and termination map to their canonical reasons, without a second event API.
+
+## Allocation and cancellation
 
 The Universal API adapter checks cancellation before sending an allocation
 request, including after option callbacks. Only the acquisition RPC is detached
@@ -175,160 +140,58 @@ Operation and cleanup errors remain joined. The caller-owned physical transport
 and other logical clients on it remain open. These bounds limit client waiting;
 the hosted implementation must still honor its cancellation and Close contracts.
 
-
-## Convenience execution
-
-For a one-shot program, `Client.Run` composes compile, execute, wait, and
-ordered cleanup while preserving the Unified API encoded output boundary:
-
-```go
-output, err := wireClient.Run(
-	ctx,
-	api.NewSource("query.fql", "RETURN @input"),
-	client.Parameters{"input": "hello"},
-	client.RunOptions{Execute: client.ExecuteOptions{OutputContentType: "application/json"}},
-)
-```
-
-A caller that owns a reusable plan can run it repeatedly without surrendering
-plan ownership:
-
-```go
-src := api.NewSource("query.fql", "RETURN @input")
-plan, err := wireClient.Compile(ctx, src, client.CompileOptions{})
-if err != nil {
-	return err
-}
-defer func() {
-	if closeErr := plan.Close(context.Background()); closeErr != nil {
-		log.Printf("close plan: %v", closeErr)
-	}
-}()
-
-output, err := plan.Run(ctx, parameters, client.ExecuteOptions{})
-```
-
-The ownership boundary is explicit:
-
-| Operation | Creates | Releases |
-| --- | --- | --- |
-| `Client.Run` | Plan and Execution | Plan and Execution |
-| `Plan.Run` | Execution | Execution only |
-| `Execution.Wait` | Nothing | Nothing |
-
-`Execution.Wait` opens a fresh watch, ignores non-terminal snapshots, and
-returns when the execution completes, fails, or is remotely cancelled. The
-method, along with `Client.Run` and `Plan.Run`, returns `Output`, the alias of
-`api.Output`. Failed terminal snapshots return `*failure.Failure`; remote cancellation returns
-`client.ErrExecutionCancelled`. Cancellation of the caller's waiting context
-instead returns that context's error.
-
-Convenience cleanup is synchronous and uses a cancellation-detached context
-with a fresh 30-second deadline for each release, so resources created by
-`Run` are still released after the request context is cancelled without
-allowing a stalled cleanup call to block forever. Execution and cleanup errors
-are joined rather than replacing one another.
-
-Universal API resource-allocation RPCs use the same bounded detached context.
-This prevents a cancellation race from discarding the only opaque handle after
-the server has published a resource. The original caller context is checked
-after allocation; a resource that raced cancellation is cancelled and released
-before the adapter returns the caller-visible cancellation.
-
-## Snapshots and events
-
-Handles represent identity, ownership, and operations; they are not mutable
-state snapshots. Execution state crosses the facade as `execution.Event` and
-`execution.Snapshot` from `pkg/execution`; debug state crosses as `debugger.Event`
-and `debugger.Snapshot` from Wire's `pkg/debugger`. These snapshots preserve
-Unified API `api.Output` and use API `debugger.Reason`, `source.Range`, and
-`debugger.BreakpointID` values without exposing generated protobuf messages.
-The client allocates fresh output bytes, diagnostics, ranges, and breakpoint-ID
-slices while decoding each protobuf response.
-
-Execution and debugger command methods return errors only. Their state changes
-are observed through `Execution.Watch` or `DebugSession.Watch`. A watch sends
-the server's latest published event first, then ordered changes through one
-terminal event. A newly created debug session replays sequence 1 with
-`debugger.EventCreated` and a created snapshot; the client does not need a Get
-RPC.
-
-`execution.Event` contains a sequence and execution snapshot.
-`execution.State.Terminal` identifies completed, failed, and cancelled states.
-Debug events retain a separate `debugger.EventKind` because starting and
-continuing are distinct transitions that both publish a running snapshot.
-`debugger.State.Terminal` centralizes completed, failed, and terminated state
-handling.
-
-Watch streams are tied to both the operation context and the logical Client
-lifecycle. A watch opened before resource closure remains able to receive the
-server's terminal event. New watches are rejected after the handle or an
-ancestor starts closing.
-
 ## Closing resources
 
-The lower-level `Plan`, `Execution`, and `DebugSession` expose
-`Close(context.Context) error`.
-Close maps to the corresponding protocol release operation; it is never driven
-by finalizers or garbage collection.
+The constructor context bounds the handshake, not the lifetime of the returned
+runtime. Cancelling it after construction does not close the runtime.
 
-The first Close commits teardown exactly once. Concurrent and repeated callers
-wait for the same retained release result. A waiter's context can expire
-without cancelling the committed cleanup, and a later call can still observe
-the retained result. Release failures are retained rather than hidden or
-retried. Once close begins, the handle rejects new operations with an error
-matching `client.ErrClosed`.
+Public resources implement `Close() error`. Closing uses a detached context
+with a 30-second bound. The first close commits teardown exactly once.
+Concurrent and repeated callers observe the retained release result; a caller
+whose wait expires does not abandon committed cleanup. Failed releases remain
+observable rather than being hidden or automatically retried.
 
-Closing a Client or Plan owns cleanup of its descendants. Descendant operations
-are rejected as soon as ancestor closure begins. A descendant first closed
-after ancestor cleanup begins observes the ancestor's retained result rather
-than issuing a duplicate release. Close children before parents when reporting
-each resource's direct release result matters; normal `defer` ordering provides
-this naturally.
+Closing a runtime or plan owns descendant cleanup. Descendant operations are
+rejected as soon as ancestor closure begins. A descendant closed after ancestor
+cleanup begins observes the ancestor's retained result instead of issuing a
+duplicate release. Close children before parents when each direct cleanup
+result matters; normal defer ordering provides this.
 
-`DebugSession.Stop` and `DebugSession.Close` are intentionally distinct. Stop
-terminates debugger execution without releasing the remote ID; Close commits
-termination and resource release.
+Private watches are tied to operation and logical connection contexts. An
+existing watch may receive the terminal event during resource closure; new
+operations are rejected after closure begins. Private handles and cleanup
+helpers remain with their existing lifecycle owners inside `client`.
 
 ## Errors
 
-Immediate Wire failures are exposed as `*client.Error` with a
-`failure.Category`, sanitized gRPC message, and canonical
-`diagnostics.Diagnostics` when the runtime returned that typed collection.
-Terminal `*failure.Failure` values carry the same canonical diagnostics. Wire
-never parses error strings to construct them. Invalid requests, cancellation,
-deadlines, unavailable transports, and resource exhaustion use their native
-gRPC codes without a duplicate Wire category; `client.Error.Category` is zero
-unless an `ErrorDetail` was transmitted. The error unwraps its transport cause,
-so callers can use `status.Code(err)` without making transport codes part of
-the semantic category. Protocol resource identifiers remain private.
+Immediate failures remain `*client.Error`, preserving `failure.Category`,
+sanitized message, canonical `diagnostics.Diagnostics`, and the transport cause
+through `Unwrap`. Categories are set only when the server supplies an
+`ErrorDetail`; transport-native cancellation, deadlines, unavailable,
+invalid-request, and resource-exhaustion errors keep category zero.
+`status.Code(err)` remains available for transport-specific handling.
+Wire never parses arbitrary error strings to reconstruct diagnostics.
 
-Terminal execution and debug failures use `*failure.Failure`, while local
-lifecycle and waiting conditions remain distinguishable through
-`client.ErrClosed`, `client.ErrExecutionCancelled`, and context errors.
-Convenience APIs join operation and cleanup errors so `errors.Is` and
-`errors.As` continue to find each component.
+Terminal execution and debugger failures remain `*failure.Failure`.
+`client.ErrClosed` identifies closed logical resources.
+`client.ErrExecutionCancelled` identifies remote execution cancellation and
+remains distinct from cancellation of the caller's context.
+Operation and cleanup errors are joined so `errors.Is` and `errors.As` can find
+each component.
 
-## Facade responsibilities
+These Wire errors remain public because the Universal API has no equivalent
+general remote-error taxonomy. Connection and allocation IDs remain private,
+and contained implementation panic details remain sanitized.
 
-The client package is limited to:
+## Migration
 
-- logical Connect lifecycle;
-- a complete remote `api.Runtime` adapter;
-- typed plan, execution, debugger, and event operations;
-- private connection and resource-ID propagation;
-- explicit parameter conversion;
-- transport-neutral snapshots with defensive conversion and structured error mapping;
-- hiding protobuf and gRPC ceremony without hiding protocol concepts.
+Call `client.New` instead of `NewRuntime`. Use `api.Runtime`, `api.Session`,
+and `api.Output` instead of client aliases. The old `Client`, `Plan`,
+`Execution`, `DebugSession`, and event receiver types, semantic option structs,
+`Parameters`, `RuntimeInfo`, and `Capabilities` have been removed without
+compatibility shims.
 
-Parameter conversion deliberately accepts only the portable Wire subset:
-null, booleans, signed integers, finite doubles, strings, bytes, `[]any`, and
-`map[string]any`. Exact signed `int64` and floating-point values remain distinct;
-NaN and infinities are rejected even when nested. Duration, datetime, regexp,
-and custom values are rejected locally. Further lower-level client redesign is
-separate from the Universal API adapter.
-
-Closing the Client never closes the caller-owned gRPC connection. The facade
-does not construct runtimes or transports. Its convenience execution methods
-compose the same handles and watches; they do not duplicate runtime
-semantics.
+Use canonical runtime/plan/session operations, cancellation contexts, and
+debugger events. The versioned protobuf services and shared domain packages
+remain unchanged; callers implementing protocol tooling may still use the
+generated bindings directly.

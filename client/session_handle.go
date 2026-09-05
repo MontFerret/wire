@@ -8,13 +8,13 @@ import (
 
 // sessionHandle is the private Wire handle for one durable Unified API session.
 type sessionHandle struct {
-	client *Client
-	plan   *Plan
+	client *connectionHandle
+	plan   *planHandle
 	id     string
 	close  *closeState
 }
 
-func (s *sessionHandle) run(ctx context.Context) (*Execution, error) {
+func (s *sessionHandle) run(ctx context.Context) (*executionHandle, error) {
 	if err := s.checkOpen(); err != nil {
 		return nil, err
 	}
@@ -27,7 +27,7 @@ func (s *sessionHandle) run(ctx context.Context) (*Execution, error) {
 		return nil, allocationRPCError(err)
 	}
 
-	return newExecutionHandle(s.client, s.plan, s, response.GetExecution())
+	return newExecutionHandle(s.client, s, response.GetExecution())
 }
 
 func (s *sessionHandle) Close(ctx context.Context) error {

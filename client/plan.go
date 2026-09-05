@@ -7,42 +7,16 @@ import (
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
 )
 
-// Plan is a compiled remote runtime plan owned by one Client.
-type Plan struct {
-	client     *Client
+// planHandle is a compiled remote runtime plan owned by one connectionHandle.
+type planHandle struct {
+	client     *connectionHandle
 	id         string
 	parameters []string
-	debuggable bool
 	close      *closeState
 }
 
-// Execute publishes a remote execution of this plan. Output remains the Unified API
-// encoded content-type and byte contract.
-func (p *Plan) Execute(ctx context.Context, parameters Parameters, options ExecuteOptions) (*Execution, error) {
-	if err := p.checkOpen(); err != nil {
-		return nil, err
-	}
-
-	converted, err := encodeParameters(parameters)
-	if err != nil {
-		return nil, err
-	}
-
-	response, err := p.client.executionClient.Execute(ctx, &wirev1.ExecuteRequest{
-		ConnectionId:      p.client.connectionProto(),
-		PlanId:            &wirev1.PlanId{Value: p.id},
-		Parameters:        converted,
-		OutputContentType: options.OutputContentType,
-	})
-	if err != nil {
-		return nil, decodeError(err)
-	}
-
-	return newExecutionHandle(p.client, p, nil, response.GetExecution())
-}
-
 // Parameters returns a copy of the FQL parameters declared by this plan.
-func (p *Plan) Parameters() []string {
+func (p *planHandle) Parameters() []string {
 	if p == nil {
 		return nil
 	}
@@ -50,34 +24,14 @@ func (p *Plan) Parameters() []string {
 	return append([]string(nil), p.parameters...)
 }
 
-// Debuggable reports whether this plan was compiled for debugging.
-func (p *Plan) Debuggable() bool {
-	return p != nil && p.debuggable
-}
-
-// Run executes the plan once, waits for encoded output, and releases the
-// execution it creates. Execution and release errors are joined. The caller
-// retains ownership of the Plan.
-func (p *Plan) Run(ctx context.Context, parameters Parameters, options ExecuteOptions) (Output, error) {
-	execution, err := p.Execute(ctx, parameters, options)
-	if err != nil {
-		return Output{}, err
-	}
-
-	output, waitErr := execution.Wait(ctx)
-	closeErr := boundedCleanup(ctx, convenienceCleanupTimeout, execution.Close)
-
-	return output, errors.Join(waitErr, closeErr)
-}
-
 // NewDebugSession creates a Unified API debug session for a plan compiled with
-// CompileOptions.Debuggable.
-func (p *Plan) NewDebugSession(ctx context.Context, parameters Parameters, options DebugSessionOptions) (*DebugSession, error) {
+// CompileDebug.
+func (p *planHandle) NewDebugSession(ctx context.Context, configured runtimeSessionOptions) (*debugSessionHandle, error) {
 	if err := p.checkOpen(); err != nil {
 		return nil, err
 	}
 
-	converted, err := encodeParameters(parameters)
+	converted, err := encodeParameters(configured.parameters)
 	if err != nil {
 		return nil, err
 	}
@@ -86,7 +40,7 @@ func (p *Plan) NewDebugSession(ctx context.Context, parameters Parameters, optio
 		ConnectionId:      p.client.connectionProto(),
 		PlanId:            &wirev1.PlanId{Value: p.id},
 		Parameters:        converted,
-		OutputContentType: options.OutputContentType,
+		OutputContentType: configured.outputContentType,
 	})
 	if err != nil {
 		return nil, allocationRPCError(err)
@@ -97,12 +51,12 @@ func (p *Plan) NewDebugSession(ctx context.Context, parameters Parameters, optio
 		return nil, &allocationError{cause: errors.New("Wire server returned an invalid debug session")}
 	}
 
-	return &DebugSession{client: p.client, plan: p, id: value.GetId().GetValue(), close: &closeState{}}, nil
+	return &debugSessionHandle{client: p.client, plan: p, id: value.GetId().GetValue(), close: &closeState{}}, nil
 }
 
 // Close releases the plan and its remote sessions, executions, and debug sessions.
 // Concurrent and repeated calls observe one retained release result.
-func (p *Plan) Close(ctx context.Context) error {
+func (p *planHandle) Close(ctx context.Context) error {
 	if p == nil || p.client == nil || p.id == "" || p.close == nil {
 		return ErrClosed
 	}
@@ -114,7 +68,7 @@ func (p *Plan) Close(ctx context.Context) error {
 	return p.close.Wait(ctx)
 }
 
-func (p *Plan) checkOpen() error {
+func (p *planHandle) checkOpen() error {
 	if p == nil || p.client == nil || p.id == "" || p.close == nil || p.close.Started() {
 		return ErrClosed
 	}
@@ -122,7 +76,7 @@ func (p *Plan) checkOpen() error {
 	return p.client.checkOpen()
 }
 
-func (p *Plan) ancestorCloseResult(ctx context.Context) (bool, error) {
+func (p *planHandle) ancestorCloseResult(ctx context.Context) (bool, error) {
 	if p == nil || p.client == nil || p.close == nil {
 		return true, ErrClosed
 	}
@@ -134,7 +88,7 @@ func (p *Plan) ancestorCloseResult(ctx context.Context) (bool, error) {
 	return p.client.closeResult(ctx)
 }
 
-func (p *Plan) release(ctx context.Context) error {
+func (p *planHandle) release(ctx context.Context) error {
 	if closing, err := p.client.closeResult(ctx); closing {
 		return err
 	}
@@ -151,16 +105,15 @@ func (p *Plan) release(ctx context.Context) error {
 	return decodeError(err)
 }
 
-func (p *Plan) newSession(
+func (p *planHandle) newSession(
 	ctx context.Context,
-	parameters Parameters,
-	options ExecuteOptions,
+	configured runtimeSessionOptions,
 ) (*sessionHandle, error) {
 	if err := p.checkOpen(); err != nil {
 		return nil, err
 	}
 
-	converted, err := encodeParameters(parameters)
+	converted, err := encodeParameters(configured.parameters)
 	if err != nil {
 		return nil, err
 	}
@@ -169,7 +122,7 @@ func (p *Plan) newSession(
 		ConnectionId:      p.client.connectionProto(),
 		PlanId:            &wirev1.PlanId{Value: p.id},
 		Parameters:        converted,
-		OutputContentType: options.OutputContentType,
+		OutputContentType: configured.outputContentType,
 	})
 	if err != nil {
 		return nil, allocationRPCError(err)

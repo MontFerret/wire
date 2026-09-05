@@ -9,7 +9,7 @@ import (
 )
 
 type remotePlan struct {
-	plan *Plan
+	plan *planHandle
 }
 
 var _ api.Plan = (*remotePlan)(nil)
@@ -22,7 +22,7 @@ func (p *remotePlan) Params() []string {
 	return p.plan.Parameters()
 }
 
-func (p *remotePlan) NewSession(ctx context.Context, options ...api.SessionOption) (Session, error) {
+func (p *remotePlan) NewSession(ctx context.Context, options ...api.SessionOption) (api.Session, error) {
 	if p == nil || p.plan == nil {
 		return nil, ErrClosed
 	}
@@ -41,9 +41,7 @@ func (p *remotePlan) NewSession(ctx context.Context, options ...api.SessionOptio
 		return nil, err
 	}
 
-	session, err := p.plan.newSession(creationCtx, configured.parameters, ExecuteOptions{
-		OutputContentType: configured.outputContentType,
-	})
+	session, err := p.plan.newSession(creationCtx, configured)
 	cancel()
 	if err != nil {
 		return nil, p.plan.client.reclaimAllocation(ctx, err, p.plan.Close)
@@ -80,9 +78,7 @@ func (p *remotePlan) NewDebugSession(
 		return nil, err
 	}
 
-	session, err := p.plan.NewDebugSession(creationCtx, configured.parameters, DebugSessionOptions{
-		OutputContentType: configured.outputContentType,
-	})
+	session, err := p.plan.NewDebugSession(creationCtx, configured)
 	cancel()
 	if err != nil {
 		return nil, p.plan.client.reclaimAllocation(ctx, err, p.plan.Close)

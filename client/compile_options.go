@@ -7,16 +7,6 @@ import (
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
 )
 
-// CompileOptions controls runtime plan construction.
-type CompileOptions struct {
-	Debuggable bool
-
-	// PlanOptions are applied once, in order, before dispatch. Omitting an
-	// optimization option preserves the hosted runtime's default, while
-	// api.WithOptimizationLevel(api.OptimizationNone) explicitly disables it.
-	PlanOptions []api.PlanOption
-}
-
 func encodeCompileOptions(level api.OptimizationLevel, present bool) (*wirev1.CompileOptions, error) {
 	if !present {
 		return nil, nil

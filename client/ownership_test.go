@@ -25,10 +25,12 @@ type handleServer struct {
 	wirev1.UnimplementedRuntimeServiceServer
 	wirev1.UnimplementedPlanServiceServer
 	wirev1.UnimplementedExecutionServiceServer
+	wirev1.UnimplementedSessionServiceServer
 	wirev1.UnimplementedDebugServiceServer
 
 	mu                      sync.Mutex
 	connections             int
+	sessions                int
 	executions              int
 	calls                   []string
 	releasePlanCalls        int
@@ -111,20 +113,31 @@ func (s *handleServer) ReleasePlan(_ context.Context, request *wirev1.ReleasePla
 	return &wirev1.ReleasePlanResponse{}, nil
 }
 
-func (s *handleServer) Execute(_ context.Context, request *wirev1.ExecuteRequest) (*wirev1.ExecuteResponse, error) {
+func (s *handleServer) CreateSession(_ context.Context, request *wirev1.CreateSessionRequest) (*wirev1.CreateSessionResponse, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.sessions++
+	s.calls = append(s.calls, call("new-session", request.GetConnectionId().GetValue(), request.GetPlanId().GetValue()))
+	id := fmt.Sprintf("session-%d", s.sessions)
+
+	return &wirev1.CreateSessionResponse{Session: &wirev1.Session{Id: &wirev1.SessionId{Value: id}}}, nil
+}
+
+func (s *handleServer) ReleaseSession(_ context.Context, request *wirev1.ReleaseSessionRequest) (*wirev1.ReleaseSessionResponse, error) {
+	s.record("release-session", request.GetConnectionId().GetValue(), request.GetSessionId().GetValue())
+
+	return &wirev1.ReleaseSessionResponse{}, nil
+}
+
+func (s *handleServer) RunSession(_ context.Context, request *wirev1.RunSessionRequest) (*wirev1.RunSessionResponse, error) {
 	s.mu.Lock()
 	s.executions++
 	id := fmt.Sprintf("execution-%d", s.executions)
-	s.calls = append(s.calls, call("execute", request.GetConnectionId().GetValue(), request.GetPlanId().GetValue()))
+	s.calls = append(s.calls, call("run-session", request.GetConnectionId().GetValue(), request.GetSessionId().GetValue()))
 	s.mu.Unlock()
 
-	return &wirev1.ExecuteResponse{Execution: executionProto(id)}, nil
-}
-
-func (s *handleServer) CancelExecution(_ context.Context, request *wirev1.CancelExecutionRequest) (*wirev1.CancelExecutionResponse, error) {
-	s.record("cancel", request.GetConnectionId().GetValue(), request.GetExecutionId().GetValue())
-
-	return &wirev1.CancelExecutionResponse{}, nil
+	return &wirev1.RunSessionResponse{Execution: executionProto(id)}, nil
 }
 
 func (s *handleServer) ReleaseExecution(_ context.Context, request *wirev1.ReleaseExecutionRequest) (*wirev1.ReleaseExecutionResponse, error) {
@@ -202,12 +215,6 @@ func (s *handleServer) StepOut(_ context.Context, request *wirev1.StepOutRequest
 	s.record("step-out", request.GetConnectionId().GetValue(), request.GetDebugSessionId().GetValue())
 
 	return &wirev1.StepOutResponse{}, nil
-}
-
-func (s *handleServer) Terminate(_ context.Context, request *wirev1.TerminateRequest) (*wirev1.TerminateResponse, error) {
-	s.record("stop", request.GetConnectionId().GetValue(), request.GetDebugSessionId().GetValue())
-
-	return &wirev1.TerminateResponse{}, nil
 }
 
 func (s *handleServer) SetBreakpoint(_ context.Context, request *wirev1.SetBreakpointRequest) (*wirev1.SetBreakpointResponse, error) {
@@ -314,29 +321,26 @@ func TestHandleOperationsUseBoundOwnerResources(t *testing.T) {
 	first := openHandleClient(t, connection)
 	second := openHandleClient(t, connection)
 
-	plan, err := first.Compile(testClientContext(t), api.Source{Content: "RETURN @input"}, CompileOptions{Debuggable: true})
+	plan, err := first.compileConfigured(testClientContext(t), api.Source{Content: "RETURN @input"}, true, runtimePlanOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	parameters := plan.Parameters()
 	parameters[0] = "changed"
-	if got := plan.Parameters(); !slices.Equal(got, []string{"input"}) || !plan.Debuggable() {
-		t.Fatalf("plan metadata was not immutable: %v, %v", got, plan.Debuggable())
+	if got := plan.Parameters(); !slices.Equal(got, []string{"input"}) {
+		t.Fatalf("plan metadata was not immutable: %v", got)
 	}
 
 	if err := second.Close(testClientContext(t)); err != nil {
 		t.Fatal(err)
 	}
 
-	firstExecution, err := plan.Execute(testClientContext(t), Parameters{"input": 1}, ExecuteOptions{})
+	firstExecution, err := startTestPlanExecution(testClientContext(t), plan, map[string]any{"input": 1})
 	if err != nil {
 		t.Fatal(err)
 	}
-	secondExecution, err := plan.Execute(testClientContext(t), Parameters{"input": 2}, ExecuteOptions{})
+	secondExecution, err := startTestPlanExecution(testClientContext(t), plan, map[string]any{"input": 2})
 	if err != nil {
-		t.Fatal(err)
-	}
-	if err := firstExecution.Cancel(testClientContext(t)); err != nil {
 		t.Fatal(err)
 	}
 	executionEvents, err := firstExecution.Watch(testClientContext(t))
@@ -347,23 +351,23 @@ func TestHandleOperationsUseBoundOwnerResources(t *testing.T) {
 		t.Fatalf("unexpected execution event: %#v, %v", event, err)
 	}
 
-	debug, err := plan.NewDebugSession(testClientContext(t), nil, DebugSessionOptions{})
+	debug, err := plan.NewDebugSession(testClientContext(t), runtimeSessionOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	for name, command := range map[string]func(context.Context) error{
 		"start": debug.Start, "continue": debug.Continue, "pause": debug.Pause,
-		"step-over": debug.StepOver, "step-in": debug.StepIn, "step-out": debug.StepOut, "stop": debug.Stop,
+		"step-over": debug.StepOver, "step-in": debug.StepIn, "step-out": debug.StepOut,
 	} {
 		if err := command(testClientContext(t)); err != nil {
 			t.Fatalf("%s failed: %v", name, err)
 		}
 	}
 
-	breakpoint, err := debug.SetBreakpoint(testClientContext(t), source.Location{
+	breakpoint, err := debug.SetBreakpointAt(testClientContext(t), source.Location{
 		Position:   source.Position{Line: 1},
 		SourceName: "query.fql",
-	})
+	}, debugger.BreakpointOptions{BindingMode: debugger.BreakpointBindNextExecutableInSource})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -425,14 +429,13 @@ func TestHandleOperationsUseBoundOwnerResources(t *testing.T) {
 
 	want := []string{
 		call("compile", "connection-1", ""),
-		call("execute", "connection-1", "plan-connection-1"),
-		call("execute", "connection-1", "plan-connection-1"),
-		call("cancel", "connection-1", "execution-1"),
+		call("run-session", "connection-1", "session-1"),
+		call("run-session", "connection-1", "session-2"),
 		call("watch-execution", "connection-1", "execution-1"),
 		call("new-debug", "connection-1", "plan-connection-1"),
 	}
 	debugID := "debug-connection-1"
-	for _, name := range []string{"start", "continue", "pause", "step-over", "step-in", "step-out", "stop", "set-breakpoint", "delete-breakpoint", "frames", "frame-locals", "variables", "evaluate", "watch-debug", "release-debug"} {
+	for _, name := range []string{"start", "continue", "pause", "step-over", "step-in", "step-out", "set-breakpoint", "delete-breakpoint", "frames", "frame-locals", "variables", "evaluate", "watch-debug", "release-debug"} {
 		want = append(want, call(name, "connection-1", debugID))
 	}
 	want = append(want,
@@ -458,9 +461,9 @@ func TestHandleOperationsUseBoundOwnerResources(t *testing.T) {
 	}
 }
 
-func openHandleClient(t *testing.T, connection grpc.ClientConnInterface) *Client {
+func openHandleClient(t *testing.T, connection grpc.ClientConnInterface) *connectionHandle {
 	t.Helper()
-	client, err := New(testClientContext(t), connection)
+	client, err := newConnection(testClientContext(t), connection)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -480,6 +483,7 @@ func startHandleServer(t *testing.T, implementation *handleServer) *grpc.ClientC
 	wirev1.RegisterRuntimeServiceServer(server, implementation)
 	wirev1.RegisterPlanServiceServer(server, implementation)
 	wirev1.RegisterExecutionServiceServer(server, implementation)
+	wirev1.RegisterSessionServiceServer(server, implementation)
 	wirev1.RegisterDebugServiceServer(server, implementation)
 	serveDone := make(chan error, 1)
 	go func() { serveDone <- server.Serve(listener) }()
@@ -526,4 +530,15 @@ func countCall(calls []string, target string) int {
 	}
 
 	return count
+}
+
+// startTestPlanExecution creates the private session/execution subtree exercised
+// by handle ownership tests. The fixture's plan or connection owns final cleanup.
+func startTestPlanExecution(ctx context.Context, plan *planHandle, parameters map[string]any) (*executionHandle, error) {
+	session, err := plan.newSession(ctx, runtimeSessionOptions{parameters: parameters})
+	if err != nil {
+		return nil, err
+	}
+
+	return session.run(ctx)
 }

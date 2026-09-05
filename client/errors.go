@@ -22,12 +22,12 @@ type Error struct {
 }
 
 var (
-	// ErrClosed reports an operation attempted through a closed Client or resource
+	// ErrClosed reports an operation attempted through a closed runtime or resource
 	// handle. Closing begins when the first Close call commits teardown.
 	ErrClosed = errors.New("Wire client or resource is closed")
 
 	// ErrExecutionCancelled reports that a remote execution reached its cancelled
-	// terminal state. It is distinct from cancellation of a Wait caller's context.
+	// terminal state. It is distinct from cancellation of the caller's context.
 	ErrExecutionCancelled = errors.New("remote execution was cancelled")
 )
 
