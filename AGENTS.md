@@ -221,7 +221,8 @@ contract crosses layers:
 | Protobuf/API compatibility | Buf lint and breaking checks |
 | Server request semantics | `server/internal/grpcserver` tests |
 | Logical ownership and limits | `server/internal/core` lifecycle tests |
-| Unified runtime adaptation | `server` integration tests using Unified API fakes |
+| Public Universal API round trips | `test/integration` using the public client/server and hosted API spies |
+| Low-level facade and protocol integration | `server` integration tests |
 | Cancellation and cleanup | Lifecycle and integration tests |
 | Debugger commands and inspection | Core and integration debugger tests |
 | Client facade and conversions | `client` contract tests |

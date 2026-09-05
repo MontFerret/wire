@@ -256,4 +256,13 @@ make test-race
 make build
 ```
 
-Tests use in-memory `bufconn` transports and direct lifecycle coverage. CI invokes these Make targets on Linux, macOS, and Windows; Linux additionally runs the race detector, Buf lint, checked generation, and pull-request breaking checks against the fetched base branch.
+The [Universal API integration suite](test/integration/README.md) exercises the
+public client/server boundary over real gRPC using an in-memory `bufconn`
+transport and hosted API spies. Run it independently with
+`go test ./test/integration/...` or `go test -race ./test/integration/...`.
+Package-local tests retain component, conversion, and low-level protocol coverage.
+
+CI invokes these Make targets on Linux, macOS, and Windows; Linux additionally
+runs the race detector, Buf lint, checked generation, and pull-request breaking
+checks against the fetched base branch. The integration suite is included in
+the existing `./...` targets without build tags or extra services.

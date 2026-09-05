@@ -30,12 +30,3 @@ func applyAPIOptions(options []api.SessionOption) (apiSessionOptions, error) {
 
 	return configured, nil
 }
-
-func cloneOptimizationLevels(values []contractPlanOptions) []api.OptimizationLevel {
-	result := make([]api.OptimizationLevel, len(values))
-	for index, value := range values {
-		result[index] = value.optimizationLevel
-	}
-
-	return result
-}

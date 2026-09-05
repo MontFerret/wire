@@ -21,11 +21,14 @@ func remoteDebuggerEvent(event wiredebugger.Event) (*debugger.Event, bool, error
 		return nil, false, snapshot.Failure
 	case wiredebugger.StateStopped:
 		result := &debugger.Event{
-			Error:            snapshot.Failure,
 			Reason:           snapshot.StopReason,
 			HitBreakpointIDs: append([]debugger.BreakpointID(nil), snapshot.HitBreakpointIDs...),
 			Depth:            snapshot.Depth,
 		}
+		if snapshot.Failure != nil {
+			result.Error = snapshot.Failure
+		}
+
 		if snapshot.Location != nil {
 			result.Location = *snapshot.Location
 		}
