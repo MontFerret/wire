@@ -15,20 +15,26 @@ import (
 	"google.golang.org/grpc"
 )
 
-// Server hosts Ferret Wire over a caller-supplied listener. It borrows the
-// runtime passed to NewServer and never closes it.
-type Server struct {
-	grpcServer *grpc.Server
-	lifecycle  *core.Lifecycle
+type (
+	// Runtime is the canonical api.Runtime contract accepted by NewServer.
+	// The host configures and owns the implementation; Wire never closes it.
+	Runtime = api.Runtime
 
-	serveMu  sync.Mutex
-	serving  bool
-	shutdown lifecycle.Close
-}
+	// Server hosts Ferret Wire over a caller-supplied listener. It borrows the
+	// runtime passed to NewServer and never closes it.
+	Server struct {
+		grpcServer *grpc.Server
+		lifecycle  *core.Lifecycle
+
+		serveMu  sync.Mutex
+		serving  bool
+		shutdown lifecycle.Close
+	}
+)
 
 // NewServer adapts a caller-configured runtime without taking ownership
 // or creating a listener. Limits default to DefaultLimits.
-func NewServer(runtime api.Runtime, options ...Option) (*Server, error) {
+func NewServer(runtime Runtime, options ...Option) (*Server, error) {
 	configured := config{limits: DefaultLimits()}
 	for _, option := range options {
 		if option == nil {

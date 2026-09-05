@@ -25,7 +25,7 @@ type (
 		t                  *testing.T
 		env                *integrationEnv
 		gate               *allocationResponseGate
-		remote             *client.Runtime
+		remote             client.Runtime
 		plan               api.Plan
 		session            api.Session
 		operation          allocationOperation

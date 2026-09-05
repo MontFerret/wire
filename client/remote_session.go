@@ -12,24 +12,24 @@ type remoteSession struct {
 
 var _ api.Session = (*remoteSession)(nil)
 
-func (s *remoteSession) Run(ctx context.Context) (api.Output, error) {
+func (s *remoteSession) Run(ctx context.Context) (Output, error) {
 	if s == nil || s.session == nil {
-		return api.Output{}, ErrClosed
+		return Output{}, ErrClosed
 	}
 
 	if err := ctx.Err(); err != nil {
-		return api.Output{}, err
+		return Output{}, err
 	}
 
 	creationCtx, cancel, err := runtimeAllocationContext(ctx)
 	if err != nil {
-		return api.Output{}, err
+		return Output{}, err
 	}
 
 	execution, err := s.session.run(creationCtx)
 	cancel()
 	if err != nil {
-		return api.Output{}, s.session.client.reclaimAllocation(ctx, err, s.session.Close, s.session.plan.Close)
+		return Output{}, s.session.client.reclaimAllocation(ctx, err, s.session.Close, s.session.plan.Close)
 	}
 
 	return execution.waitAndRelease(ctx)

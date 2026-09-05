@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 
-	"github.com/MontFerret/api"
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
 )
 
@@ -59,10 +58,10 @@ func (p *Plan) Debuggable() bool {
 // Run executes the plan once, waits for encoded output, and releases the
 // execution it creates. Execution and release errors are joined. The caller
 // retains ownership of the Plan.
-func (p *Plan) Run(ctx context.Context, parameters Parameters, options ExecuteOptions) (api.Output, error) {
+func (p *Plan) Run(ctx context.Context, parameters Parameters, options ExecuteOptions) (Output, error) {
 	execution, err := p.Execute(ctx, parameters, options)
 	if err != nil {
-		return api.Output{}, err
+		return Output{}, err
 	}
 
 	output, waitErr := execution.Wait(ctx)

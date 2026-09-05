@@ -32,6 +32,14 @@ Runtime implementations must never depend on Wire. Wire must not absorb DAP, LSP
 transport-security, or host-configuration semantics for downstream
 convenience.
 
+The public `client.Runtime`, `client.Session`, and `client.Output` names are
+convenience aliases of `api.Runtime`, `api.Session`, and `api.Output`;
+`server.Runtime` also aliases `api.Runtime`. Output's canonical definition is
+`api/result.Output`. Aliases preserve type identity and leave semantic ownership
+with the API. `client.NewRuntime` returns the canonical runtime interface backed
+by a private Wire adapter. The existing lower-level `client.Plan` and
+`client.DebugSession` handles retain their separate Wire lifecycle contracts.
+
 ## gRPC service composition
 
 `grpcserver.Server` constructs and registers five dedicated implementations.

@@ -53,7 +53,7 @@ See [Wire Protocol](docs/protocol.md) for every RPC/message/enum, lifecycle and 
 The host chooses and configures both the runtime implementation and endpoint. This function accepts caller-owned values and does not close either one:
 
 ```go
-func serveRuntime(ctx context.Context, hostRuntime api.Runtime, listener net.Listener) error {
+func serveRuntime(ctx context.Context, hostRuntime server.Runtime, listener net.Listener) error {
     wireServer, err := server.NewServer(hostRuntime, server.WithRuntimeIdentity(execution.Identity{
         Name: "my-app", Version: "1.0.0", InstanceID: "worker-1",
     }))
@@ -64,6 +64,10 @@ func serveRuntime(ctx context.Context, hostRuntime api.Runtime, listener net.Lis
     return wireServer.Serve(ctx, listener)
 }
 ```
+
+`server.Runtime` aliases the canonical `api.Runtime` interface. The alias lets
+host-facing function signatures use the server package without changing runtime
+ownership or requiring an adapter.
 
 For an application-private Unix socket, the caller creates `net.Listen("unix", socket)`, applies appropriate directory and socket permissions, and closes both the listener and runtime after the Wire server has shut down.
 
@@ -96,10 +100,21 @@ if err != nil {
 fmt.Printf("%s: %s\n", output.ContentType, output.Content)
 ```
 
-`client.Runtime` implements `api.Runtime`. Its returned Plans, normal Sessions,
-and debugger Sessions implement the corresponding Universal API interfaces.
+`NewRuntime` returns `client.Runtime`, an alias of the canonical `api.Runtime`
+interface backed by a private Wire adapter. `client.Session` aliases
+`api.Session`, and `client.Output` aliases `api.Output`, whose definition belongs
+to `github.com/MontFerret/api/result`. These aliases preserve canonical type
+identity. Plans and debugger Sessions use `api.Plan` and `api/debugger.Session`;
+their Wire adapters remain private. Source constructors, options, and debugger
+inspection types remain in their canonical packages.
+
 Plans and durable Sessions may be reused; normal Session runs are sequential.
 All adapter `Close` methods use bounded detached cleanup and never close `conn`.
+
+Code that explicitly declared `*client.Runtime` must now use `client.Runtime`.
+The inferred `remoteRuntime, err := client.NewRuntime(ctx, conn)` usage above is
+unchanged. The lower-level `client.Plan` and `client.DebugSession` handles keep
+their existing names and methods.
 
 Allocation replies that race cancellation are reclaimed automatically. If a
 reply is lost, the adapter closes the nearest owning Session or Plan and

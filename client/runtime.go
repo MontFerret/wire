@@ -8,44 +8,46 @@ import (
 	"google.golang.org/grpc"
 )
 
-// Runtime is a remote implementation of the Universal Ferret API. It owns
+// remoteRuntime is a remote implementation of the Universal Ferret API. It owns
 // one logical Wire client and borrows the caller's gRPC transport.
-type Runtime struct {
+type remoteRuntime struct {
 	client *Client
 }
 
-var _ api.Runtime = (*Runtime)(nil)
+var _ api.Runtime = (*remoteRuntime)(nil)
 
 // NewRuntime opens a logical Wire connection and exposes it through the
-// Universal Ferret API. Closing the Runtime never closes connection.
-func NewRuntime(ctx context.Context, connection grpc.ClientConnInterface) (*Runtime, error) {
+// canonical api.Runtime interface. The private adapter releases its resources
+// with bounded detached cleanup; closing it never closes connection.
+// On failure, NewRuntime returns a nil Runtime and the connection error.
+func NewRuntime(ctx context.Context, connection grpc.ClientConnInterface) (Runtime, error) {
 	wireClient, err := New(ctx, connection)
 	if err != nil {
 		return nil, err
 	}
 
-	return &Runtime{client: wireClient}, nil
+	return &remoteRuntime{client: wireClient}, nil
 }
 
 // Run invokes the hosted Runtime.Run operation once and releases the temporary
 // Wire execution used to preserve cancellation, output, and failure semantics.
-func (r *Runtime) Run(ctx context.Context, src api.Source, options ...api.SessionOption) (api.Output, error) {
+func (r *remoteRuntime) Run(ctx context.Context, src api.Source, options ...api.SessionOption) (Output, error) {
 	if r == nil || r.client == nil {
-		return api.Output{}, ErrClosed
+		return Output{}, ErrClosed
 	}
 
 	if err := ctx.Err(); err != nil {
-		return api.Output{}, err
+		return Output{}, err
 	}
 
 	configured, err := applyRuntimeSessionOptions(options)
 	if err != nil {
-		return api.Output{}, err
+		return Output{}, err
 	}
 
 	creationCtx, cancel, err := runtimeAllocationContext(ctx)
 	if err != nil {
-		return api.Output{}, err
+		return Output{}, err
 	}
 
 	execution, err := r.client.run(creationCtx, src, configured.parameters, ExecuteOptions{
@@ -53,23 +55,23 @@ func (r *Runtime) Run(ctx context.Context, src api.Source, options ...api.Sessio
 	})
 	cancel()
 	if err != nil {
-		return api.Output{}, r.client.reclaimAllocation(ctx, err)
+		return Output{}, r.client.reclaimAllocation(ctx, err)
 	}
 
 	return execution.waitAndRelease(ctx)
 }
 
 // Compile creates a reusable remote Universal API Plan.
-func (r *Runtime) Compile(ctx context.Context, src api.Source, options ...api.PlanOption) (api.Plan, error) {
+func (r *remoteRuntime) Compile(ctx context.Context, src api.Source, options ...api.PlanOption) (api.Plan, error) {
 	return r.compile(ctx, src, false, options)
 }
 
 // CompileDebug creates a reusable remote Plan with debugger metadata.
-func (r *Runtime) CompileDebug(ctx context.Context, src api.Source, options ...api.PlanOption) (api.Plan, error) {
+func (r *remoteRuntime) CompileDebug(ctx context.Context, src api.Source, options ...api.PlanOption) (api.Plan, error) {
 	return r.compile(ctx, src, true, options)
 }
 
-func (r *Runtime) compile(
+func (r *remoteRuntime) compile(
 	ctx context.Context,
 	src api.Source,
 	debuggable bool,
@@ -109,7 +111,7 @@ func (r *Runtime) compile(
 }
 
 // Close releases the logical Wire connection and all of its remote resources.
-func (r *Runtime) Close() error {
+func (r *remoteRuntime) Close() error {
 	if r == nil || r.client == nil {
 		return ErrClosed
 	}

@@ -9,10 +9,10 @@ clients. It owns one logical Wire connection while borrowing the caller's
 Remote resources are exposed as opaque, typed handles:
 
 ```text
-Runtime (implements api.Runtime)
+Runtime (= api.Runtime; private Wire implementation)
 └── private Universal API adapters
     ├── api.Plan
-    │   ├── api.Session
+    │   ├── Session (= api.Session)
     │   └── debugger.Session
     └── temporary Execution handles
 
@@ -22,13 +22,34 @@ Client (lower-level Wire facade)
     └── DebugSession
 ```
 
-`NewRuntime(ctx, conn)` is the Universal API-first entry point. `Runtime` owns
-one logical `Client`, while the returned Plan, normal Session, and debugger
-adapters remain private implementation types behind their Universal API
-interfaces. `Runtime.Run` uses `RuntimeService.Run` to call the hosted
+`NewRuntime(ctx, conn)` is the Universal API-first entry point. It returns
+`Runtime`, an alias of `api.Runtime`, backed by a private `remoteRuntime` that
+owns one logical `Client`. The returned Plan, normal Session, and debugger
+adapters also remain private behind their Universal API interfaces.
+The runtime adapter's `Run` uses `RuntimeService.Run` to call the hosted
 `api.Runtime.Run` directly. A normal Session is created remotely once and each sequential `Run` uses a hidden
 Execution that is watched and released before returning. Closing any adapter
 uses the 30-second detached cleanup bound; closing Runtime never closes `conn`.
+
+The client re-exports three canonical types for ordinary remote-runtime use:
+
+| Alias | Canonical contract | Ordinary use |
+| --- | --- | --- |
+| `client.Runtime` | `api.Runtime` | Store or pass the runtime returned by `NewRuntime`. |
+| `client.Session` | `api.Session` | Store or pass reusable normal sessions created by a plan. |
+| `client.Output` | `api.Output`, defined in `api/result` | Consume encoded execution results. |
+
+These are true Go aliases: ownership and type identity stay in
+`github.com/MontFerret/api` and its canonical subpackages. Source construction,
+options, diagnostics, debugger inspection values, and shared Wire snapshots
+continue to use their owning packages. The existing `client.Plan` and
+`client.DebugSession` names denote lower-level Wire handles; the Universal API
+workflow returns `api.Plan` and `api/debugger.Session` instead.
+
+`client.Runtime` was previously an exported concrete adapter. Explicit
+`*client.Runtime` declarations must become `client.Runtime`; inferred
+`remote, err := client.NewRuntime(ctx, conn)` calls remain unchanged. Constructor
+failures return a nil interface and the existing error.
 
 `Client` compiles plans. A `Plan` executes its compiled program and creates
 debug sessions. Execution and debugger operations live on their respective
@@ -197,8 +218,8 @@ The ownership boundary is explicit:
 
 `Execution.Wait` opens a fresh watch, ignores non-terminal snapshots, and
 returns when the execution completes, fails, or is remotely cancelled. The
-method, along with `Client.Run` and `Plan.Run`, returns `api.Output`. Failed
-terminal snapshots return `*failure.Failure`; remote cancellation returns
+method, along with `Client.Run` and `Plan.Run`, returns `Output`, the alias of
+`api.Output`. Failed terminal snapshots return `*failure.Failure`; remote cancellation returns
 `client.ErrExecutionCancelled`. Cancellation of the caller's waiting context
 instead returns that context's error.
 
