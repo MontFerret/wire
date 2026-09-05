@@ -11,12 +11,12 @@ import (
 	"github.com/MontFerret/wire/pkg/failure"
 )
 
-func TestRunRuntimeUsesBorrowedRuntimeWithoutPlan(t *testing.T) {
+func TestRunUsesBorrowedRuntimeWithoutPlan(t *testing.T) {
 	hosted := &spyRuntime{run: func(_ context.Context, _ api.Source, options sessionOptions) (api.Output, error) {
 		return api.Output{ContentType: options.contentType, Content: []byte("direct")}, nil
 	}}
 	connection := newTestConnection(t, hosted)
-	run, err := connection.RunRuntime(context.Background(), RunRuntimeInput{
+	run, err := connection.Run(context.Background(), RunInput{
 		Source:            api.Source{Name: "direct.fql", Content: "RETURN @input"},
 		Parameters:        map[string]any{"input": int64(7)},
 		OutputContentType: "text/plain",
@@ -24,11 +24,17 @@ func TestRunRuntimeUsesBorrowedRuntimeWithoutPlan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	if run.Snapshot.State != wireexecution.StateRunning {
+		t.Fatalf("direct Run did not return the initial running snapshot: %+v", run)
+	}
+
 	terminal := waitExecution(t, connection, run.ID)
 	if terminal.State != wireexecution.StateCompleted || terminal.Output == nil ||
 		terminal.Output.ContentType != "text/plain" || string(terminal.Output.Content) != "direct" {
 		t.Fatalf("unexpected direct runtime execution: %#v", terminal)
 	}
+
 	if ids := connection.host.plans.listByOwner(connection.ID()); len(ids) != 0 {
 		t.Fatalf("direct Runtime.Run created Plans: %#v", ids)
 	}
@@ -43,17 +49,18 @@ func TestRunRuntimeUsesBorrowedRuntimeWithoutPlan(t *testing.T) {
 		!reflect.DeepEqual(options[0].params, map[string]any{"input": int64(7)}) {
 		t.Fatalf("unexpected Runtime.Run delegation: sources=%#v options=%#v", sources, options)
 	}
+
 	if err := connection.ReleaseExecution(testContext(t), run.ID); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func TestRunRuntimePanicIsContainedAsInternalFailure(t *testing.T) {
+func TestRunPanicIsContainedAsInternalFailure(t *testing.T) {
 	hosted := &spyRuntime{run: func(context.Context, api.Source, sessionOptions) (api.Output, error) {
 		panic("runtime secret")
 	}}
 	connection := newTestConnection(t, hosted)
-	run, err := connection.RunRuntime(context.Background(), RunRuntimeInput{
+	run, err := connection.Run(context.Background(), RunInput{
 		Source: api.Source{Content: "RETURN 1"},
 	})
 	if err != nil {
@@ -65,6 +72,7 @@ func TestRunRuntimePanicIsContainedAsInternalFailure(t *testing.T) {
 		terminal.Failure.Message != "runtime operation failed" {
 		t.Fatalf("runtime panic crossed the boundary: %#v", terminal)
 	}
+
 	if err := connection.ReleaseExecution(testContext(t), run.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -74,17 +82,19 @@ func TestRunRuntimePanicIsContainedAsInternalFailure(t *testing.T) {
 	}
 }
 
-func TestRunRuntimeRejectsCancelledAndInvalidRequestsBeforeAllocation(t *testing.T) {
+func TestRunRejectsCancelledAndInvalidRequestsBeforeAllocation(t *testing.T) {
 	hosted := &spyRuntime{}
 	connection := newTestConnection(t, hosted)
 	cancelled, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := connection.RunRuntime(cancelled, RunRuntimeInput{Source: api.Source{Content: "RETURN 1"}}); !errors.Is(err, context.Canceled) {
+	if _, err := connection.Run(cancelled, RunInput{Source: api.Source{Content: "RETURN 1"}}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled direct run was admitted: %v", err)
 	}
-	if _, err := connection.RunRuntime(context.Background(), RunRuntimeInput{}); !hasCategory(err, ErrorKindInvalidRequest) {
+
+	if _, err := connection.Run(context.Background(), RunInput{}); !hasCategory(err, ErrorKindInvalidRequest) {
 		t.Fatalf("empty direct source was admitted: %v", err)
 	}
+
 	if ids := connection.host.executions.listByOwner(connection.ID()); len(ids) != 0 {
 		t.Fatalf("rejected direct runs leaked executions: %#v", ids)
 	}

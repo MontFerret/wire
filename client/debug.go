@@ -41,12 +41,12 @@ func (p *Plan) NewDebugSession(ctx context.Context, parameters Parameters, optio
 		OutputContentType: options.OutputContentType,
 	})
 	if err != nil {
-		return nil, decodeError(err)
+		return nil, allocationRPCError(err)
 	}
 
 	value := response.GetSession()
 	if value == nil || value.GetId().GetValue() == "" {
-		return nil, errors.New("Wire server returned an invalid debug session")
+		return nil, &allocationError{cause: errors.New("Wire server returned an invalid debug session")}
 	}
 
 	return &DebugSession{client: p.client, plan: p, id: value.GetId().GetValue(), close: &closeState{}}, nil

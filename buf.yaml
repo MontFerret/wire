@@ -10,3 +10,10 @@ lint:
 breaking:
   use:
     - FILE
+    - PACKAGE_SERVICE_NO_DELETE
+  # RuntimeService moved to runtime_service.proto so Run can reference Execution
+  # without a cycle through the shared runtime messages. Package and RPC checks
+  # still protect the service, its methods, signatures, and streaming contracts.
+  ignore_only:
+    SERVICE_NO_DELETE:
+      - proto/ferret/wire/v1/runtime.proto

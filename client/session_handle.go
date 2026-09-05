@@ -15,7 +15,7 @@ type sessionHandle struct {
 	close  *closeState
 }
 
-func (p *Plan) newRuntimeSession(
+func (p *Plan) newSession(
 	ctx context.Context,
 	parameters Parameters,
 	options ExecuteOptions,
@@ -36,12 +36,12 @@ func (p *Plan) newRuntimeSession(
 		OutputContentType: options.OutputContentType,
 	})
 	if err != nil {
-		return nil, decodeError(err)
+		return nil, allocationRPCError(err)
 	}
 
 	value := response.GetSession()
 	if value == nil || value.GetId().GetValue() == "" {
-		return nil, errors.New("Wire server returned an invalid session")
+		return nil, &allocationError{cause: errors.New("Wire server returned an invalid session")}
 	}
 
 	return &sessionHandle{
@@ -62,7 +62,7 @@ func (s *sessionHandle) run(ctx context.Context) (*Execution, error) {
 		SessionId:    &wirev1.SessionId{Value: s.id},
 	})
 	if err != nil {
-		return nil, decodeError(err)
+		return nil, allocationRPCError(err)
 	}
 
 	return newExecutionHandle(s.client, s.plan, s, response.GetExecution())

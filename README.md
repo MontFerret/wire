@@ -33,7 +33,7 @@ Unary execution and debug resume calls publish work before returning. Once publi
 
 - `Compile` and `CompileDebug` create the same reusable Plan resource, containing only its opaque ID and declared parameters. Optional optimization levels map to Unified API plan options; an unspecified level preserves the runtime default.
 - `CreateSession` constructs one durable hosted `api.Session`. `RunSession` reuses it for sequential runs and represents every run as a distinct asynchronous Execution; overlap is rejected until the prior Execution is released.
-- `RunRuntime` invokes the hosted `api.Runtime.Run` directly and represents that one-shot operation as a connection-owned asynchronous Execution. It does not compile a temporary Plan.
+- `RuntimeService.Run` invokes the hosted `api.Runtime.Run` directly and represents that one-shot operation as a connection-owned asynchronous Execution. It does not compile a temporary Plan.
 - Parameter values use an explicit protobuf oneof for null, boolean, exact signed 64-bit integer, finite double, string, bytes, array, or string-keyed object. Missing variants, NaN, infinities, custom values, and nesting beyond 64 levels are rejected. In protobuf JSON, int64 values are decimal strings while finite doubles remain JSON numbers.
 - Execution and debug completion carry one shared Unified API output contract unchanged: `content_type` plus encoded `content` bytes. Wire never decodes or reinterprets them.
 - Execution and debug watches carry ordered snapshots. State is the execution lifecycle discriminator; debug events also carry a kind because start and continue both publish a running state. A new debug session immediately publishes a created snapshot. Created, running, stopped, and terminal snapshots are replayable; watcher cancellation is independent of resource cancellation, and slow watchers are detached without blocking runtime work.
@@ -100,6 +100,12 @@ fmt.Printf("%s: %s\n", output.ContentType, output.Content)
 and debugger Sessions implement the corresponding Universal API interfaces.
 Plans and durable Sessions may be reused; normal Session runs are sequential.
 All adapter `Close` methods use bounded detached cleanup and never close `conn`.
+
+Allocation replies that race cancellation are reclaimed automatically. If a
+reply is lost, the adapter closes the nearest owning Session or Plan and
+escalates to its logical Runtime only when needed. The caller's gRPC transport
+remains open. See [allocation and cancellation](docs/client.md#allocation-and-cancellation)
+for the bounded cleanup contract.
 
 The lower-level `client.Client` remains available. Its common one-shot path creates and releases
 its plan and execution automatically:

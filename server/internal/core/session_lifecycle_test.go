@@ -40,10 +40,15 @@ func TestDurableSessionRunsSequentiallyOnOneHostedSession(t *testing.T) {
 	}
 
 	for range 2 {
-		run, err := connection.RunSession(context.Background(), created.ID)
+		run, err := connection.RunSession(context.Background(), created)
 		if err != nil {
 			t.Fatal(err)
 		}
+
+		if run.Snapshot.State != wireexecution.StateRunning {
+			t.Fatalf("Session.Run did not return the initial running snapshot: %+v", run)
+		}
+
 		terminal := waitExecution(t, connection, run.ID)
 		if terminal.State != wireexecution.StateCompleted || terminal.Output == nil ||
 			string(terminal.Output.Content) != `{"ok":true}` {
@@ -59,17 +64,20 @@ func TestDurableSessionRunsSequentiallyOnOneHostedSession(t *testing.T) {
 		!reflect.DeepEqual(sessionOptions[0].params, map[string]any{"input": int64(42)}) {
 		t.Fatalf("unexpected durable session options: %#v", sessionOptions)
 	}
+
 	if runCalls, closeCalls := runtimeSession.counts(); runCalls != 2 || closeCalls != 0 {
 		t.Fatalf("unexpected hosted session state before release: run=%d close=%d", runCalls, closeCalls)
 	}
 
-	if err := connection.ReleaseSession(testContext(t), created.ID); err != nil {
+	if err := connection.ReleaseSession(testContext(t), created); err != nil {
 		t.Fatal(err)
 	}
+
 	if runCalls, closeCalls := runtimeSession.counts(); runCalls != 2 || closeCalls != 1 {
 		t.Fatalf("unexpected hosted session state after release: run=%d close=%d", runCalls, closeCalls)
 	}
-	if err := connection.ReleaseSession(testContext(t), created.ID); !hasCategory(err, ErrorKindSessionNotFound) {
+
+	if err := connection.ReleaseSession(testContext(t), created); !hasCategory(err, ErrorKindSessionNotFound) {
 		t.Fatalf("released session ID did not become stale: %v", err)
 	}
 }
@@ -83,23 +91,24 @@ func TestDurableSessionRejectsOverlappingRunsUntilExecutionRelease(t *testing.T)
 		return api.Output{}, ctx.Err()
 	}}
 	connection, _, created := openTestSession(t, runtimeSession)
-	first, err := connection.RunSession(context.Background(), created.ID)
+	first, err := connection.RunSession(context.Background(), created)
 	if err != nil {
 		t.Fatal(err)
 	}
 	<-started
 
-	if _, err := connection.RunSession(context.Background(), created.ID); !hasCategory(err, ErrorKindInvalidState) {
+	if _, err := connection.RunSession(context.Background(), created); !hasCategory(err, ErrorKindInvalidState) {
 		t.Fatalf("overlapping session run was accepted: %v", err)
 	}
 
 	if err := connection.ReleaseExecution(testContext(t), first.ID); err != nil {
 		t.Fatal(err)
 	}
-	second, err := connection.RunSession(context.Background(), created.ID)
+	second, err := connection.RunSession(context.Background(), created)
 	if err != nil {
 		t.Fatalf("session was not reusable after execution release: %v", err)
 	}
+
 	if err := connection.ReleaseExecution(testContext(t), second.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +137,7 @@ func TestDurableSessionReleaseCancelsRunBeforeExactlyOnceClose(t *testing.T) {
 		},
 	}
 	connection, compiled, created := openTestSession(t, runtimeSession)
-	if _, err := connection.RunSession(context.Background(), created.ID); err != nil {
+	if _, err := connection.RunSession(context.Background(), created); err != nil {
 		t.Fatal(err)
 	}
 	<-started
@@ -136,7 +145,8 @@ func TestDurableSessionReleaseCancelsRunBeforeExactlyOnceClose(t *testing.T) {
 	if err := connection.ReleasePlan(testContext(t), compiled.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := connection.RunSession(context.Background(), created.ID); !hasCategory(err, ErrorKindSessionNotFound) {
+
+	if _, err := connection.RunSession(context.Background(), created); !hasCategory(err, ErrorKindSessionNotFound) {
 		t.Fatalf("released plan retained a session: %v", err)
 	}
 
@@ -146,6 +156,7 @@ func TestDurableSessionReleaseCancelsRunBeforeExactlyOnceClose(t *testing.T) {
 	if !reflect.DeepEqual(settledOrder, []string{"run", "close"}) {
 		t.Fatalf("session cleanup was not descendants-first: %#v", settledOrder)
 	}
+
 	if runCalls, closeCalls := runtimeSession.counts(); runCalls != 1 || closeCalls != 1 {
 		t.Fatalf("unexpected hosted session cleanup: run=%d close=%d", runCalls, closeCalls)
 	}
@@ -190,13 +201,13 @@ func TestSessionLimitCountsPendingAndClosingSessions(t *testing.T) {
 	}
 
 	creation := make(chan struct {
-		session SessionSnapshot
+		session SessionID
 		err     error
 	}, 1)
 	go func() {
 		session, createErr := connection.CreateSession(context.Background(), CreateSessionInput{PlanID: compiled.ID})
 		creation <- struct {
-			session SessionSnapshot
+			session SessionID
 			err     error
 		}{session: session, err: createErr}
 	}()
@@ -212,7 +223,7 @@ func TestSessionLimitCountsPendingAndClosingSessions(t *testing.T) {
 	}
 
 	release := make(chan error, 1)
-	go func() { release <- connection.ReleaseSession(context.Background(), created.session.ID) }()
+	go func() { release <- connection.ReleaseSession(context.Background(), created.session) }()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		if _, err := connection.CreateSession(context.Background(), CreateSessionInput{PlanID: compiled.ID}); hasCategory(err, ErrorKindResourceExhausted) {
@@ -220,6 +231,7 @@ func TestSessionLimitCountsPendingAndClosingSessions(t *testing.T) {
 		}
 		time.Sleep(time.Millisecond)
 	}
+
 	if _, err := connection.CreateSession(context.Background(), CreateSessionInput{PlanID: compiled.ID}); !hasCategory(err, ErrorKindResourceExhausted) {
 		t.Fatalf("closing session did not count against limit: %v", err)
 	}
@@ -232,12 +244,13 @@ func TestSessionLimitCountsPendingAndClosingSessions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("settled session did not release its limit slot: %v", err)
 	}
-	if err := connection.ReleaseSession(testContext(t), createdAgain.ID); err != nil {
+
+	if err := connection.ReleaseSession(testContext(t), createdAgain); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func openTestSession(t *testing.T, runtimeSession api.Session) (*testEnvironment, PlanSnapshot, SessionSnapshot) {
+func openTestSession(t *testing.T, runtimeSession api.Session) (*testEnvironment, PlanSnapshot, SessionID) {
 	t.Helper()
 	plan := &spyPlan{newSession: func(context.Context, sessionOptions) (api.Session, error) {
 		return runtimeSession, nil
@@ -281,7 +294,7 @@ func TestDurableSessionIsNotReusedAfterRuntimePanic(t *testing.T) {
 		panic("runtime defect")
 	}}
 	connection, _, created := openTestSession(t, runtimeSession)
-	run, err := connection.RunSession(context.Background(), created.ID)
+	run, err := connection.RunSession(context.Background(), created)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -289,16 +302,42 @@ func TestDurableSessionIsNotReusedAfterRuntimePanic(t *testing.T) {
 	if terminal.State != wireexecution.StateFailed || terminal.Failure == nil {
 		t.Fatalf("runtime panic did not fail the execution: %#v", terminal)
 	}
+
 	if err := connection.ReleaseExecution(testContext(t), run.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := connection.RunSession(context.Background(), created.ID); !hasCategory(err, ErrorKindInvalidState) {
+
+	if _, err := connection.RunSession(context.Background(), created); !hasCategory(err, ErrorKindInvalidState) {
 		t.Fatalf("poisoned hosted session was reused: %v", err)
 	}
-	if err := connection.ReleaseSession(testContext(t), created.ID); err != nil {
+
+	if err := connection.ReleaseSession(testContext(t), created); err != nil {
 		t.Fatal(err)
 	}
+
 	if runCalls, closeCalls := runtimeSession.counts(); runCalls != 1 || closeCalls != 1 {
 		t.Fatalf("unexpected poisoned session cleanup: run=%d close=%d", runCalls, closeCalls)
+	}
+}
+
+func TestDurableSessionClosePanicSettlesReleaseAndParentCleanup(t *testing.T) {
+	runtimeSession := &spySession{close: func() error {
+		panic("session close secret")
+	}}
+	connection, compiled, created := openTestSession(t, runtimeSession)
+	if err := connection.ReleaseSession(testContext(t), created); !hasCategory(err, ErrorKindInternal) {
+		t.Fatalf("hosted close panic was not retained: %v", err)
+	}
+
+	if _, closes := runtimeSession.counts(); closes != 1 {
+		t.Fatalf("hosted Session closed %d times", closes)
+	}
+
+	if err := connection.ReleaseSession(testContext(t), created); !hasCategory(err, ErrorKindSessionNotFound) {
+		t.Fatalf("failed cleanup retained the Session resource: %v", err)
+	}
+
+	if err := connection.ReleasePlan(testContext(t), compiled.ID); err != nil {
+		t.Fatalf("Session panic blocked parent cleanup: %v", err)
 	}
 }

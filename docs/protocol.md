@@ -5,6 +5,21 @@ protobuf sources under `proto/ferret/wire/v1` are normative; this document
 records why every retained symbol belongs at this boundary and why removed
 symbols do not.
 
+## Service declaration and compatibility
+
+`RuntimeService` is declared in `runtime_service.proto`. Its shared connection,
+output, and failure messages remain in `runtime.proto`; this separation lets
+`Run` reference the existing Execution message without an import cycle.
+The service's full name is unchanged. Existing Connect and CloseConnection
+paths, message names, field numbers, and streaming contracts are preserved.
+Generate clients from the updated inputs to obtain `RuntimeService.Run`,
+with `RunRequest` and `RunResponse`.
+
+Buf retains its FILE policy, with only SERVICE_NO_DELETE ignored for the old
+`runtime.proto` declaration location. PACKAGE_SERVICE_NO_DELETE and the normal
+RPC deletion, signature, and streaming checks remain active, so this file move
+does not permit deleting or changing the service contract.
+
 ## Classification taxonomy
 
 | Class | Meaning |
@@ -48,7 +63,7 @@ and listener and never closes either.
 `Compile` and `CompileDebug` create reusable Plans. Each `Execute` creates a new
 temporary `api.Session`. `CreateSession` instead constructs one durable
 `api.Session`; each sequential `RunSession` creates a distinct Execution that
-invokes the same hosted session. `RunRuntime` creates a connection-owned
+invokes the same hosted session. `RuntimeService.Run` creates a connection-owned
 Execution that calls the borrowed `api.Runtime.Run` directly. Each
 `CreateDebugSession` creates a new `debugger.Session` from a debug Plan.
 Cancellation or `Terminate` changes runtime state but does not release the
@@ -120,7 +135,10 @@ and field. Rows that list several fields classify each listed field.
 
 | Symbol | Class | Fields or contract |
 | --- | --- | --- |
-| service `RuntimeService` | B/C | Logical connection lifecycle over gRPC. |
+| service `RuntimeService` | A/B/C | Logical connection lifecycle and direct hosted Runtime invocation. |
+| RPC `Run` | A/B/C | Creates one connection-owned Execution that invokes hosted `api.Runtime.Run`. |
+| `RunRequest` | A/B/C | `connection_id=1`, `source=2`, optional `parameters=3`, optional requested `output_content_type=4`. |
+| `RunResponse` | B/C | Required running `execution=1`. |
 | RPC `Connect` | B/C | `ConnectRequest` to streaming `ConnectResponse`; creates and signals one logical connection. |
 | RPC `CloseConnection` | B/C | Explicit connection teardown and empty acknowledgement. |
 | `ConnectionId` | B | `value=1`, opaque and non-empty. |
@@ -184,7 +202,6 @@ and field. Rows that list several fields classify each listed field.
 | service `ExecutionService` | A/B/C | Creates, controls, releases, and watches asynchronous operations. |
 | RPC `Execute` | A/B/C | Creates one asynchronous session and immediately returns its running snapshot. |
 | RPC `RunSession` | A/B/C | Creates one Execution for a durable Session run; overlapping runs are invalid state. |
-| RPC `RunRuntime` | A/B/C | Creates one connection-owned Execution that invokes hosted `api.Runtime.Run`. |
 | RPC `CancelExecution` | A/B/C | Requests cancellation; does not release. |
 | RPC `ReleaseExecution` | B/C | Commits cancellation and cleanup. |
 | RPC `WatchExecution` | B/C | Non-owning ordered snapshot stream. |
@@ -196,8 +213,6 @@ and field. Rows that list several fields classify each listed field.
 | `ExecuteResponse` | B/C | Required running `execution=1`. |
 | `RunSessionRequest` | A/B/C | `connection_id=1`, `session_id=2`. |
 | `RunSessionResponse` | B/C | Required running `execution=1`. |
-| `RunRuntimeRequest` | A/B/C | `connection_id=1`, `source=2`, optional `parameters=3`, optional requested `output_content_type=4`. |
-| `RunRuntimeResponse` | B/C | Required running `execution=1`. |
 | `CancelExecutionRequest` | B/C | `connection_id=1`, `execution_id=2`. |
 | `CancelExecutionResponse` | C | Empty acknowledgement. |
 | `ReleaseExecutionRequest` | B/C | `connection_id=1`, `execution_id=2`. |

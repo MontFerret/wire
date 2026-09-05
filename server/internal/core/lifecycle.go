@@ -82,6 +82,10 @@ func (l *Lifecycle) releaseSession(waiter context.Context, owner ConnectionID, i
 	return session.waitRelease(waiter)
 }
 
+// settleSession is the terminal boundary of a committed, detached release.
+// As with the other settle operations, a Wire orchestration panic must settle
+// release waiters and registry bookkeeping. It is not an external API panic;
+// only calls into the hosted implementation use panicboundary.
 func (l *Lifecycle) settleSession(session *Session) {
 	var err error
 	defer func() {

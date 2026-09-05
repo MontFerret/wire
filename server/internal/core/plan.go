@@ -22,9 +22,10 @@ type (
 	}
 
 	CompileInput struct {
-		Source            api.Source
-		Debuggable        bool
-		OptimizationLevel *api.OptimizationLevel
+		Source               api.Source
+		Debuggable           bool
+		OptimizationLevel    api.OptimizationLevel
+		HasOptimizationLevel bool
 	}
 
 	PlanSnapshot struct {

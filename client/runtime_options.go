@@ -9,7 +9,8 @@ import (
 
 type (
 	runtimePlanOptions struct {
-		optimizationLevel *api.OptimizationLevel
+		optimizationLevel    api.OptimizationLevel
+		hasOptimizationLevel bool
 	}
 
 	runtimeSessionOptions struct {
@@ -35,8 +36,8 @@ func applyRuntimePlanOptions(options []api.PlanOption) (runtimePlanOptions, erro
 func (o *runtimePlanOptions) SetOptimizationLevel(level api.OptimizationLevel) error {
 	switch level {
 	case api.OptimizationNone, api.OptimizationBasic, api.OptimizationFull, api.OptimizationAggressive:
-		copied := level
-		o.optimizationLevel = &copied
+		o.optimizationLevel = level
+		o.hasOptimizationLevel = true
 
 		return nil
 	default:

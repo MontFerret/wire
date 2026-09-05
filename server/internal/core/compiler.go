@@ -106,8 +106,8 @@ func (c *Compiler) Compile(ctx *Context, input CompileInput) (PlanSnapshot, erro
 
 func (c *Compiler) compileAPIPlan(ctx *Context, input CompileInput) (api.Plan, error) {
 	var options []api.PlanOption
-	if input.OptimizationLevel != nil {
-		options = append(options, api.WithOptimizationLevel(*input.OptimizationLevel))
+	if input.HasOptimizationLevel {
+		options = append(options, api.WithOptimizationLevel(input.OptimizationLevel))
 	}
 
 	if input.Debuggable {

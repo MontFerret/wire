@@ -184,6 +184,16 @@ resource types. Individual resources retain their own state machines, runtime
 handles, watches, and local close invariants. A per-operation Wire `Context`
 combines the unary or stream context with the resolved logical connection.
 
+The client adapter uses the same ownership tree to reclaim allocations whose
+responses are lost. Unknown Session IDs invalidate their Plan; unknown
+Session-owned Execution IDs invalidate their Session; unknown root allocations
+invalidate the logical Runtime. A failed narrow release escalates to logical
+connection cleanup, including Connect-stream cancellation when release cannot
+be acknowledged. Acquisition and automatic release waits each have a 30-second
+bound. Successful narrow cleanup preserves siblings outside its subtree and
+never closes the borrowed physical transport. See [Client Handles](client.md)
+for the cancellation contract.
+
 ```text
 Compiler ──► api.Runtime
 Compiler ──► PlanRegistry ◄── Executor ──► api.Runtime.Run
@@ -276,6 +286,12 @@ queues and are detached with resource exhaustion. Watcher slots remain owned
 until the stream handler exits, including after lag or a terminal snapshot.
 Detached cleanup has a named owner, is panic-safe, and terminates
 deterministically.
+
+`Lifecycle.settleSession` follows the existing detached-release terminal policy:
+its recovery settles release waiters and registry bookkeeping if Wire
+orchestration panics. This is distinct from `panicboundary`, which guards only
+external implementation calls. Session-local close relies on the existing
+external `api.Session.Close` boundary without adding another raw recovery site.
 
 Direct Plan execution, normal Session run, and direct Runtime run construction
 publish running state. Debug-session construction

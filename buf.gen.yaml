@@ -4,6 +4,7 @@ clean: true
 inputs:
   - directory: .
     paths:
+      - proto/ferret/wire/v1/runtime_service.proto
       - proto/ferret/wire/v1/runtime.proto
       - proto/ferret/wire/v1/source.proto
       - proto/ferret/wire/v1/value.proto

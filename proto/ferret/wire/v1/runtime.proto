@@ -6,17 +6,6 @@ import "ferret/wire/v1/source.proto";
 
 option go_package = "github.com/MontFerret/wire/gen/ferret/wire/v1;wirev1";
 
-// RuntimeService owns logical Wire connections independently of the physical transport.
-service RuntimeService {
-  // Servers apply finite host-configured limits to messages and logical resources.
-  // Connect creates the logical ownership scope for all resources created with
-  // the returned connection ID. The stream remains open for that scope's life.
-  rpc Connect(ConnectRequest) returns (stream ConnectResponse);
-  // CloseConnection commits deterministic cleanup of one logical connection.
-  // After cleanup, the connection ID and every owned resource ID are stale.
-  rpc CloseConnection(CloseConnectionRequest) returns (CloseConnectionResponse);
-}
-
 // ConnectionId is an opaque, server-issued logical connection identifier.
 message ConnectionId {
   // value is opaque, non-empty, and scoped to the server that issued it.

@@ -27,16 +27,6 @@ type (
 		close          lifecycle.Close
 		release        lifecycle.Close
 	}
-
-	CreateSessionInput struct {
-		PlanID            PlanID
-		Parameters        map[string]any
-		OutputContentType string
-	}
-
-	SessionSnapshot struct {
-		ID SessionID
-	}
 )
 
 func newSession(
@@ -59,10 +49,6 @@ func newSession(
 
 func (s *Session) ID() SessionID {
 	return s.id
-}
-
-func (s *Session) snapshot() SessionSnapshot {
-	return SessionSnapshot{ID: s.id}
 }
 
 func (s *Session) Context() context.Context {
@@ -90,6 +76,7 @@ func (s *Session) beginExecution(id ExecutionID) error {
 	if s.closing {
 		return notFound(ErrorKindSessionNotFound, string(s.id))
 	}
+
 	if s.poisoned {
 		return invalidState("session cannot run after a runtime panic", nil)
 	}
@@ -145,10 +132,6 @@ func (s *Session) Close(ctx context.Context) error {
 func (s *Session) settleClose() {
 	var err error
 	defer func() {
-		if recover() != nil {
-			err = errors.Join(err, internalError(errors.New("session cleanup panicked")))
-		}
-
 		s.close.Finish(err)
 	}()
 

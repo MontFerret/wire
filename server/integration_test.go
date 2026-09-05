@@ -498,7 +498,7 @@ func (o apiSessionOptions) clone() apiSessionOptions {
 	return o
 }
 
-func newIntegrationEnv(t *testing.T, runtime api.Runtime, options ...server.ServerOption) *integrationEnv {
+func newIntegrationEnv(t testing.TB, runtime api.Runtime, options ...server.ServerOption) *integrationEnv {
 	t.Helper()
 	server, err := server.NewServer(runtime, options...)
 	if err != nil {
@@ -566,7 +566,7 @@ func assertTransportNeutralParams(t *testing.T, values map[string]any) {
 	}
 }
 
-func testContext(t *testing.T) context.Context {
+func testContext(t testing.TB) context.Context {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	t.Cleanup(cancel)

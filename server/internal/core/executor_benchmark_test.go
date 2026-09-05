@@ -89,7 +89,7 @@ func BenchmarkExecutorRunDurableSession(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
-		run, err := connection.RunSession(context.Background(), session.ID)
+		run, err := connection.RunSession(context.Background(), session)
 		if err != nil {
 			b.Fatal(err)
 		}

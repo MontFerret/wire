@@ -9,13 +9,27 @@ import (
 	"github.com/google/uuid"
 )
 
-// Executor owns durable session and asynchronous execution creation.
-type Executor struct {
-	runtime    api.Runtime
-	plans      *PlanRegistry
-	sessions   *SessionRegistry
-	executions *ExecutionRegistry
-}
+type (
+	// Executor owns durable session and asynchronous execution creation.
+	Executor struct {
+		runtime    api.Runtime
+		plans      *PlanRegistry
+		sessions   *SessionRegistry
+		executions *ExecutionRegistry
+	}
+
+	RunInput struct {
+		Source            api.Source
+		Parameters        map[string]any
+		OutputContentType string
+	}
+
+	CreateSessionInput struct {
+		PlanID            PlanID
+		Parameters        map[string]any
+		OutputContentType string
+	}
+)
 
 func NewExecutor(
 	runtime api.Runtime,
@@ -101,20 +115,20 @@ func (e *Executor) Execution(ctx *Context, id ExecutionID) (*Execution, error) {
 	return e.executions.get(ctx.connectionID(), id)
 }
 
-func (e *Executor) CreateSession(ctx *Context, input CreateSessionInput) (SessionSnapshot, error) {
+func (e *Executor) CreateSession(ctx *Context, input CreateSessionInput) (SessionID, error) {
 	connection := ctx.Connection()
 	if err := connection.beginOperation(); err != nil {
-		return SessionSnapshot{}, err
+		return "", err
 	}
 	defer connection.finishOperation()
 
 	if err := ctx.Err(); err != nil {
-		return SessionSnapshot{}, err
+		return "", err
 	}
 
 	owner := connection.ID()
 	if err := e.sessions.reserve(owner); err != nil {
-		return SessionSnapshot{}, err
+		return "", err
 	}
 
 	reserved := true
@@ -126,32 +140,32 @@ func (e *Executor) CreateSession(ctx *Context, input CreateSessionInput) (Sessio
 
 	plan, err := e.plans.beginChild(owner, input.PlanID, false)
 	if err != nil {
-		return SessionSnapshot{}, err
+		return "", err
 	}
 	defer plan.finishChildCreation()
 
-	runtimeSession, err := panicboundary.Call(func() (api.Session, error) {
+	hostedSession, err := panicboundary.Call(func() (api.Session, error) {
 		return plan.plan.NewSession(ctx, apiSessionOptions(input.Parameters, input.OutputContentType)...)
 	})
 	if err != nil {
 		var closeErr error
-		if !isNil(runtimeSession) {
-			closeErr = closeAPISession(runtimeSession)
+		if !isNil(hostedSession) {
+			closeErr = closeAPISession(hostedSession)
 		}
 
 		if ctxErr := ctx.Err(); ctxErr != nil {
-			return SessionSnapshot{}, errors.Join(ctxErr, closeErr)
+			return "", errors.Join(ctxErr, closeErr)
 		}
 
-		return SessionSnapshot{}, errors.Join(internalError(err), closeErr)
+		return "", errors.Join(internalError(err), closeErr)
 	}
 
-	if isNil(runtimeSession) {
-		return SessionSnapshot{}, internalError(errors.New("runtime returned no session"))
+	if isNil(hostedSession) {
+		return "", internalError(errors.New("runtime returned no session"))
 	}
 
 	if err := ctx.Err(); err != nil {
-		return SessionSnapshot{}, errors.Join(err, closeAPISession(runtimeSession))
+		return "", errors.Join(err, closeAPISession(hostedSession))
 	}
 
 	sessionCtx, cancel := context.WithCancelCause(connection.Context())
@@ -159,7 +173,7 @@ func (e *Executor) CreateSession(ctx *Context, input CreateSessionInput) (Sessio
 		SessionID(uuid.NewString()),
 		owner,
 		plan.id,
-		runtimeSession,
+		hostedSession,
 		sessionCtx,
 		cancel,
 	)
@@ -177,13 +191,14 @@ func (e *Executor) CreateSession(ctx *Context, input CreateSessionInput) (Sessio
 	if committed {
 		reserved = false
 	}
+
 	if err != nil {
 		cancel(context.Canceled)
 
-		return SessionSnapshot{}, errors.Join(err, closeAPISession(runtimeSession))
+		return "", errors.Join(err, closeAPISession(hostedSession))
 	}
 
-	return created.snapshot(), nil
+	return created.id, nil
 }
 
 func (e *Executor) RunSession(ctx *Context, id SessionID) (ExecutionRecord, error) {
@@ -221,34 +236,34 @@ func (e *Executor) RunSession(ctx *Context, id SessionID) (ExecutionRecord, erro
 	defer plan.finishChildCreation()
 
 	executionID := ExecutionID(uuid.NewString())
-	runtimeSession, err := e.sessions.beginExecution(owner, id, executionID)
+	session, err := e.sessions.beginExecution(owner, id, executionID)
 	if err != nil {
 		return ExecutionRecord{}, err
 	}
-	defer runtimeSession.finishExecutionCreation()
+	defer session.finishExecutionCreation()
 
 	committed := false
 	defer func() {
 		if !committed {
-			runtimeSession.finishExecution(executionID)
+			session.finishExecution(executionID)
 		}
 	}()
 
-	executionCtx, cancel := context.WithCancelCause(runtimeSession.Context())
+	executionCtx, cancel := context.WithCancelCause(session.Context())
 	created := newOperationExecution(
 		executionID,
 		owner,
 		plan.id,
-		runtimeSession.id,
+		session.id,
 		executionCtx,
 		cancel,
-		runtimeSession.Run,
+		session.Run,
 		e.executions.maxWatchers,
 	)
 
 	registryCommitted := false
 	err = e.plans.commitChild(owner, plan.id, plan, func() error {
-		return e.sessions.commitExecution(owner, id, runtimeSession, executionID, func() error {
+		return e.sessions.commitExecution(owner, id, session, executionID, func() error {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
@@ -261,6 +276,7 @@ func (e *Executor) RunSession(ctx *Context, id SessionID) (ExecutionRecord, erro
 	if registryCommitted {
 		reserved = false
 	}
+
 	if err != nil {
 		cancel(context.Canceled)
 
@@ -268,12 +284,13 @@ func (e *Executor) RunSession(ctx *Context, id SessionID) (ExecutionRecord, erro
 	}
 
 	committed = true
+	snapshot := created.Snapshot()
 	go created.run()
 
-	return created.Snapshot(), nil
+	return snapshot, nil
 }
 
-func (e *Executor) RunRuntime(ctx *Context, input RunRuntimeInput) (ExecutionRecord, error) {
+func (e *Executor) Run(ctx *Context, input RunInput) (ExecutionRecord, error) {
 	connection := ctx.Connection()
 	if err := connection.beginOperation(); err != nil {
 		return ExecutionRecord{}, err
@@ -313,7 +330,7 @@ func (e *Executor) RunRuntime(ctx *Context, input RunRuntimeInput) (ExecutionRec
 		executionCtx,
 		cancel,
 		func(runCtx context.Context) (api.Output, error) {
-			return e.runRuntime(runCtx, input)
+			return e.run(runCtx, input)
 		},
 		e.executions.maxWatchers,
 	)
@@ -332,12 +349,14 @@ func (e *Executor) RunRuntime(ctx *Context, input RunRuntimeInput) (ExecutionRec
 		return ExecutionRecord{}, err
 	}
 
+	// Capture the promised running response before fast hosted work can finish.
+	snapshot := created.Snapshot()
 	go created.run()
 
-	return created.Snapshot(), nil
+	return snapshot, nil
 }
 
-func (e *Executor) runRuntime(ctx context.Context, input RunRuntimeInput) (api.Output, error) {
+func (e *Executor) run(ctx context.Context, input RunInput) (api.Output, error) {
 	output, err := panicboundary.Call(func() (api.Output, error) {
 		return e.runtime.Run(ctx, input.Source, apiSessionOptions(input.Parameters, input.OutputContentType)...)
 	})

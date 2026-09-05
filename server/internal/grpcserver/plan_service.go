@@ -40,7 +40,7 @@ func (s *Server) compile(ctx context.Context, request compileRequest, debug bool
 
 	defer cancel()
 
-	optimization, err := optimizationLevel(request.GetOptions())
+	optimization, present, err := optimizationLevel(request.GetOptions())
 	if err != nil {
 		return nil, rpcError(err)
 	}
@@ -50,8 +50,9 @@ func (s *Server) compile(ctx context.Context, request compileRequest, debug bool
 			Name:    request.GetSource().GetName(),
 			Content: request.GetSource().GetContent(),
 		},
-		Debuggable:        debug,
-		OptimizationLevel: optimization,
+		Debuggable:           debug,
+		OptimizationLevel:    optimization,
+		HasOptimizationLevel: present,
 	})
 	if err != nil {
 		return nil, rpcError(err)
@@ -60,7 +61,7 @@ func (s *Server) compile(ctx context.Context, request compileRequest, debug bool
 	return plan(snapshot), nil
 }
 
-func optimizationLevel(options *wirev1.CompileOptions) (*api.OptimizationLevel, error) {
+func optimizationLevel(options *wirev1.CompileOptions) (api.OptimizationLevel, bool, error) {
 	value := wirev1.OptimizationLevel_OPTIMIZATION_LEVEL_UNSPECIFIED
 	if options != nil {
 		value = options.GetOptimizationLevel()
@@ -69,7 +70,7 @@ func optimizationLevel(options *wirev1.CompileOptions) (*api.OptimizationLevel, 
 	var level api.OptimizationLevel
 	switch value {
 	case wirev1.OptimizationLevel_OPTIMIZATION_LEVEL_UNSPECIFIED:
-		return nil, nil
+		return 0, false, nil
 	case wirev1.OptimizationLevel_OPTIMIZATION_LEVEL_NONE:
 		level = api.OptimizationNone
 	case wirev1.OptimizationLevel_OPTIMIZATION_LEVEL_BASIC:
@@ -79,10 +80,10 @@ func optimizationLevel(options *wirev1.CompileOptions) (*api.OptimizationLevel, 
 	case wirev1.OptimizationLevel_OPTIMIZATION_LEVEL_AGGRESSIVE:
 		level = api.OptimizationAggressive
 	default:
-		return nil, &core.DomainError{Kind: core.ErrorKindInvalidRequest, Message: "optimization level is invalid"}
+		return 0, false, &core.DomainError{Kind: core.ErrorKindInvalidRequest, Message: "optimization level is invalid"}
 	}
 
-	return &level, nil
+	return level, true, nil
 }
 
 func (s *Server) ReleasePlan(ctx context.Context, request *wirev1.ReleasePlanRequest) (*wirev1.ReleasePlanResponse, error) {

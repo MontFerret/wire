@@ -18,7 +18,7 @@ type (
 		runOptions          []sessionOptions
 		compileSources      []api.Source
 		compileDebug        []bool
-		compileOptimization []*api.OptimizationLevel
+		compileOptimization []planOptions
 		closeCalls          int
 	}
 
@@ -66,7 +66,8 @@ type (
 	}
 
 	planOptions struct {
-		optimizationLevel *api.OptimizationLevel
+		optimizationLevel    api.OptimizationLevel
+		hasOptimizationLevel bool
 	}
 )
 
@@ -111,7 +112,7 @@ func (r *spyRuntime) compilePlan(ctx context.Context, src api.Source, debug bool
 	r.mu.Lock()
 	r.compileSources = append(r.compileSources, src)
 	r.compileDebug = append(r.compileDebug, debug)
-	r.compileOptimization = append(r.compileOptimization, configured.optimizationLevel)
+	r.compileOptimization = append(r.compileOptimization, *configured)
 	compile := r.compile
 	r.mu.Unlock()
 
@@ -137,25 +138,16 @@ func (r *spyRuntime) snapshot() ([]api.Source, []bool, int) {
 	return append([]api.Source(nil), r.compileSources...), append([]bool(nil), r.compileDebug...), r.closeCalls
 }
 
-func (r *spyRuntime) optimizationSnapshot() []*api.OptimizationLevel {
+func (r *spyRuntime) optimizationSnapshot() []planOptions {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	result := make([]*api.OptimizationLevel, len(r.compileOptimization))
-	for index, level := range r.compileOptimization {
-		if level == nil {
-			continue
-		}
-
-		copied := *level
-		result[index] = &copied
-	}
-
-	return result
+	return append([]planOptions(nil), r.compileOptimization...)
 }
 
 func (options *planOptions) SetOptimizationLevel(level api.OptimizationLevel) error {
-	options.optimizationLevel = &level
+	options.optimizationLevel = level
+	options.hasOptimizationLevel = true
 
 	return nil
 }

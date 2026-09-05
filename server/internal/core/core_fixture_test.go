@@ -145,7 +145,7 @@ func (e *testEnvironment) Execute(ctx context.Context, input ExecuteInput) (Exec
 	return e.host.executor.Execute(operation, input)
 }
 
-func (e *testEnvironment) CreateSession(ctx context.Context, input CreateSessionInput) (SessionSnapshot, error) {
+func (e *testEnvironment) CreateSession(ctx context.Context, input CreateSessionInput) (SessionID, error) {
 	operation, cancel := e.operation(ctx)
 	defer cancel()
 
@@ -159,11 +159,11 @@ func (e *testEnvironment) RunSession(ctx context.Context, id SessionID) (Executi
 	return e.host.executor.RunSession(operation, id)
 }
 
-func (e *testEnvironment) RunRuntime(ctx context.Context, input RunRuntimeInput) (ExecutionRecord, error) {
+func (e *testEnvironment) Run(ctx context.Context, input RunInput) (ExecutionRecord, error) {
 	operation, cancel := e.operation(ctx)
 	defer cancel()
 
-	return e.host.executor.RunRuntime(operation, input)
+	return e.host.executor.Run(operation, input)
 }
 
 func (e *testEnvironment) ReleaseSession(ctx context.Context, id SessionID) error {

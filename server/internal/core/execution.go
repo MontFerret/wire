@@ -39,12 +39,6 @@ type (
 		Parameters        map[string]any
 		OutputContentType string
 	}
-
-	RunRuntimeInput struct {
-		Source            api.Source
-		Parameters        map[string]any
-		OutputContentType string
-	}
 )
 
 func newExecution(

@@ -25,8 +25,8 @@ Client (lower-level Wire facade)
 `NewRuntime(ctx, conn)` is the Universal API-first entry point. `Runtime` owns
 one logical `Client`, while the returned Plan, normal Session, and debugger
 adapters remain private implementation types behind their Universal API
-interfaces. `Runtime.Run` calls the hosted `api.Runtime.Run` directly. A normal
-Session is created remotely once and each sequential `Run` uses a hidden
+interfaces. `Runtime.Run` uses `RuntimeService.Run` to call the hosted
+`api.Runtime.Run` directly. A normal Session is created remotely once and each sequential `Run` uses a hidden
 Execution that is watched and released before returning. Closing any adapter
 uses the 30-second detached cleanup bound; closing Runtime never closes `conn`.
 
@@ -98,15 +98,41 @@ output, err := execution.Wait(ctx)
 
 Plan metadata is immutable. `Parameters` returns a defensive copy.
 `CompileOptions.Debuggable` chooses the protocol's `CompileDebug` operation
-instead of `Compile`. `CompileOptions.OptimizationLevel` is optional: nil
-preserves the hosted runtime default, while non-nil values transport all
-Universal API optimization levels.
+instead of `Compile`. `CompileOptions.HasOptimizationLevel` controls whether
+`OptimizationLevel` is supplied. False preserves the hosted runtime default;
+true transports the specified Universal API level, including the zero value
+`api.OptimizationNone`. Universal API callers express the same distinction by
+omitting or supplying `api.WithOptimizationLevel`.
 
 The metadata facade maps `APIIdentity` and `WireVersion` from the handshake's
 protocol name and version and maps optional host runtime identity directly to
 `*execution.Identity` from `pkg/execution`.
 Legacy Ferret-version and capability fields remain empty rather than
 fabricating values not carried by the protocol.
+
+### Allocation and cancellation
+
+The Universal API adapter checks cancellation before sending an allocation
+request, including after option callbacks. Only the acquisition RPC is detached
+from caller cancellation, with an internal 30-second deadline. If its resource
+handle arrives after cancellation, the adapter releases that handle before
+returning the caller's cancellation. Execution waiting uses the original caller
+context; releasing the temporary Execution also cancels unfinished work.
+
+A lost reply or a reply without a usable resource ID cannot be reclaimed by ID.
+The adapter immediately closes the narrowest known owner: a Plan for an unknown
+normal or debug Session, a Session for its unknown Execution, or the logical
+Runtime for a root Plan or direct Runtime Execution. Successful narrow cleanup
+preserves resources outside that subtree. Confirmed creation rejections and
+local validation errors do not trigger this invalidation.
+
+Each automatic release attempt has a fresh 30-second bound. If a parent release
+fails or expires, cleanup escalates to the logical Runtime; if connection
+release fails, cancelling its Connect stream supplies the final lifetime signal.
+Operation and cleanup errors remain joined. The caller-owned physical transport
+and other logical clients on it remain open. These bounds limit client waiting;
+the hosted implementation must still honor its cancellation and Close contracts.
+
 
 ## Convenience execution
 

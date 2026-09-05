@@ -34,34 +34,6 @@ type (
 	}
 )
 
-func (c *Client) runRuntime(
-	ctx context.Context,
-	src api.Source,
-	parameters Parameters,
-	options ExecuteOptions,
-) (*Execution, error) {
-	if err := c.checkOpen(); err != nil {
-		return nil, err
-	}
-
-	converted, err := encodeParameters(parameters)
-	if err != nil {
-		return nil, err
-	}
-
-	response, err := c.executionClient.RunRuntime(ctx, &wirev1.RunRuntimeRequest{
-		ConnectionId:      c.connectionProto(),
-		Source:            &wirev1.Source{Name: src.Name, Content: src.Content},
-		Parameters:        converted,
-		OutputContentType: options.OutputContentType,
-	})
-	if err != nil {
-		return nil, decodeError(err)
-	}
-
-	return newExecutionHandle(c, nil, nil, response.GetExecution())
-}
-
 // Execute publishes a remote execution of this plan. Output remains the Unified API
 // encoded content-type and byte contract.
 func (p *Plan) Execute(ctx context.Context, parameters Parameters, options ExecuteOptions) (*Execution, error) {
@@ -84,12 +56,7 @@ func (p *Plan) Execute(ctx context.Context, parameters Parameters, options Execu
 		return nil, decodeError(err)
 	}
 
-	value := response.GetExecution()
-	if value == nil || value.GetId().GetValue() == "" {
-		return nil, errors.New("Wire server returned an invalid execution")
-	}
-
-	return newExecutionHandle(p.client, p, nil, value)
+	return newExecutionHandle(p.client, p, nil, response.GetExecution())
 }
 
 func newExecutionHandle(
@@ -99,7 +66,7 @@ func newExecutionHandle(
 	value *wirev1.Execution,
 ) (*Execution, error) {
 	if value == nil || value.GetId().GetValue() == "" {
-		return nil, errors.New("Wire server returned an invalid execution")
+		return nil, &allocationError{cause: errors.New("Wire server returned an invalid execution")}
 	}
 
 	return &Execution{
@@ -298,4 +265,20 @@ func (c *Client) releaseExecution(ctx context.Context, id string) error {
 	})
 
 	return decodeError(err)
+}
+
+// waitAndRelease is the adapter's one-shot invocation lifecycle. Release itself
+// cancels running work and waits for teardown; a separate Cancel RPC is redundant.
+func (e *Execution) waitAndRelease(ctx context.Context) (api.Output, error) {
+	output, waitErr := e.Wait(ctx)
+	var parent func(context.Context) error
+	if e.session != nil {
+		parent = e.session.Close
+	} else if e.plan != nil {
+		parent = e.plan.Close
+	}
+
+	closeErr := e.client.closeAllocation(ctx, e.Close, parent)
+
+	return output, errors.Join(waitErr, closeErr)
 }

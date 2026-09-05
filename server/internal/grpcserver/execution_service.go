@@ -3,7 +3,6 @@ package grpcserver
 import (
 	"context"
 
-	"github.com/MontFerret/api"
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
 	"github.com/MontFerret/wire/server/internal/core"
 )
@@ -59,41 +58,6 @@ func (s *Server) RunSession(
 	}
 
 	return &wirev1.RunSessionResponse{Execution: converted}, nil
-}
-
-func (s *Server) RunRuntime(
-	ctx context.Context,
-	request *wirev1.RunRuntimeRequest,
-) (*wirev1.RunRuntimeResponse, error) {
-	operation, cancel, err := s.operationContext(ctx, request.GetConnectionId())
-	if err != nil {
-		return nil, err
-	}
-	defer cancel()
-
-	parameters, err := decodeParameters(request.GetParameters())
-	if err != nil {
-		return nil, rpcError(&core.DomainError{Kind: core.ErrorKindInvalidRequest, Message: err.Error()})
-	}
-
-	snapshot, err := s.executor.RunRuntime(operation, core.RunRuntimeInput{
-		Source: api.Source{
-			Name:    request.GetSource().GetName(),
-			Content: request.GetSource().GetContent(),
-		},
-		Parameters:        parameters,
-		OutputContentType: request.GetOutputContentType(),
-	})
-	if err != nil {
-		return nil, rpcError(err)
-	}
-
-	converted, err := execution(snapshot)
-	if err != nil {
-		return nil, rpcError(err)
-	}
-
-	return &wirev1.RunRuntimeResponse{Execution: converted}, nil
 }
 
 func (s *Server) CancelExecution(ctx context.Context, request *wirev1.CancelExecutionRequest) (*wirev1.CancelExecutionResponse, error) {

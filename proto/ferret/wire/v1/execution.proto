@@ -5,7 +5,6 @@ package ferret.wire.v1;
 import "ferret/wire/v1/plan.proto";
 import "ferret/wire/v1/runtime.proto";
 import "ferret/wire/v1/session.proto";
-import "ferret/wire/v1/source.proto";
 import "ferret/wire/v1/value.proto";
 
 option go_package = "github.com/MontFerret/wire/gen/ferret/wire/v1;wirev1";
@@ -16,8 +15,6 @@ service ExecutionService {
   rpc Execute(ExecuteRequest) returns (ExecuteResponse);
   // RunSession publishes one execution of an existing reusable Session.
   rpc RunSession(RunSessionRequest) returns (RunSessionResponse);
-  // RunRuntime publishes a one-shot invocation of the hosted api.Runtime.Run.
-  rpc RunRuntime(RunRuntimeRequest) returns (RunRuntimeResponse);
   // CancelExecution requests cancellation without releasing the execution.
   rpc CancelExecution(CancelExecutionRequest) returns (CancelExecutionResponse);
   // ReleaseExecution commits cancellation and cleanup. The execution ID then becomes stale.
@@ -82,20 +79,6 @@ message RunSessionRequest {
 }
 
 message RunSessionResponse {
-  // execution is present and already in RUNNING state.
-  Execution execution = 1;
-}
-
-message RunRuntimeRequest {
-  ConnectionId connection_id = 1;
-  Source source = 2;
-  Parameters parameters = 3;
-  // output_content_type requests a runtime-supported encoded output codec;
-  // empty preserves the runtime default.
-  string output_content_type = 4;
-}
-
-message RunRuntimeResponse {
   // execution is present and already in RUNNING state.
   Execution execution = 1;
 }

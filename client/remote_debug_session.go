@@ -6,13 +6,11 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/MontFerret/api"
 	"github.com/MontFerret/api/debugger"
 	"github.com/MontFerret/api/source"
-	wiredebugger "github.com/MontFerret/wire/pkg/debugger"
 )
 
-type runtimeDebugSession struct {
+type remoteDebugSession struct {
 	session *DebugSession
 	ctx     context.Context
 	cancel  context.CancelFunc
@@ -22,10 +20,12 @@ type runtimeDebugSession struct {
 	breakpoints  map[debugger.BreakpointID]debugger.Breakpoint
 }
 
-func newRuntimeDebugSession(session *DebugSession) *runtimeDebugSession {
+var _ debugger.Session = (*remoteDebugSession)(nil)
+
+func newRemoteDebugSession(session *DebugSession) *remoteDebugSession {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	return &runtimeDebugSession{
+	return &remoteDebugSession{
 		session:     session,
 		ctx:         ctx,
 		cancel:      cancel,
@@ -33,27 +33,27 @@ func newRuntimeDebugSession(session *DebugSession) *runtimeDebugSession {
 	}
 }
 
-func (d *runtimeDebugSession) Start(ctx context.Context) (*debugger.Event, error) {
+func (d *remoteDebugSession) Start(ctx context.Context) (*debugger.Event, error) {
 	return d.runCommand(ctx, d.session.Start)
 }
 
-func (d *runtimeDebugSession) Continue(ctx context.Context) (*debugger.Event, error) {
+func (d *remoteDebugSession) Continue(ctx context.Context) (*debugger.Event, error) {
 	return d.runCommand(ctx, d.session.Continue)
 }
 
-func (d *runtimeDebugSession) StepIn(ctx context.Context) (*debugger.Event, error) {
+func (d *remoteDebugSession) StepIn(ctx context.Context) (*debugger.Event, error) {
 	return d.runCommand(ctx, d.session.StepIn)
 }
 
-func (d *runtimeDebugSession) StepOver(ctx context.Context) (*debugger.Event, error) {
+func (d *remoteDebugSession) StepOver(ctx context.Context) (*debugger.Event, error) {
 	return d.runCommand(ctx, d.session.StepOver)
 }
 
-func (d *runtimeDebugSession) StepOut(ctx context.Context) (*debugger.Event, error) {
+func (d *remoteDebugSession) StepOut(ctx context.Context) (*debugger.Event, error) {
 	return d.runCommand(ctx, d.session.StepOut)
 }
 
-func (d *runtimeDebugSession) runCommand(
+func (d *remoteDebugSession) runCommand(
 	ctx context.Context,
 	command func(context.Context) error,
 ) (*debugger.Event, error) {
@@ -95,7 +95,7 @@ func (d *runtimeDebugSession) runCommand(
 			return nil, d.commandError(ctx, err)
 		}
 
-		converted, terminal, err := runtimeDebuggerEvent(event)
+		converted, terminal, err := remoteDebuggerEvent(event)
 		if err != nil {
 			return nil, err
 		}
@@ -106,7 +106,7 @@ func (d *runtimeDebugSession) runCommand(
 	}
 }
 
-func (d *runtimeDebugSession) commandError(ctx context.Context, err error) error {
+func (d *remoteDebugSession) commandError(ctx context.Context, err error) error {
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		closeErr := d.Close()
 
@@ -120,47 +120,7 @@ func (d *runtimeDebugSession) commandError(ctx context.Context, err error) error
 	return err
 }
 
-func runtimeDebuggerEvent(event wiredebugger.Event) (*debugger.Event, bool, error) {
-	snapshot := event.Snapshot
-	switch snapshot.State {
-	case wiredebugger.StateCreated, wiredebugger.StateRunning:
-		return nil, false, nil
-	case wiredebugger.StateFailed:
-		if snapshot.Failure == nil {
-			return nil, false, errors.New("Wire server returned a failed debug session without failure details")
-		}
-
-		return nil, false, snapshot.Failure
-	case wiredebugger.StateStopped:
-		result := &debugger.Event{
-			Error:            snapshot.Failure,
-			Reason:           snapshot.StopReason,
-			HitBreakpointIDs: append([]debugger.BreakpointID(nil), snapshot.HitBreakpointIDs...),
-			Depth:            snapshot.Depth,
-		}
-		if snapshot.Location != nil {
-			result.Location = *snapshot.Location
-		}
-
-		return result, true, nil
-	case wiredebugger.StateCompleted:
-		result := &debugger.Event{Reason: debugger.ReasonCompleted}
-		if snapshot.Output != nil {
-			result.Output = &api.Output{
-				ContentType: snapshot.Output.ContentType,
-				Content:     append([]byte(nil), snapshot.Output.Content...),
-			}
-		}
-
-		return result, true, nil
-	case wiredebugger.StateTerminated:
-		return &debugger.Event{Reason: debugger.ReasonTerminated}, true, nil
-	default:
-		return nil, false, errors.New("Wire server returned an invalid debug session state")
-	}
-}
-
-func (d *runtimeDebugSession) Pause() error {
+func (d *remoteDebugSession) Pause() error {
 	if d == nil || d.session == nil {
 		return ErrClosed
 	}
@@ -168,13 +128,13 @@ func (d *runtimeDebugSession) Pause() error {
 	return d.session.Pause(d.ctx)
 }
 
-func (d *runtimeDebugSession) SetBreakpoint(location source.Location) (debugger.Breakpoint, error) {
+func (d *remoteDebugSession) SetBreakpoint(location source.Location) (debugger.Breakpoint, error) {
 	return d.SetBreakpointAt(location, debugger.BreakpointOptions{
 		BindingMode: debugger.BreakpointBindNextExecutableInSource,
 	})
 }
 
-func (d *runtimeDebugSession) SetBreakpointAt(
+func (d *remoteDebugSession) SetBreakpointAt(
 	location source.Location,
 	options debugger.BreakpointOptions,
 ) (debugger.Breakpoint, error) {
@@ -194,7 +154,7 @@ func (d *runtimeDebugSession) SetBreakpointAt(
 	return breakpoint, nil
 }
 
-func (d *runtimeDebugSession) DeleteBreakpoint(id debugger.BreakpointID) error {
+func (d *remoteDebugSession) DeleteBreakpoint(id debugger.BreakpointID) error {
 	if d == nil || d.session == nil {
 		return ErrClosed
 	}
@@ -210,7 +170,7 @@ func (d *runtimeDebugSession) DeleteBreakpoint(id debugger.BreakpointID) error {
 	return nil
 }
 
-func (d *runtimeDebugSession) Breakpoints() []debugger.Breakpoint {
+func (d *remoteDebugSession) Breakpoints() []debugger.Breakpoint {
 	if d == nil {
 		return nil
 	}
@@ -227,7 +187,7 @@ func (d *runtimeDebugSession) Breakpoints() []debugger.Breakpoint {
 	return result
 }
 
-func (d *runtimeDebugSession) Frames() ([]debugger.Frame, error) {
+func (d *remoteDebugSession) Frames() ([]debugger.Frame, error) {
 	if d == nil || d.session == nil {
 		return nil, ErrClosed
 	}
@@ -235,11 +195,11 @@ func (d *runtimeDebugSession) Frames() ([]debugger.Frame, error) {
 	return d.session.Frames(d.ctx)
 }
 
-func (d *runtimeDebugSession) Locals() ([]debugger.Variable, error) {
+func (d *remoteDebugSession) Locals() ([]debugger.Variable, error) {
 	return d.FrameLocals(0)
 }
 
-func (d *runtimeDebugSession) FrameLocals(frame int) ([]debugger.Variable, error) {
+func (d *remoteDebugSession) FrameLocals(frame int) ([]debugger.Variable, error) {
 	if d == nil || d.session == nil {
 		return nil, ErrClosed
 	}
@@ -247,7 +207,7 @@ func (d *runtimeDebugSession) FrameLocals(frame int) ([]debugger.Variable, error
 	return d.session.FrameLocals(d.ctx, frame)
 }
 
-func (d *runtimeDebugSession) Variables(reference debugger.ValueReference) ([]debugger.Variable, error) {
+func (d *remoteDebugSession) Variables(reference debugger.ValueReference) ([]debugger.Variable, error) {
 	if d == nil || d.session == nil {
 		return nil, ErrClosed
 	}
@@ -255,11 +215,11 @@ func (d *runtimeDebugSession) Variables(reference debugger.ValueReference) ([]de
 	return d.session.Variables(d.ctx, reference)
 }
 
-func (d *runtimeDebugSession) Evaluate(ctx context.Context, expression string) (debugger.Value, error) {
+func (d *remoteDebugSession) Evaluate(ctx context.Context, expression string) (debugger.Value, error) {
 	return d.EvaluateFrame(ctx, 0, expression)
 }
 
-func (d *runtimeDebugSession) EvaluateFrame(
+func (d *remoteDebugSession) EvaluateFrame(
 	ctx context.Context,
 	frame int,
 	expression string,
@@ -271,7 +231,7 @@ func (d *runtimeDebugSession) EvaluateFrame(
 	return d.session.EvaluateFrame(ctx, frame, expression)
 }
 
-func (d *runtimeDebugSession) Close() error {
+func (d *remoteDebugSession) Close() error {
 	if d == nil || d.session == nil {
 		return ErrClosed
 	}

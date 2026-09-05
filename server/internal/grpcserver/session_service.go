@@ -22,7 +22,7 @@ func (s *Server) CreateSession(
 		return nil, rpcError(&core.DomainError{Kind: core.ErrorKindInvalidRequest, Message: err.Error()})
 	}
 
-	snapshot, err := s.executor.CreateSession(operation, core.CreateSessionInput{
+	id, err := s.executor.CreateSession(operation, core.CreateSessionInput{
 		PlanID:            core.PlanID(request.GetPlanId().GetValue()),
 		Parameters:        parameters,
 		OutputContentType: request.GetOutputContentType(),
@@ -32,7 +32,7 @@ func (s *Server) CreateSession(
 	}
 
 	return &wirev1.CreateSessionResponse{Session: &wirev1.Session{
-		Id: &wirev1.SessionId{Value: string(snapshot.ID)},
+		Id: &wirev1.SessionId{Value: string(id)},
 	}}, nil
 }
 
