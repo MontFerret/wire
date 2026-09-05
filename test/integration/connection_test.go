@@ -101,7 +101,7 @@ func TestConnectionLossReclaimsResources(t *testing.T) {
 					t.Fatalf("active operation silently succeeded after connection loss: event=%#v", terminalEvent)
 				}
 
-				if code := status.Code(err); err != nil && code != codes.Unavailable && code != codes.Canceled && !errors.Is(err, client.ErrClosed) && !errors.Is(err, client.ErrExecutionCancelled) {
+				if !expectedConnectionLoss(err, mode, shutdown) {
 					t.Fatalf("connection failure classification=%v", err)
 				}
 
@@ -111,6 +111,47 @@ func TestConnectionLossReclaimsResources(t *testing.T) {
 			})
 		}
 	}
+}
+
+func expectedConnectionLoss(err error, mode string, shutdown bool) bool {
+	if err == nil {
+		return true
+	}
+
+	// A wrapped join still contains independent operation and cleanup failures.
+	// Inspect every cause before matching a status or sentinel from the tree.
+	var joined interface{ Unwrap() []error }
+	if errors.As(err, &joined) {
+		for _, cause := range joined.Unwrap() {
+			if !expectedConnectionLoss(cause, mode, shutdown) {
+				return false
+			}
+		}
+
+		return true
+	}
+
+	if errors.Is(err, client.ErrClosed) || errors.Is(err, client.ErrExecutionCancelled) {
+		return true
+	}
+
+	switch status.Code(err) {
+	case codes.Unavailable, codes.Canceled:
+		return true
+	case codes.NotFound:
+		// Shutdown can remove the connection or execution before Run opens its
+		// watch. Debugger commands establish their watch before starting work.
+		if !shutdown || (mode != "runtime" && mode != "session") {
+			return false
+		}
+
+		var remote *client.Error
+		if errors.As(err, &remote) {
+			return remote.Category == failure.CategoryConnectionNotFound || remote.Category == failure.CategoryExecutionNotFound
+		}
+	}
+
+	return false
 }
 
 func TestWatchTerminationReturnsError(t *testing.T) {

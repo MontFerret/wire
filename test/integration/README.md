@@ -121,7 +121,12 @@ rejected creation.
 
 Abrupt connection loss returns errors. Graceful server shutdown can deliver a
 semantic debugger termination event before transport closure; the suite accepts
-that terminal outcome. Premature watch closure must not look like successful
+that terminal outcome. Runtime and normal-session execution can instead receive
+`NotFound` if shutdown removes the logical connection or execution before the
+client opens its watch. The suite accepts this only for server shutdown with a
+public `ConnectionNotFound` or `ExecutionNotFound` category, and checks each joined
+operation and cleanup error independently. Cancellation and exactly-once hosted
+cleanup remain required. Premature watch closure must not look like successful
 execution. Explicit debugger Close still owns cleanup after a watch-only failure.
 No automatic reconnection or protocol changes are introduced.
 
