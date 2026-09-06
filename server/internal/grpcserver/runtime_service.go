@@ -5,35 +5,34 @@ import (
 
 	"github.com/MontFerret/api"
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
+	wireexecution "github.com/MontFerret/wire/pkg/execution"
 	"github.com/MontFerret/wire/server/internal/core"
 )
 
 // RuntimeService adapts the runtime RPC contract to its core owners.
 type RuntimeService struct {
 	wirev1.UnimplementedRuntimeServiceServer
-	info        core.RuntimeInfo
+	info        Handshake
+	runtime     api.Runtime
 	connections *core.ConnectionRegistry
-	executor    *core.Executor
-	lifecycle   *core.Lifecycle
-	operations  *operationContextFactory
 }
 
 var _ wirev1.RuntimeServiceServer = (*RuntimeService)(nil)
 
 func (s *RuntimeService) Connect(_ *wirev1.ConnectRequest, stream wirev1.RuntimeService_ConnectServer) error {
-	connection := core.NewConnection()
-	if err := s.connections.Register(connection); err != nil {
+	connection, err := s.connections.Open()
+	if err != nil {
 		return rpcError(err)
 	}
 
 	defer func() {
-		_ = s.lifecycle.CloseConnection(context.Background(), connection.ID())
+		_ = s.connections.CloseConnection(context.Background(), connection.ID())
 	}()
 
 	response := &wirev1.ConnectResponse{
 		ConnectionId:    &wirev1.ConnectionId{Value: string(connection.ID())},
 		Protocol:        protocolInfo(s.info),
-		RuntimeIdentity: runtimeIdentity(s.info.RuntimeIdentity),
+		RuntimeIdentity: runtimeIdentity(s.info),
 	}
 
 	if err := stream.Send(response); err != nil {
@@ -49,7 +48,7 @@ func (s *RuntimeService) Connect(_ *wirev1.ConnectRequest, stream wirev1.Runtime
 }
 
 func (s *RuntimeService) CloseConnection(ctx context.Context, request *wirev1.CloseConnectionRequest) (*wirev1.CloseConnectionResponse, error) {
-	err := s.lifecycle.CloseConnection(ctx, core.ConnectionID(request.GetConnectionId().GetValue()))
+	err := s.connections.CloseConnection(ctx, core.ConnectionID(request.GetConnectionId().GetValue()))
 	if err != nil {
 		return nil, rpcError(err)
 	}
@@ -61,31 +60,24 @@ func (s *RuntimeService) Run(
 	ctx context.Context,
 	request *wirev1.RunRequest,
 ) (*wirev1.RunResponse, error) {
-	operation, cancel, err := s.operations.New(ctx, request.GetConnectionId())
+	operation, resources, cancel, err := prepareOperation(ctx, s.connections, request.GetConnectionId())
 	if err != nil {
 		return nil, err
 	}
 
 	defer cancel()
 
-	parameters, err := decodeParameters(request.GetParameters())
-	if err != nil {
-		return nil, rpcError(&core.DomainError{Kind: core.ErrorKindInvalidRequest, Message: err.Error()})
-	}
-
-	snapshot, err := s.executor.Run(operation, core.RunInput{
-		Source: api.Source{
-			Name:    request.GetSource().GetName(),
-			Content: request.GetSource().GetContent(),
-		},
-		Parameters:        parameters,
-		OutputContentType: request.GetOutputContentType(),
-	})
+	options, err := decodeSessionOptions(request.GetParameters(), request.GetOutputContentType())
 	if err != nil {
 		return nil, rpcError(err)
 	}
 
-	converted, err := execution(snapshot)
+	created, err := core.Run(operation, s.runtime, resources, decodeSource(request.GetSource()), options...)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+
+	converted, err := execution(created.ID(), wireexecution.Snapshot{State: wireexecution.StateRunning})
 	if err != nil {
 		return nil, rpcError(err)
 	}

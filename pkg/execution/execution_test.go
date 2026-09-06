@@ -38,12 +38,8 @@ func TestExecutionSemanticTypesUseUnifiedOutputAndSharedFailure(t *testing.T) {
 			Failure: terminalFailure,
 		},
 	}
-	identity := execution.Identity{Name: "host", Version: "1.0.0", InstanceID: "instance"}
 
 	if event.Sequence != 7 || event.Snapshot.Output != output || event.Snapshot.Failure != terminalFailure {
 		t.Fatalf("unexpected execution event: %#v", event)
-	}
-	if identity.Name != "host" || identity.Version != "1.0.0" || identity.InstanceID != "instance" {
-		t.Fatalf("unexpected runtime identity: %#v", identity)
 	}
 }

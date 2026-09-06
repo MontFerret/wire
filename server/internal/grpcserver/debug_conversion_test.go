@@ -69,13 +69,13 @@ func TestUnifiedDebuggerTypesPreservePortableProtocolFields(t *testing.T) {
 		t.Fatalf("unexpected variable transport projection: %#v", convertedVariable)
 	}
 
-	convertedSession, err := debugSession(core.DebugSessionRecord{Snapshot: wiredebugger.Snapshot{
+	convertedSession, err := debugSession("", wiredebugger.Snapshot{
 		State:            wiredebugger.StateStopped,
 		StopReason:       debugger.ReasonBreakpoint,
 		Location:         &resolved,
 		HitBreakpointIDs: []debugger.BreakpointID{7},
 		Depth:            3,
-	}})
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -252,9 +252,9 @@ func TestDebuggerBoundaryRejectsMalformedRepresentations(t *testing.T) {
 			name: "non-nil empty debug location",
 			err: func() error {
 				empty := source.Range{}
-				_, err := debugSession(core.DebugSessionRecord{Snapshot: wiredebugger.Snapshot{
+				_, err := debugSession("", wiredebugger.Snapshot{
 					State: wiredebugger.StateStopped, Location: &empty,
-				}})
+				})
 
 				return err
 			}(),
@@ -263,7 +263,7 @@ func TestDebuggerBoundaryRejectsMalformedRepresentations(t *testing.T) {
 		{
 			name: "negative runtime debug depth",
 			err: func() error {
-				_, err := debugSession(core.DebugSessionRecord{Snapshot: wiredebugger.Snapshot{State: wiredebugger.StateStopped, Depth: -1}})
+				_, err := debugSession("", wiredebugger.Snapshot{State: wiredebugger.StateStopped, Depth: -1})
 
 				return err
 			}(),

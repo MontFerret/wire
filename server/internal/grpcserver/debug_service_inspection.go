@@ -9,14 +9,14 @@ import (
 )
 
 func (s *DebugService) Frames(ctx context.Context, request *wirev1.FramesRequest) (*wirev1.FramesResponse, error) {
-	operation, cancel, err := s.operations.New(ctx, request.GetConnectionId())
+	operation, resources, cancel, err := prepareOperation(ctx, s.connections, request.GetConnectionId())
 	if err != nil {
 		return nil, err
 	}
 
 	defer cancel()
 
-	session, err := s.debugger.Session(operation, core.DebugSessionID(request.GetDebugSessionId().GetValue()))
+	session, err := resources.DebugSession(operation, core.DebugSessionID(request.GetDebugSessionId().GetValue()))
 	if err != nil {
 		return nil, rpcError(err)
 	}
@@ -40,14 +40,14 @@ func (s *DebugService) Frames(ctx context.Context, request *wirev1.FramesRequest
 }
 
 func (s *DebugService) FrameLocals(ctx context.Context, request *wirev1.FrameLocalsRequest) (*wirev1.FrameLocalsResponse, error) {
-	operation, cancel, err := s.operations.New(ctx, request.GetConnectionId())
+	operation, resources, cancel, err := prepareOperation(ctx, s.connections, request.GetConnectionId())
 	if err != nil {
 		return nil, err
 	}
 
 	defer cancel()
 
-	session, err := s.debugger.Session(operation, core.DebugSessionID(request.GetDebugSessionId().GetValue()))
+	session, err := resources.DebugSession(operation, core.DebugSessionID(request.GetDebugSessionId().GetValue()))
 	if err != nil {
 		return nil, rpcError(err)
 	}
@@ -57,21 +57,16 @@ func (s *DebugService) FrameLocals(ctx context.Context, request *wirev1.FrameLoc
 		return nil, rpcError(err)
 	}
 
-	result := make([]*wirev1.Variable, len(values))
-	for i, value := range values {
-		converted, err := variable(value)
-		if err != nil {
-			return nil, rpcError(err)
-		}
-
-		result[i] = converted
+	result, err := variablesToProto(values)
+	if err != nil {
+		return nil, rpcError(err)
 	}
 
 	return &wirev1.FrameLocalsResponse{Variables: result}, nil
 }
 
 func (s *DebugService) Variables(ctx context.Context, request *wirev1.VariablesRequest) (*wirev1.VariablesResponse, error) {
-	operation, cancel, err := s.operations.New(ctx, request.GetConnectionId())
+	operation, resources, cancel, err := prepareOperation(ctx, s.connections, request.GetConnectionId())
 	if err != nil {
 		return nil, err
 	}
@@ -83,7 +78,7 @@ func (s *DebugService) Variables(ctx context.Context, request *wirev1.VariablesR
 		return nil, rpcError(err)
 	}
 
-	session, err := s.debugger.Session(operation, core.DebugSessionID(request.GetDebugSessionId().GetValue()))
+	session, err := resources.DebugSession(operation, core.DebugSessionID(request.GetDebugSessionId().GetValue()))
 	if err != nil {
 		return nil, rpcError(err)
 	}
@@ -93,28 +88,23 @@ func (s *DebugService) Variables(ctx context.Context, request *wirev1.VariablesR
 		return nil, rpcError(err)
 	}
 
-	result := make([]*wirev1.Variable, len(values))
-	for i, value := range values {
-		converted, err := variable(value)
-		if err != nil {
-			return nil, rpcError(err)
-		}
-
-		result[i] = converted
+	result, err := variablesToProto(values)
+	if err != nil {
+		return nil, rpcError(err)
 	}
 
 	return &wirev1.VariablesResponse{Variables: result}, nil
 }
 
 func (s *DebugService) EvaluateFrame(ctx context.Context, request *wirev1.EvaluateFrameRequest) (*wirev1.EvaluateFrameResponse, error) {
-	operation, cancel, err := s.operations.New(ctx, request.GetConnectionId())
+	operation, resources, cancel, err := prepareOperation(ctx, s.connections, request.GetConnectionId())
 	if err != nil {
 		return nil, err
 	}
 
 	defer cancel()
 
-	session, err := s.debugger.Session(operation, core.DebugSessionID(request.GetDebugSessionId().GetValue()))
+	session, err := resources.DebugSession(operation, core.DebugSessionID(request.GetDebugSessionId().GetValue()))
 	if err != nil {
 		return nil, rpcError(err)
 	}

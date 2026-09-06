@@ -11,9 +11,8 @@ import (
 // PlanService adapts the plan RPC contract to its core owners.
 type PlanService struct {
 	wirev1.UnimplementedPlanServiceServer
-	compiler   *core.Compiler
-	lifecycle  *core.Lifecycle
-	operations *operationContextFactory
+	runtime     api.Runtime
+	connections *core.ConnectionRegistry
 }
 
 var _ wirev1.PlanServiceServer = (*PlanService)(nil)
@@ -43,43 +42,35 @@ func (s *PlanService) compile(
 	options *wirev1.CompileOptions,
 	debug bool,
 ) (*wirev1.Plan, error) {
-	operation, cancel, err := s.operations.New(ctx, connectionID)
+	operation, resources, cancel, err := prepareOperation(ctx, s.connections, connectionID)
 	if err != nil {
 		return nil, err
 	}
 
 	defer cancel()
 
-	optimization, present, err := optimizationLevel(options)
+	planOptions, err := decodeCompileOptions(options)
 	if err != nil {
 		return nil, rpcError(err)
 	}
 
-	snapshot, err := s.compiler.Compile(operation, core.CompileInput{
-		Source: api.Source{
-			Name:    source.GetName(),
-			Content: source.GetContent(),
-		},
-		Debuggable:           debug,
-		OptimizationLevel:    optimization,
-		HasOptimizationLevel: present,
-	})
+	compiled, err := core.CompilePlan(operation, s.runtime, resources, decodeSource(source), debug, planOptions...)
 	if err != nil {
 		return nil, rpcError(err)
 	}
 
-	return plan(snapshot), nil
+	return plan(compiled), nil
 }
 
 func (s *PlanService) ReleasePlan(ctx context.Context, request *wirev1.ReleasePlanRequest) (*wirev1.ReleasePlanResponse, error) {
-	operation, cancel, err := s.operations.New(ctx, request.GetConnectionId())
+	operation, resources, cancel, err := prepareOperation(ctx, s.connections, request.GetConnectionId())
 	if err != nil {
 		return nil, err
 	}
 
 	defer cancel()
 
-	if err := s.lifecycle.ReleasePlan(operation, core.PlanID(request.GetPlanId().GetValue())); err != nil {
+	if err := resources.ReleasePlan(operation, core.PlanID(request.GetPlanId().GetValue())); err != nil {
 		return nil, rpcError(err)
 	}
 

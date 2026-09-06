@@ -6,14 +6,14 @@ import (
 )
 
 func (s *DebugService) WatchDebug(request *wirev1.WatchDebugRequest, stream wirev1.DebugService_WatchDebugServer) error {
-	operation, cancel, err := s.operations.New(stream.Context(), request.GetConnectionId())
+	operation, resources, cancel, err := prepareOperation(stream.Context(), s.connections, request.GetConnectionId())
 	if err != nil {
 		return err
 	}
 
 	defer cancel()
 
-	session, err := s.debugger.Session(operation, core.DebugSessionID(request.GetDebugSessionId().GetValue()))
+	session, err := resources.DebugSession(operation, core.DebugSessionID(request.GetDebugSessionId().GetValue()))
 	if err != nil {
 		return rpcError(err)
 	}

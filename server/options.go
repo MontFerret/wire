@@ -1,12 +1,16 @@
 package server
 
-import (
-	"errors"
-
-	"github.com/MontFerret/wire/pkg/execution"
-)
+import "errors"
 
 type (
+	// RuntimeIdentity is optional host-supplied handshake metadata. Wire does
+	// not derive it from the runtime implementation or process environment.
+	RuntimeIdentity struct {
+		Name       string
+		Version    string
+		InstanceID string
+	}
+
 	// Option configures a Server without transferring host ownership.
 	Option interface {
 		apply(*config) error
@@ -15,7 +19,7 @@ type (
 	serverOptionFunc func(*config) error
 
 	config struct {
-		runtimeIdentity execution.Identity
+		runtimeIdentity RuntimeIdentity
 		limits          Limits
 	}
 )
@@ -27,7 +31,7 @@ func (option serverOptionFunc) apply(cfg *config) error {
 // WithRuntimeIdentity publishes optional host application identity during the
 // Connect handshake. Name is required; Wire does not derive identity from the
 // process or environment.
-func WithRuntimeIdentity(identity execution.Identity) Option {
+func WithRuntimeIdentity(identity RuntimeIdentity) Option {
 	return serverOptionFunc(func(cfg *config) error {
 		if identity.Name == "" {
 			return errors.New("runtime identity name is required")

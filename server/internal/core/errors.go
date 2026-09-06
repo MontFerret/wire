@@ -46,11 +46,12 @@ func failureFromError(category failure.Category, err error) *failure.Failure {
 	return &failure.Failure{
 		Category:    category,
 		Message:     "runtime operation failed",
-		Diagnostics: diagnosticsFromError(err),
+		Diagnostics: DiagnosticsFromError(err),
 	}
 }
 
-func diagnosticsFromError(err error) diagnostics.Diagnostics {
+// DiagnosticsFromError extracts and detaches only canonical diagnostics from an error chain.
+func DiagnosticsFromError(err error) diagnostics.Diagnostics {
 	if err == nil {
 		return nil
 	}

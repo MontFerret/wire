@@ -4,42 +4,36 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 
 	"github.com/MontFerret/api"
 	"github.com/MontFerret/wire/server/internal/lifecycle"
 	"github.com/MontFerret/wire/server/internal/panicboundary"
+	"github.com/google/uuid"
 )
 
-// Session owns one durable Unified API session and admits one execution at a time.
+// Session owns one durable hosted session. Its execution slot remains occupied
+// through execution release, including after the run reaches a terminal state.
 type Session struct {
-	mu             sync.Mutex
-	id             SessionID
-	owner          ConnectionID
-	planID         PlanID
-	session        api.Session
-	ctx            context.Context
-	cancel         context.CancelCauseFunc
-	closing        bool
-	poisoned       bool
-	active         ExecutionID
-	childCreations sync.WaitGroup
-	close          lifecycle.Close
-	release        lifecycle.Close
+	id       SessionID
+	plan     *Plan
+	session  api.Session
+	ctx      context.Context
+	cancel   context.CancelCauseFunc
+	poisoned atomic.Bool
+	// active and creation admission are guarded by plan.store.mu.
+	active   *Execution
+	creating sync.WaitGroup
+	release  lifecycle.Close
 }
 
-func newSession(
-	id SessionID,
-	owner ConnectionID,
-	planID PlanID,
-	session api.Session,
-	ctx context.Context,
-	cancel context.CancelCauseFunc,
-) *Session {
+func newSession(plan *Plan, hosted api.Session) *Session {
+	ctx, cancel := context.WithCancelCause(plan.store.ctx)
+
 	return &Session{
-		id:      id,
-		owner:   owner,
-		planID:  planID,
-		session: session,
+		id:      SessionID(uuid.NewString()),
+		plan:    plan,
+		session: hosted,
 		ctx:     ctx,
 		cancel:  cancel,
 	}
@@ -49,99 +43,107 @@ func (s *Session) ID() SessionID {
 	return s.id
 }
 
-func (s *Session) Context() context.Context {
-	return s.ctx
+func (s *Session) Execute(ctx context.Context) (*Execution, error) {
+	if err := s.plan.store.operationError(ctx); err != nil {
+		return nil, err
+	}
+
+	r := s.plan.store
+	if err := r.beginCreation(executionResource, s.plan); err != nil {
+		return nil, err
+	}
+
+	committed := false
+	defer func() { r.finishCreation(executionResource, s.plan, committed) }()
+
+	r.mu.Lock()
+	if r.sessions[s.id] != s || s.release.Started() {
+		r.mu.Unlock()
+
+		return nil, notFound(ErrorKindSessionNotFound, string(s.id))
+	}
+
+	if s.poisoned.Load() {
+		r.mu.Unlock()
+
+		return nil, invalidState("session cannot run after a runtime panic", nil)
+	}
+
+	if s.active != nil {
+		r.mu.Unlock()
+
+		return nil, invalidState("session already has an active execution", nil)
+	}
+
+	created := newExecution(r, s.plan, s, s.run, nil)
+	s.active = created
+	s.creating.Add(1)
+	r.mu.Unlock()
+	defer s.creating.Done()
+
+	if err := r.registerExecution(ctx, created); err != nil {
+		created.cancel(context.Canceled)
+		r.mu.Lock()
+		s.active = nil
+		r.mu.Unlock()
+
+		return nil, err
+	}
+
+	committed = true
+	go created.run()
+
+	return created, nil
 }
 
-func (s *Session) Run(ctx context.Context) (api.Output, error) {
+func (s *Session) run(ctx context.Context) (api.Output, error) {
 	output, err := panicboundary.Call(func() (api.Output, error) {
 		return s.session.Run(ctx)
 	})
 	var panicErr *panicboundary.Error
 	if errors.As(err, &panicErr) {
-		s.mu.Lock()
-		s.poisoned = true
-		s.mu.Unlock()
+		s.poisoned.Store(true)
 	}
 
 	return output, runtimePanicError("run runtime session", err)
 }
 
-func (s *Session) beginExecution(id ExecutionID) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if s.closing {
-		return notFound(ErrorKindSessionNotFound, string(s.id))
+func (s *Session) Release(ctx context.Context) error {
+	r := s.plan.store
+	r.mu.Lock()
+	started := s.release.Begin()
+	if started {
+		s.cancel(context.Canceled)
 	}
 
-	if s.poisoned {
-		return invalidState("session cannot run after a runtime panic", nil)
+	r.mu.Unlock()
+	if started {
+		go s.settleRelease()
 	}
 
-	if s.active != "" {
-		return invalidState("session already has an active execution", nil)
-	}
-
-	s.active = id
-	s.childCreations.Add(1)
-
-	return nil
+	return s.release.Wait(ctx)
 }
 
-func (s *Session) finishExecutionCreation() {
-	s.childCreations.Done()
-}
-
-func (s *Session) finishExecution(id ExecutionID) {
-	s.mu.Lock()
-	if s.active == id {
-		s.active = ""
-	}
-
-	s.mu.Unlock()
-}
-
-func (s *Session) markClosing() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if s.closing {
-		return false
-	}
-
-	s.closing = true
-	s.cancel(context.Canceled)
-
-	return s.release.Begin()
-}
-
-func (s *Session) waitChildCreations() {
-	s.childCreations.Wait()
-}
-
-func (s *Session) Close(ctx context.Context) error {
-	if s.close.Begin() {
-		go s.settleClose()
-	}
-
-	return s.close.Wait(ctx)
-}
-
-func (s *Session) settleClose() {
+func (s *Session) settleRelease() {
 	var err error
+	r := s.plan.store
 	defer func() {
-		s.close.Finish(err)
+		if recover() != nil {
+			err = errors.Join(err, internalError(errors.New("session release panicked")))
+		}
+
+		r.removeSession(s)
+
+		s.release.Finish(err)
 	}()
 
-	s.cancel(context.Canceled)
-	err = closeAPISession(s.session)
-}
+	s.creating.Wait()
+	r.mu.Lock()
+	execution := s.active
+	r.mu.Unlock()
+	if execution != nil {
+		err = execution.Release(context.Background())
+	}
 
-func (s *Session) finishRelease(err error) {
-	s.release.Finish(err)
-}
-
-func (s *Session) waitRelease(ctx context.Context) error {
-	return s.release.Wait(ctx)
+	err = errors.Join(err, closeAPISession(s.session))
 }

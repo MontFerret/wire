@@ -5,8 +5,8 @@ import (
 	"github.com/MontFerret/wire/server"
 )
 
-// Check exact type identity as well as the public constructor signature.
+// Server construction accepts the canonical runtime and server-owned identity.
 var (
-	_ func() server.Runtime                                          = (func() api.Runtime)(nil)
-	_ func(server.Runtime, ...server.Option) (*server.Server, error) = server.NewServer
+	_ func(server.RuntimeIdentity) server.Option                  = server.WithRuntimeIdentity
+	_ func(api.Runtime, ...server.Option) (*server.Server, error) = server.NewServer
 )

@@ -12,19 +12,19 @@ import (
 	"github.com/MontFerret/wire/pkg/failure"
 	"github.com/MontFerret/wire/server/internal/lifecycle"
 	"github.com/MontFerret/wire/server/internal/panicboundary"
+	"github.com/google/uuid"
 )
 
 type DebugSession struct {
 	// operationMu serializes state-dependent operations and command commits.
 	// The active runtime resume and close paths intentionally do not hold it
-	// so pause and cancellation can reach the controller.
+	// so pause and cancellation can reach the hosted debugger.
 	operationMu sync.Mutex
 	// stateMu protects only Wire-visible state and never spans a runtime call.
 	stateMu     sync.Mutex
 	id          DebugSessionID
-	owner       ConnectionID
-	planID      PlanID
-	controller  *DebugController
+	plan        *Plan
+	session     debugger.Session
 	ctx         context.Context
 	cancel      context.CancelCauseFunc
 	state       debugSessionState
@@ -34,30 +34,47 @@ type DebugSession struct {
 	release     lifecycle.Close
 }
 
-func newDebugSession(
-	id DebugSessionID,
-	owner ConnectionID,
-	planID PlanID,
-	controller *DebugController,
-	ctx context.Context,
-	cancel context.CancelCauseFunc,
-	maxWatchers int,
-	maxBreakpoints int,
-) *DebugSession {
+func newDebugSession(plan *Plan, hosted debugger.Session) *DebugSession {
+	ctx, cancel := context.WithCancelCause(plan.store.ctx)
 	session := &DebugSession{
-		id:          id,
-		owner:       owner,
-		planID:      planID,
-		controller:  controller,
+		id:          DebugSessionID(uuid.NewString()),
+		plan:        plan,
+		session:     hosted,
 		ctx:         ctx,
 		cancel:      cancel,
 		state:       debugSessionState{status: wiredebugger.StateCreated},
-		breakpoints: newBreakpointSet(maxBreakpoints),
-		events:      newEventStream(maxWatchers, cloneDebugEvent, sequenceDebugEvent),
+		breakpoints: newBreakpointSet(plan.store.limits.Breakpoints),
+		events:      newEventStream(plan.store.limits.Watchers, cloneDebugEvent, sequenceDebugEvent),
 	}
 	session.publishLocked(wiredebugger.EventCreated, false)
 
 	return session
+}
+
+func (d *DebugSession) Release(ctx context.Context) error {
+	d.plan.store.mu.Lock()
+	started := d.release.Begin()
+	d.plan.store.mu.Unlock()
+	if started {
+		go d.settleRelease()
+	}
+
+	return d.release.Wait(ctx)
+}
+
+func (d *DebugSession) settleRelease() {
+	var err error
+	defer func() {
+		if recover() != nil {
+			err = errors.Join(err, internalError(errors.New("debug session release panicked")))
+		}
+
+		d.plan.store.removeDebugSession(d)
+
+		d.release.Finish(err)
+	}()
+
+	err = d.Close(context.Background())
 }
 
 func (d *DebugSession) Close(ctx context.Context) error {
@@ -70,22 +87,22 @@ func (d *DebugSession) ID() DebugSessionID {
 	return d.id
 }
 
-func (d *DebugSession) Stop(ctx context.Context) (DebugSessionRecord, error) {
-	snapshot := d.snapshot()
-	if !snapshot.Snapshot.State.Terminal() {
+func (d *DebugSession) Stop(ctx context.Context) (wiredebugger.Snapshot, error) {
+	snapshot := d.Snapshot()
+	if !snapshot.State.Terminal() {
 		if err := d.Close(ctx); err != nil {
-			return DebugSessionRecord{}, err
+			return wiredebugger.Snapshot{}, err
 		}
 
-		snapshot = d.snapshot()
+		snapshot = d.Snapshot()
 	}
 
 	return snapshot, nil
 }
 
-func (d *DebugSession) Pause(ctx context.Context) (DebugSessionRecord, error) {
+func (d *DebugSession) Pause(ctx context.Context) (wiredebugger.Snapshot, error) {
 	if err := ctx.Err(); err != nil {
-		return DebugSessionRecord{}, err
+		return wiredebugger.Snapshot{}, err
 	}
 
 	d.operationMu.Lock()
@@ -95,20 +112,20 @@ func (d *DebugSession) Pause(ctx context.Context) (DebugSessionRecord, error) {
 	if d.state.status != wiredebugger.StateRunning {
 		d.stateMu.Unlock()
 
-		return DebugSessionRecord{}, invalidState("debug session is not running", nil)
+		return wiredebugger.Snapshot{}, invalidState("debug session is not running", nil)
 	}
 
 	d.stateMu.Unlock()
 
-	if err := d.controller.Pause(); err != nil {
+	if err := panicboundary.Do(d.session.Pause); err != nil {
 		if panicErr := d.poisonAfterRuntimePanic("pause runtime debugger", err); panicErr != nil {
-			return DebugSessionRecord{}, panicErr
+			return wiredebugger.Snapshot{}, panicErr
 		}
 
-		return DebugSessionRecord{}, invalidState("pause failed", err)
+		return wiredebugger.Snapshot{}, invalidState("pause failed", err)
 	}
 
-	return d.snapshot(), nil
+	return d.Snapshot(), nil
 }
 
 func (d *DebugSession) SetBreakpoint(
@@ -159,7 +176,9 @@ func (d *DebugSession) SetBreakpointAt(
 		return debugger.Breakpoint{}, err
 	}
 
-	value, err := d.controller.SetBreakpoint(location, options)
+	value, err := panicboundary.Call(func() (debugger.Breakpoint, error) {
+		return d.session.SetBreakpointAt(location, options)
+	})
 	if err != nil {
 		if panicErr := d.poisonAfterRuntimePanic("set runtime breakpoint", err); panicErr != nil {
 			return debugger.Breakpoint{}, panicErr
@@ -201,7 +220,7 @@ func (d *DebugSession) DeleteBreakpoint(ctx context.Context, breakpointID debugg
 		return err
 	}
 
-	if err := d.controller.DeleteBreakpoint(value.ID); err != nil {
+	if err := panicboundary.Do(func() error { return d.session.DeleteBreakpoint(value.ID) }); err != nil {
 		if panicErr := d.poisonAfterRuntimePanic("delete runtime breakpoint", err); panicErr != nil {
 			return panicErr
 		}
@@ -214,24 +233,24 @@ func (d *DebugSession) DeleteBreakpoint(ctx context.Context, breakpointID debugg
 	return nil
 }
 
-func (d *DebugSession) Start(ctx context.Context) (DebugSessionRecord, error) {
-	return d.start(ctx, true, d.controller.Start)
+func (d *DebugSession) Start(ctx context.Context) (wiredebugger.Snapshot, error) {
+	return d.start(ctx, true, d.session.Start)
 }
 
-func (d *DebugSession) Continue(ctx context.Context) (DebugSessionRecord, error) {
-	return d.start(ctx, false, d.controller.Continue)
+func (d *DebugSession) Continue(ctx context.Context) (wiredebugger.Snapshot, error) {
+	return d.start(ctx, false, d.session.Continue)
 }
 
-func (d *DebugSession) StepOver(ctx context.Context) (DebugSessionRecord, error) {
-	return d.start(ctx, false, d.controller.StepOver)
+func (d *DebugSession) StepOver(ctx context.Context) (wiredebugger.Snapshot, error) {
+	return d.start(ctx, false, d.session.StepOver)
 }
 
-func (d *DebugSession) StepIn(ctx context.Context) (DebugSessionRecord, error) {
-	return d.start(ctx, false, d.controller.StepIn)
+func (d *DebugSession) StepIn(ctx context.Context) (wiredebugger.Snapshot, error) {
+	return d.start(ctx, false, d.session.StepIn)
 }
 
-func (d *DebugSession) StepOut(ctx context.Context) (DebugSessionRecord, error) {
-	return d.start(ctx, false, d.controller.StepOut)
+func (d *DebugSession) StepOut(ctx context.Context) (wiredebugger.Snapshot, error) {
+	return d.start(ctx, false, d.session.StepOut)
 }
 
 func (d *DebugSession) Frames(ctx context.Context) ([]debugger.Frame, error) {
@@ -242,7 +261,7 @@ func (d *DebugSession) Frames(ctx context.Context) ([]debugger.Frame, error) {
 		return nil, err
 	}
 
-	values, err := d.controller.Frames()
+	values, err := panicboundary.Call(d.session.Frames)
 	if err != nil {
 		if panicErr := d.poisonAfterRuntimePanic("read runtime debugger frames", err); panicErr != nil {
 			return nil, panicErr
@@ -251,7 +270,7 @@ func (d *DebugSession) Frames(ctx context.Context) ([]debugger.Frame, error) {
 		return nil, invalidState("frames failed", err)
 	}
 
-	return values, nil
+	return append([]debugger.Frame(nil), values...), nil
 }
 
 func (d *DebugSession) FrameLocals(ctx context.Context, frame int) ([]debugger.Variable, error) {
@@ -266,7 +285,9 @@ func (d *DebugSession) FrameLocals(ctx context.Context, frame int) ([]debugger.V
 		return nil, err
 	}
 
-	values, err := d.controller.FrameLocals(frame)
+	values, err := panicboundary.Call(func() ([]debugger.Variable, error) {
+		return d.session.FrameLocals(frame)
+	})
 	if err != nil {
 		if panicErr := d.poisonAfterRuntimePanic("read runtime debugger frame locals", err); panicErr != nil {
 			return nil, panicErr
@@ -275,7 +296,7 @@ func (d *DebugSession) FrameLocals(ctx context.Context, frame int) ([]debugger.V
 		return nil, invalidState("frame locals failed", err)
 	}
 
-	return values, nil
+	return append([]debugger.Variable(nil), values...), nil
 }
 
 func (d *DebugSession) Variables(
@@ -293,7 +314,9 @@ func (d *DebugSession) Variables(
 		return nil, err
 	}
 
-	values, err := d.controller.Variables(reference)
+	values, err := panicboundary.Call(func() ([]debugger.Variable, error) {
+		return d.session.Variables(reference)
+	})
 	if err != nil {
 		if panicErr := d.poisonAfterRuntimePanic("read runtime debugger variables", err); panicErr != nil {
 			return nil, panicErr
@@ -302,7 +325,7 @@ func (d *DebugSession) Variables(
 		return nil, invalidState("variables failed", err)
 	}
 
-	return values, nil
+	return append([]debugger.Variable(nil), values...), nil
 }
 
 func (d *DebugSession) EvaluateFrame(
@@ -325,10 +348,12 @@ func (d *DebugSession) EvaluateFrame(
 		return debugger.Value{}, err
 	}
 
-	evaluateCtx, cancel := d.operationContext(ctx)
+	evaluateCtx, cancel := OperationContext(ctx, d.ctx)
 	defer cancel()
 
-	value, err := d.controller.EvaluateFrame(evaluateCtx, frame, expression)
+	value, err := panicboundary.Call(func() (debugger.Value, error) {
+		return d.session.EvaluateFrame(evaluateCtx, frame, expression)
+	})
 	if err != nil {
 		if panicErr := d.poisonAfterRuntimePanic("evaluate with runtime debugger", err); panicErr != nil {
 			return debugger.Value{}, panicErr
@@ -358,16 +383,16 @@ func (d *DebugSession) start(
 	ctx context.Context,
 	initial bool,
 	command func(context.Context) (*debugger.Event, error),
-) (DebugSessionRecord, error) {
+) (wiredebugger.Snapshot, error) {
 	if err := ctx.Err(); err != nil {
-		return DebugSessionRecord{}, err
+		return wiredebugger.Snapshot{}, err
 	}
 
 	d.operationMu.Lock()
 	defer d.operationMu.Unlock()
 
 	if err := ctx.Err(); err != nil {
-		return DebugSessionRecord{}, err
+		return wiredebugger.Snapshot{}, err
 	}
 
 	d.stateMu.Lock()
@@ -379,7 +404,7 @@ func (d *DebugSession) start(
 	if d.state.status != expected {
 		d.stateMu.Unlock()
 
-		return DebugSessionRecord{}, invalidState("debug command is not valid in the current state", nil)
+		return wiredebugger.Snapshot{}, invalidState("debug command is not valid in the current state", nil)
 	}
 
 	d.state.beginRunning()
@@ -398,7 +423,9 @@ func (d *DebugSession) start(
 }
 
 func (d *DebugSession) runCommand(command func(context.Context) (*debugger.Event, error)) {
-	event, err := command(d.ctx)
+	event, err := panicboundary.Call(func() (*debugger.Event, error) {
+		return command(d.ctx)
+	})
 	if err != nil {
 		d.finishCommand(nil, err)
 
@@ -522,18 +549,6 @@ func (d *DebugSession) requireStopped(ctx context.Context) error {
 	return nil
 }
 
-func (d *DebugSession) operationContext(ctx context.Context) (context.Context, context.CancelFunc) {
-	operation, cancel := context.WithCancelCause(ctx)
-	stop := context.AfterFunc(d.ctx, func() {
-		cancel(context.Cause(d.ctx))
-	})
-
-	return operation, func() {
-		stop()
-		cancel(context.Canceled)
-	}
-}
-
 // poisonAfterRuntimePanic applies the aggregate policy for a debugger
 // implementation panic. The caller holds operationMu, so the failed transition
 // is serialized with commands and breakpoint bookkeeping.
@@ -557,21 +572,21 @@ func (d *DebugSession) poisonAfterRuntimePanic(operation string, err error) erro
 	return runtimePanicError(operation, err)
 }
 
-func (d *DebugSession) snapshot() DebugSessionRecord {
+func (d *DebugSession) Snapshot() wiredebugger.Snapshot {
 	d.stateMu.Lock()
 	defer d.stateMu.Unlock()
 
 	return d.snapshotLocked()
 }
 
-func (d *DebugSession) snapshotLocked() DebugSessionRecord {
-	return d.state.snapshot(d.id)
+func (d *DebugSession) snapshotLocked() wiredebugger.Snapshot {
+	return d.state.snapshot()
 }
 
 func (d *DebugSession) publishLocked(kind wiredebugger.EventKind, terminal bool) {
 	d.events.publish(wiredebugger.Event{
 		Kind:     kind,
-		Snapshot: d.snapshotLocked().Snapshot,
+		Snapshot: d.snapshotLocked(),
 	}, terminal)
 }
 
@@ -594,7 +609,7 @@ func (d *DebugSession) settleClose() {
 	}()
 
 	d.cancel(context.Canceled)
-	err = d.controller.Close()
+	err = closeAPIDebugSession(d.session)
 
 	d.operationMu.Lock()
 	d.stateMu.Lock()

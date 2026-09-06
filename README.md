@@ -53,8 +53,8 @@ See [Wire Protocol](docs/protocol.md) for every RPC/message/enum, lifecycle and 
 The host chooses and configures both the runtime implementation and endpoint. This function accepts caller-owned values and does not close either one:
 
 ```go
-func serveRuntime(ctx context.Context, hostRuntime server.Runtime, listener net.Listener) error {
-    wireServer, err := server.NewServer(hostRuntime, server.WithRuntimeIdentity(execution.Identity{
+func serveRuntime(ctx context.Context, hostRuntime api.Runtime, listener net.Listener) error {
+    wireServer, err := server.NewServer(hostRuntime, server.WithRuntimeIdentity(server.RuntimeIdentity{
         Name: "my-app", Version: "1.0.0", InstanceID: "worker-1",
     }))
     if err != nil {
@@ -65,9 +65,13 @@ func serveRuntime(ctx context.Context, hostRuntime server.Runtime, listener net.
 }
 ```
 
-`server.Runtime` aliases the canonical `api.Runtime` interface. The alias lets
-host-facing function signatures use the server package without changing runtime
-ownership or requiring an adapter.
+`NewServer` accepts the canonical `api.Runtime` directly. `server.RuntimeIdentity`
+is optional host-supplied handshake metadata.
+
+For existing hosts, replace `server.Runtime` with `api.Runtime` and
+`execution.Identity` with `server.RuntimeIdentity`. The old alias and identity
+type were removed without compatibility shims; protocol and ownership behavior
+are unchanged.
 
 For an application-private Unix socket, the caller creates `net.Listen("unix", socket)`, applies appropriate directory and socket permissions, and closes both the listener and runtime after the Wire server has shut down.
 

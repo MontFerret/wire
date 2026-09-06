@@ -3,11 +3,11 @@ package core
 import (
 	"context"
 	"errors"
-	wiredebugger "github.com/MontFerret/wire/pkg/debugger"
 	"testing"
 
 	"github.com/MontFerret/api/debugger"
 	"github.com/MontFerret/api/source"
+	wiredebugger "github.com/MontFerret/wire/pkg/debugger"
 )
 
 func TestBreakpointSetOwnsOnlyBookkeepingAndCapacity(t *testing.T) {
@@ -105,15 +105,9 @@ func newTestCoreDebugSession(t *testing.T, runtime debugger.Session, maxBreakpoi
 
 	debugCtx, cancel := context.WithCancelCause(context.Background())
 	t.Cleanup(func() { cancel(context.Canceled) })
+	limits := testLimits().resources()
+	limits.Watchers, limits.Breakpoints = 1, maxBreakpoints
+	plan := &Plan{store: newResourceStore(debugCtx, limits)}
 
-	return newDebugSession(
-		"session",
-		"owner",
-		"plan",
-		newDebugController(runtime),
-		debugCtx,
-		cancel,
-		1,
-		maxBreakpoints,
-	)
+	return newDebugSession(plan, runtime)
 }

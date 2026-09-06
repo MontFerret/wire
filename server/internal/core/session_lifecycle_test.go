@@ -25,12 +25,12 @@ func TestDurableSessionRunsSequentiallyOnOneHostedSession(t *testing.T) {
 	connection := newTestConnection(t, &spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 		return plan, nil
 	}})
-	compiled, err := connection.Compile(context.Background(), CompileInput{Source: api.Source{Content: "RETURN @input"}})
+	compiled, err := connection.Compile(context.Background(), compileRequest{Source: api.Source{Content: "RETURN @input"}})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	created, err := connection.CreateSession(context.Background(), CreateSessionInput{
+	created, err := connection.CreateSession(context.Background(), sessionRequest{
 		PlanID:            compiled.ID,
 		Parameters:        map[string]any{"input": int64(42)},
 		OutputContentType: "application/json",
@@ -195,7 +195,7 @@ func TestSessionLimitCountsPendingAndClosingSessions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	compiled, err := connection.Compile(context.Background(), CompileInput{Source: api.Source{Content: "RETURN 1"}})
+	compiled, err := connection.Compile(context.Background(), compileRequest{Source: api.Source{Content: "RETURN 1"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -205,7 +205,7 @@ func TestSessionLimitCountsPendingAndClosingSessions(t *testing.T) {
 		err     error
 	}, 1)
 	go func() {
-		session, createErr := connection.CreateSession(context.Background(), CreateSessionInput{PlanID: compiled.ID})
+		session, createErr := connection.CreateSession(context.Background(), sessionRequest{PlanID: compiled.ID})
 		creation <- struct {
 			session SessionID
 			err     error
@@ -213,7 +213,7 @@ func TestSessionLimitCountsPendingAndClosingSessions(t *testing.T) {
 	}()
 	<-constructorStarted
 
-	if _, err := connection.CreateSession(context.Background(), CreateSessionInput{PlanID: compiled.ID}); !hasCategory(err, ErrorKindResourceExhausted) {
+	if _, err := connection.CreateSession(context.Background(), sessionRequest{PlanID: compiled.ID}); !hasCategory(err, ErrorKindResourceExhausted) {
 		t.Fatalf("pending session did not count against limit: %v", err)
 	}
 	close(finishConstructor)
@@ -226,13 +226,13 @@ func TestSessionLimitCountsPendingAndClosingSessions(t *testing.T) {
 	go func() { release <- connection.ReleaseSession(context.Background(), created.session) }()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		if _, err := connection.CreateSession(context.Background(), CreateSessionInput{PlanID: compiled.ID}); hasCategory(err, ErrorKindResourceExhausted) {
+		if _, err := connection.CreateSession(context.Background(), sessionRequest{PlanID: compiled.ID}); hasCategory(err, ErrorKindResourceExhausted) {
 			break
 		}
 		time.Sleep(time.Millisecond)
 	}
 
-	if _, err := connection.CreateSession(context.Background(), CreateSessionInput{PlanID: compiled.ID}); !hasCategory(err, ErrorKindResourceExhausted) {
+	if _, err := connection.CreateSession(context.Background(), sessionRequest{PlanID: compiled.ID}); !hasCategory(err, ErrorKindResourceExhausted) {
 		t.Fatalf("closing session did not count against limit: %v", err)
 	}
 	close(finishClose)
@@ -240,7 +240,7 @@ func TestSessionLimitCountsPendingAndClosingSessions(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	createdAgain, err := connection.CreateSession(context.Background(), CreateSessionInput{PlanID: compiled.ID})
+	createdAgain, err := connection.CreateSession(context.Background(), sessionRequest{PlanID: compiled.ID})
 	if err != nil {
 		t.Fatalf("settled session did not release its limit slot: %v", err)
 	}
@@ -250,7 +250,7 @@ func TestSessionLimitCountsPendingAndClosingSessions(t *testing.T) {
 	}
 }
 
-func openTestSession(t *testing.T, runtimeSession api.Session) (*testEnvironment, PlanSnapshot, SessionID) {
+func openTestSession(t *testing.T, runtimeSession api.Session) (*testEnvironment, planResult, SessionID) {
 	t.Helper()
 	plan := &spyPlan{newSession: func(context.Context, sessionOptions) (api.Session, error) {
 		return runtimeSession, nil
@@ -258,11 +258,11 @@ func openTestSession(t *testing.T, runtimeSession api.Session) (*testEnvironment
 	connection := newTestConnection(t, &spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 		return plan, nil
 	}})
-	compiled, err := connection.Compile(context.Background(), CompileInput{Source: api.Source{Content: "RETURN 1"}})
+	compiled, err := connection.Compile(context.Background(), compileRequest{Source: api.Source{Content: "RETURN 1"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	created, err := connection.CreateSession(context.Background(), CreateSessionInput{PlanID: compiled.ID})
+	created, err := connection.CreateSession(context.Background(), sessionRequest{PlanID: compiled.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -277,13 +277,13 @@ func TestSessionCreationFailureDoesNotLeakLimit(t *testing.T) {
 	connection := newTestConnection(t, &spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 		return plan, nil
 	}})
-	compiled, err := connection.Compile(context.Background(), CompileInput{Source: api.Source{Content: "RETURN 1"}})
+	compiled, err := connection.Compile(context.Background(), compileRequest{Source: api.Source{Content: "RETURN 1"}})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	for range 2 {
-		if _, err := connection.CreateSession(context.Background(), CreateSessionInput{PlanID: compiled.ID}); !hasCategory(err, ErrorKindInternal) {
+		if _, err := connection.CreateSession(context.Background(), sessionRequest{PlanID: compiled.ID}); !hasCategory(err, ErrorKindInternal) {
 			t.Fatalf("unexpected creation failure: %v", err)
 		}
 	}

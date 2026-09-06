@@ -12,13 +12,13 @@ func (s *DebugService) debugCommand(
 	ctx context.Context,
 	connectionID *wirev1.ConnectionId,
 	sessionID *wirev1.DebugSessionId,
-) (*core.Context, context.CancelFunc, *core.DebugSession, error) {
-	operation, cancel, err := s.operations.New(ctx, connectionID)
+) (context.Context, context.CancelFunc, *core.DebugSession, error) {
+	operation, resources, cancel, err := prepareOperation(ctx, s.connections, connectionID)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 
-	session, err := s.debugger.Session(operation, core.DebugSessionID(sessionID.GetValue()))
+	session, err := resources.DebugSession(operation, core.DebugSessionID(sessionID.GetValue()))
 	if err != nil {
 		cancel()
 

@@ -3,81 +3,137 @@ package core
 import (
 	"context"
 
+	"github.com/MontFerret/api"
 	"github.com/MontFerret/api/debugger"
 	"github.com/MontFerret/api/source"
+	wireexecution "github.com/MontFerret/wire/pkg/execution"
 )
 
 type testEnvironment struct {
 	*Connection
-	host          *testHost
-	plans         testPlanRegistry
-	executions    testExecutionRegistry
-	debugSessions testDebugSessionRegistry
+	host *testHost
 }
 
-func (e *testEnvironment) operation(ctx context.Context) (*Context, context.CancelFunc) {
-	return NewContext(ctx, e.Connection)
+func (e *testEnvironment) operation(ctx context.Context) (context.Context, context.CancelFunc) {
+	return OperationContext(ctx, e.Context())
 }
 
-func (e *testEnvironment) Compile(ctx context.Context, input CompileInput) (PlanSnapshot, error) {
+func (e *testEnvironment) Compile(ctx context.Context, input compileRequest) (planResult, error) {
 	operation, cancel := e.operation(ctx)
 	defer cancel()
 
-	return e.host.compiler.Compile(operation, input)
+	var options []api.PlanOption
+	if input.HasOptimizationLevel {
+		options = append(options, api.WithOptimizationLevel(input.OptimizationLevel))
+	}
+
+	plan, err := CompilePlan(operation, e.host.runtime, e.resources, input.Source, input.Debuggable, options...)
+	if err != nil {
+		return planResult{}, err
+	}
+
+	return planResult{ID: plan.ID(), Parameters: plan.Params()}, nil
 }
 
-func (e *testEnvironment) Execute(ctx context.Context, input ExecuteInput) (ExecutionRecord, error) {
+func (e *testEnvironment) Execute(ctx context.Context, input executeRequest) (executionResult, error) {
 	operation, cancel := e.operation(ctx)
 	defer cancel()
 
-	return e.host.executor.Execute(operation, input)
+	if err := e.resources.operationError(operation); err != nil {
+		return executionResult{}, err
+	}
+
+	plan, err := e.resources.Plan(operation, input.PlanID)
+	if err != nil {
+		return executionResult{}, err
+	}
+
+	execution, err := plan.Execute(operation, apiSessionOptions(input.Parameters, input.OutputContentType)...)
+	if err != nil {
+		return executionResult{}, err
+	}
+
+	return executionResult{ID: execution.ID(), Snapshot: execution.Snapshot()}, nil
 }
 
-func (e *testEnvironment) CreateSession(ctx context.Context, input CreateSessionInput) (SessionID, error) {
+func (e *testEnvironment) CreateSession(ctx context.Context, input sessionRequest) (SessionID, error) {
 	operation, cancel := e.operation(ctx)
 	defer cancel()
 
-	return e.host.executor.CreateSession(operation, input)
+	if err := e.resources.operationError(operation); err != nil {
+		return "", err
+	}
+
+	plan, err := e.resources.Plan(operation, input.PlanID)
+	if err != nil {
+		return "", err
+	}
+
+	session, err := plan.NewSession(operation, apiSessionOptions(input.Parameters, input.OutputContentType)...)
+	if err != nil {
+		return "", err
+	}
+
+	return session.ID(), nil
 }
 
-func (e *testEnvironment) RunSession(ctx context.Context, id SessionID) (ExecutionRecord, error) {
+func (e *testEnvironment) RunSession(ctx context.Context, id SessionID) (executionResult, error) {
 	operation, cancel := e.operation(ctx)
 	defer cancel()
 
-	return e.host.executor.RunSession(operation, id)
+	if err := e.resources.operationError(operation); err != nil {
+		return executionResult{}, err
+	}
+
+	session, err := e.resources.Session(operation, id)
+	if err != nil {
+		return executionResult{}, err
+	}
+
+	execution, err := session.Execute(operation)
+	if err != nil {
+		return executionResult{}, err
+	}
+
+	return executionResult{ID: execution.ID(), Snapshot: wireexecution.Snapshot{State: wireexecution.StateRunning}}, nil
 }
 
-func (e *testEnvironment) Run(ctx context.Context, input RunInput) (ExecutionRecord, error) {
+func (e *testEnvironment) Run(ctx context.Context, input runRequest) (executionResult, error) {
 	operation, cancel := e.operation(ctx)
 	defer cancel()
 
-	return e.host.executor.Run(operation, input)
+	execution, err := Run(operation, e.host.runtime, e.resources, input.Source, apiSessionOptions(input.Parameters, input.OutputContentType)...)
+	if err != nil {
+		return executionResult{}, err
+	}
+
+	return executionResult{ID: execution.ID(), Snapshot: wireexecution.Snapshot{State: wireexecution.StateRunning}}, nil
 }
 
 func (e *testEnvironment) ReleaseSession(ctx context.Context, id SessionID) error {
 	operation, cancel := e.operation(ctx)
 	defer cancel()
 
-	return e.host.lifecycle.ReleaseSession(operation, id)
+	return e.resources.ReleaseSession(operation, id)
 }
 
-func (e *testEnvironment) CancelExecution(id ExecutionID) (ExecutionRecord, error) {
+func (e *testEnvironment) CancelExecution(id ExecutionID) (executionResult, error) {
 	operation, cancel := e.operation(context.Background())
 	defer cancel()
 
-	execution, err := e.host.executor.Execution(operation, id)
+	execution, err := e.resources.Execution(operation, id)
 	if err != nil {
-		return ExecutionRecord{}, err
+		return executionResult{}, err
 	}
 
-	return execution.Cancel(), nil
+	return executionResult{ID: execution.ID(), Snapshot: execution.Cancel()}, nil
 }
 
 func (e *testEnvironment) WatchExecution(id ExecutionID) (ExecutionSubscription, error) {
 	operation, cancel := e.operation(context.Background())
 	defer cancel()
 
-	execution, err := e.host.executor.Execution(operation, id)
+	execution, err := e.resources.Execution(operation, id)
 	if err != nil {
 		return ExecutionSubscription{}, err
 	}
@@ -89,19 +145,33 @@ func (e *testEnvironment) ReleaseExecution(ctx context.Context, id ExecutionID) 
 	operation, cancel := e.operation(ctx)
 	defer cancel()
 
-	return e.host.lifecycle.ReleaseExecution(operation, id)
+	return e.resources.ReleaseExecution(operation, id)
 }
 
-func (e *testEnvironment) OpenDebugSession(ctx context.Context, input OpenDebugInput) (DebugSessionRecord, error) {
+func (e *testEnvironment) OpenDebugSession(ctx context.Context, input debugRequest) (debugResult, error) {
 	operation, cancel := e.operation(ctx)
 	defer cancel()
 
-	return e.host.debugger.Create(operation, input)
+	if err := e.resources.operationError(operation); err != nil {
+		return debugResult{}, err
+	}
+
+	plan, err := e.resources.Plan(operation, input.PlanID)
+	if err != nil {
+		return debugResult{}, err
+	}
+
+	session, err := plan.NewDebugSession(operation, apiSessionOptions(input.Parameters, input.OutputContentType)...)
+	if err != nil {
+		return debugResult{}, err
+	}
+
+	return debugResult{ID: session.ID(), Snapshot: session.Snapshot()}, nil
 }
 
-func (e *testEnvironment) debugSession(ctx context.Context, id DebugSessionID) (*Context, context.CancelFunc, *DebugSession, error) {
+func (e *testEnvironment) debugSession(ctx context.Context, id DebugSessionID) (context.Context, context.CancelFunc, *DebugSession, error) {
 	operation, cancel := e.operation(ctx)
-	session, err := e.host.debugger.Session(operation, id)
+	session, err := e.resources.DebugSession(operation, id)
 	if err != nil {
 		cancel()
 
@@ -122,37 +192,43 @@ func (e *testEnvironment) WatchDebug(id DebugSessionID) (DebugSubscription, erro
 	return session.Watch()
 }
 
-func (e *testEnvironment) StartDebug(ctx context.Context, id DebugSessionID) (DebugSessionRecord, error) {
+func (e *testEnvironment) StartDebug(ctx context.Context, id DebugSessionID) (debugResult, error) {
 	operation, cancel, session, err := e.debugSession(ctx, id)
 	if err != nil {
-		return DebugSessionRecord{}, err
+		return debugResult{}, err
 	}
 
 	defer cancel()
 
-	return session.Start(operation)
+	snapshot, err := session.Start(operation)
+
+	return debugResult{ID: session.ID(), Snapshot: snapshot}, err
 }
 
-func (e *testEnvironment) ContinueDebug(ctx context.Context, id DebugSessionID) (DebugSessionRecord, error) {
+func (e *testEnvironment) ContinueDebug(ctx context.Context, id DebugSessionID) (debugResult, error) {
 	operation, cancel, session, err := e.debugSession(ctx, id)
 	if err != nil {
-		return DebugSessionRecord{}, err
+		return debugResult{}, err
 	}
 
 	defer cancel()
 
-	return session.Continue(operation)
+	snapshot, err := session.Continue(operation)
+
+	return debugResult{ID: session.ID(), Snapshot: snapshot}, err
 }
 
-func (e *testEnvironment) StopDebug(ctx context.Context, id DebugSessionID) (DebugSessionRecord, error) {
+func (e *testEnvironment) StopDebug(ctx context.Context, id DebugSessionID) (debugResult, error) {
 	operation, cancel, session, err := e.debugSession(ctx, id)
 	if err != nil {
-		return DebugSessionRecord{}, err
+		return debugResult{}, err
 	}
 
 	defer cancel()
 
-	return session.Stop(operation)
+	snapshot, err := session.Stop(operation)
+
+	return debugResult{ID: session.ID(), Snapshot: snapshot}, err
 }
 
 func (e *testEnvironment) SetBreakpoint(
@@ -231,18 +307,18 @@ func (e *testEnvironment) ReleaseDebugSession(ctx context.Context, id DebugSessi
 	operation, cancel := e.operation(ctx)
 	defer cancel()
 
-	return e.host.lifecycle.ReleaseDebugSession(operation, id)
+	return e.resources.ReleaseDebugSession(operation, id)
 }
 
 func (e *testEnvironment) ReleasePlan(ctx context.Context, id PlanID) error {
 	operation, cancel := e.operation(ctx)
 	defer cancel()
 
-	return e.host.lifecycle.ReleasePlan(operation, id)
+	return e.resources.ReleasePlan(operation, id)
 }
 
 func (e *testEnvironment) Close(ctx context.Context) error {
-	err := e.host.lifecycle.CloseConnection(ctx, e.ID())
+	err := e.host.connections.CloseConnection(ctx, e.ID())
 	if hasCategory(err, ErrorKindConnectionNotFound) && e.close.Started() {
 		return e.waitClose(ctx)
 	}

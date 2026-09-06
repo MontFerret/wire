@@ -6,17 +6,9 @@ import (
 	"reflect"
 
 	"github.com/MontFerret/api"
+	"github.com/MontFerret/api/debugger"
 	"github.com/MontFerret/wire/server/internal/panicboundary"
 )
-
-func apiSessionOptions(parameters map[string]any, contentType string) []api.SessionOption {
-	options := []api.SessionOption{api.WithParams(cloneParameters(parameters))}
-	if contentType != "" {
-		options = append(options, api.WithOutputContentType(contentType))
-	}
-
-	return options
-}
 
 func apiPlanParameters(plan api.Plan) ([]string, error) {
 	parameters, err := panicboundary.Call(func() ([]string, error) {
@@ -35,6 +27,10 @@ func closeAPIPlan(plan api.Plan) error {
 
 func closeAPISession(session api.Session) error {
 	return runtimePanicError("close runtime session", panicboundary.Do(session.Close))
+}
+
+func closeAPIDebugSession(session debugger.Session) error {
+	return runtimePanicError("close runtime debug session", panicboundary.Do(session.Close))
 }
 
 func runtimePanicError(operation string, err error) error {

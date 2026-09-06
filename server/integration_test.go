@@ -14,7 +14,6 @@ import (
 	"github.com/MontFerret/api/source"
 	"github.com/MontFerret/wire/client"
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
-	"github.com/MontFerret/wire/pkg/execution"
 	"github.com/MontFerret/wire/pkg/failure"
 	"github.com/MontFerret/wire/server"
 	"google.golang.org/grpc"
@@ -47,7 +46,7 @@ func TestUnifiedRuntimeCompileExecuteAndBorrowedOwnership(t *testing.T) {
 	runtime := &apiRuntimeSpy{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 		return plan, nil
 	}}
-	env := newIntegrationEnv(t, runtime, server.WithRuntimeIdentity(execution.Identity{
+	env := newIntegrationEnv(t, runtime, server.WithRuntimeIdentity(server.RuntimeIdentity{
 		Name: "test-host", Version: "1.2.3", InstanceID: "instance-1",
 	}))
 
