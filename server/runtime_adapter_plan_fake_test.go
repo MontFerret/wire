@@ -36,6 +36,7 @@ func (p *contractPlan) NewSession(ctx context.Context, options ...api.SessionOpt
 	p.sessionOptions = append(p.sessionOptions, configured.clone())
 	create := p.newSession
 	p.mu.Unlock()
+
 	if create == nil {
 		return &contractSession{}, nil
 	}
@@ -53,6 +54,7 @@ func (p *contractPlan) NewDebugSession(ctx context.Context, options ...api.Sessi
 	p.debugOptions = append(p.debugOptions, configured.clone())
 	create := p.newDebugSession
 	p.mu.Unlock()
+
 	if create == nil {
 		return nil, errors.New("debug session is not configured")
 	}

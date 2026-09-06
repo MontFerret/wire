@@ -37,6 +37,7 @@ func (c *callbackLifetime) AfterFunc(func()) func() bool {
 
 func TestOperationContextDetachesLifetimeCallback(t *testing.T) {
 	lifetime := &callbackLifetime{Context: context.Background(), done: make(chan struct{})}
+
 	operation, cancel := OperationContext(context.Background(), lifetime)
 	if lifetime.callbacks.Load() != 1 {
 		t.Fatal("operation did not register its lifetime callback")
@@ -44,6 +45,7 @@ func TestOperationContextDetachesLifetimeCallback(t *testing.T) {
 
 	cancel()
 	cancel()
+
 	if lifetime.callbacks.Load() != 0 || !errors.Is(operation.Err(), context.Canceled) {
 		t.Fatal("operation cancellation did not detach its lifetime callback")
 	}
@@ -59,6 +61,7 @@ func TestOperationContextPreservesCancellationCauses(t *testing.T) {
 			defer cancelLifetime(nil)
 
 			cause := errors.New("cancellation cause")
+
 			if source == "already cancelled lifetime" {
 				cancelLifetime(cause)
 			}
@@ -90,6 +93,7 @@ func TestOperationContextPreservesCancellationCauses(t *testing.T) {
 			}
 
 			want := context.Canceled
+
 			if source == "deadline" {
 				want = context.DeadlineExceeded
 			}

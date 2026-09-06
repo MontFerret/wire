@@ -109,6 +109,7 @@ func (d *debugSessionHandle) Frames(ctx context.Context) ([]debugger.Frame, erro
 		if err != nil {
 			return nil, err
 		}
+
 		result[i] = converted
 	}
 
@@ -139,6 +140,7 @@ func (d *debugSessionHandle) FrameLocals(ctx context.Context, frameIndex int) ([
 		if err != nil {
 			return nil, err
 		}
+
 		result[i] = converted
 	}
 
@@ -169,6 +171,7 @@ func (d *debugSessionHandle) Variables(ctx context.Context, reference debugger.V
 		if err != nil {
 			return nil, err
 		}
+
 		result[i] = converted
 	}
 
@@ -240,6 +243,7 @@ func convertBreakpoint(value *wirev1.Breakpoint) (debugger.Breakpoint, error) {
 	}
 
 	var location source.Range
+
 	if resolved != nil {
 		location = *resolved
 	}
@@ -264,12 +268,14 @@ func convertFrame(value *wirev1.Frame, index int) (debugger.Frame, error) {
 	if err != nil {
 		return debugger.Frame{}, err
 	}
+
 	functionID, err := debuggerIDFromProto[debugger.FunctionID](value.GetFunctionId(), "frame function ID", true)
 	if err != nil {
 		return debugger.Frame{}, err
 	}
 
 	result := debugger.Frame{Name: value.GetName(), FunctionID: functionID}
+
 	if location != nil {
 		result.Location = *location
 	}

@@ -47,6 +47,7 @@ func TestDebuggerRoundTrip(t *testing.T) {
 			return nil
 		},
 	}}}))
+
 	plan, err := h.Runtime().CompileDebug(h.Context(), api.Source{Name: "debug.fql", Content: "RETURN @input"})
 	if err != nil {
 		t.Fatal(err)

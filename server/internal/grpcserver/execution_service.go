@@ -16,6 +16,7 @@ type ExecutionService struct {
 
 var _ wirev1.ExecutionServiceServer = (*ExecutionService)(nil)
 
+// Execute starts a plan run with decoded options and returns its initial protocol snapshot.
 func (s *ExecutionService) Execute(ctx context.Context, request *wirev1.ExecuteRequest) (*wirev1.ExecuteResponse, error) {
 	operation, resources, cancel, err := prepareOperation(ctx, s.connections, request.GetConnectionId())
 	if err != nil {
@@ -47,6 +48,7 @@ func (s *ExecutionService) Execute(ctx context.Context, request *wirev1.ExecuteR
 	return &wirev1.ExecuteResponse{Execution: converted}, nil
 }
 
+// RunSession starts a run on a durable session and returns its execution handle.
 func (s *ExecutionService) RunSession(
 	ctx context.Context,
 	request *wirev1.RunSessionRequest,
@@ -76,6 +78,7 @@ func (s *ExecutionService) RunSession(
 	return &wirev1.RunSessionResponse{Execution: converted}, nil
 }
 
+// CancelExecution requests cancellation without waiting for the run to settle.
 func (s *ExecutionService) CancelExecution(ctx context.Context, request *wirev1.CancelExecutionRequest) (*wirev1.CancelExecutionResponse, error) {
 	operation, resources, cancel, err := prepareOperation(ctx, s.connections, request.GetConnectionId())
 	if err != nil {
@@ -94,6 +97,7 @@ func (s *ExecutionService) CancelExecution(ctx context.Context, request *wirev1.
 	return &wirev1.CancelExecutionResponse{}, nil
 }
 
+// ReleaseExecution cancels and reclaims the run through its logical connection.
 func (s *ExecutionService) ReleaseExecution(ctx context.Context, request *wirev1.ReleaseExecutionRequest) (*wirev1.ReleaseExecutionResponse, error) {
 	operation, resources, cancel, err := prepareOperation(ctx, s.connections, request.GetConnectionId())
 	if err != nil {
@@ -109,6 +113,8 @@ func (s *ExecutionService) ReleaseExecution(ctx context.Context, request *wirev1
 	return &wirev1.ReleaseExecutionResponse{}, nil
 }
 
+// WatchExecution sends the current snapshot followed by ordered events.
+// Stream completion releases the bounded subscription.
 func (s *ExecutionService) WatchExecution(request *wirev1.WatchExecutionRequest, stream wirev1.ExecutionService_WatchExecutionServer) error {
 	operation, resources, cancel, err := prepareOperation(stream.Context(), s.connections, request.GetConnectionId())
 	if err != nil {

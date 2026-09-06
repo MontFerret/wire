@@ -7,10 +7,15 @@ import (
 )
 
 type (
-	ConnectionID   string
-	PlanID         string
-	SessionID      string
-	ExecutionID    string
+	// ConnectionID is the opaque registry key for a logical connection.
+	ConnectionID string
+	// PlanID is the opaque registry key for a compiled plan.
+	PlanID string
+	// SessionID is the opaque registry key for a durable session.
+	SessionID string
+	// ExecutionID is the opaque registry key for an execution.
+	ExecutionID string
+	// DebugSessionID is the opaque registry key for a debug session.
 	DebugSessionID string
 )
 

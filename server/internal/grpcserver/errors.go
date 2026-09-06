@@ -5,10 +5,11 @@ import (
 	"errors"
 	"fmt"
 
-	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
-	"github.com/MontFerret/wire/server/internal/core"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+
+	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
+	"github.com/MontFerret/wire/server/internal/core"
 )
 
 func rpcError(err error) error {
@@ -71,6 +72,7 @@ func rpcError(err error) error {
 	}
 
 	category := wirev1.ErrorCategory_ERROR_CATEGORY_UNSPECIFIED
+
 	if value := domain.Category(); value != 0 {
 		category, conversionErr = failureCategory(value)
 		if conversionErr != nil {
@@ -92,6 +94,7 @@ func statusWithDiagnostics(
 	diagnosticSet *wirev1.DiagnosticSet,
 ) error {
 	base := status.New(code, message)
+
 	if category == wirev1.ErrorCategory_ERROR_CATEGORY_UNSPECIFIED {
 		return base.Err()
 	}

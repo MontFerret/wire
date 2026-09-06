@@ -30,6 +30,7 @@ func (r *spyRuntime) Run(ctx context.Context, src api.Source, options ...api.Ses
 	r.runOptions = append(r.runOptions, configured.clone())
 	run := r.run
 	r.mu.Unlock()
+
 	if run == nil {
 		return api.Output{}, nil
 	}

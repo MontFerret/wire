@@ -15,6 +15,7 @@ type SessionService struct {
 
 var _ wirev1.SessionServiceServer = (*SessionService)(nil)
 
+// CreateSession applies decoded options to a durable session under the requested plan.
 func (s *SessionService) CreateSession(
 	ctx context.Context,
 	request *wirev1.CreateSessionRequest,
@@ -46,6 +47,7 @@ func (s *SessionService) CreateSession(
 	}}, nil
 }
 
+// ReleaseSession reclaims a durable session through its logical connection.
 func (s *SessionService) ReleaseSession(
 	ctx context.Context,
 	request *wirev1.ReleaseSessionRequest,

@@ -23,6 +23,7 @@ func (e *allocationError) Unwrap() error {
 
 func allocationRPCError(err error) error {
 	decoded := decodeError(err)
+
 	var rejection *Error
 	if errors.As(decoded, &rejection) && rejection.Category != 0 {
 		// Structured Wire failures describe a rejected creation. Its owner rolls

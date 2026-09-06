@@ -8,6 +8,7 @@ import (
 	"github.com/MontFerret/wire/server/internal/core"
 )
 
+// Frames converts stopped-debugger frames, rejecting unrepresentable runtime values.
 func (s *DebugService) Frames(ctx context.Context, request *wirev1.FramesRequest) (*wirev1.FramesResponse, error) {
 	operation, resources, cancel, err := prepareOperation(ctx, s.connections, request.GetConnectionId())
 	if err != nil {
@@ -39,6 +40,7 @@ func (s *DebugService) Frames(ctx context.Context, request *wirev1.FramesRequest
 	return &wirev1.FramesResponse{Frames: result}, nil
 }
 
+// FrameLocals converts variables from the requested stopped frame.
 func (s *DebugService) FrameLocals(ctx context.Context, request *wirev1.FrameLocalsRequest) (*wirev1.FrameLocalsResponse, error) {
 	operation, resources, cancel, err := prepareOperation(ctx, s.connections, request.GetConnectionId())
 	if err != nil {
@@ -65,6 +67,7 @@ func (s *DebugService) FrameLocals(ctx context.Context, request *wirev1.FrameLoc
 	return &wirev1.FrameLocalsResponse{Variables: result}, nil
 }
 
+// Variables validates a protocol reference before expanding and converting its children.
 func (s *DebugService) Variables(ctx context.Context, request *wirev1.VariablesRequest) (*wirev1.VariablesResponse, error) {
 	operation, resources, cancel, err := prepareOperation(ctx, s.connections, request.GetConnectionId())
 	if err != nil {
@@ -96,6 +99,7 @@ func (s *DebugService) Variables(ctx context.Context, request *wirev1.VariablesR
 	return &wirev1.VariablesResponse{Variables: result}, nil
 }
 
+// EvaluateFrame evaluates in a stopped frame and converts the resulting debugger value.
 func (s *DebugService) EvaluateFrame(ctx context.Context, request *wirev1.EvaluateFrameRequest) (*wirev1.EvaluateFrameResponse, error) {
 	operation, resources, cancel, err := prepareOperation(ctx, s.connections, request.GetConnectionId())
 	if err != nil {

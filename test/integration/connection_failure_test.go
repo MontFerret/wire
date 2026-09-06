@@ -5,10 +5,11 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/MontFerret/wire/client"
-	"github.com/MontFerret/wire/pkg/failure"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+
+	"github.com/MontFerret/wire/client"
+	"github.com/MontFerret/wire/pkg/failure"
 )
 
 // connectionLossRPCError supplies public client metadata and a transport status

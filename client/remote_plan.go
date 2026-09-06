@@ -43,6 +43,7 @@ func (p *remotePlan) NewSession(ctx context.Context, options ...api.SessionOptio
 
 	session, err := p.plan.newSession(creationCtx, configured)
 	cancel()
+
 	if err != nil {
 		return nil, p.plan.client.reclaimAllocation(ctx, err, p.plan.Close)
 	}
@@ -80,6 +81,7 @@ func (p *remotePlan) NewDebugSession(
 
 	session, err := p.plan.NewDebugSession(creationCtx, configured)
 	cancel()
+
 	if err != nil {
 		return nil, p.plan.client.reclaimAllocation(ctx, err, p.plan.Close)
 	}

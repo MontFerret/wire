@@ -2,6 +2,8 @@ package core
 
 import wiredebugger "github.com/MontFerret/wire/pkg/debugger"
 
+// DebugSubscription pairs a current snapshot with subsequent ordered events.
+// Cancel releases the watcher slot, including after the event channels close.
 type DebugSubscription struct {
 	Current wiredebugger.Event
 	Events  <-chan wiredebugger.Event

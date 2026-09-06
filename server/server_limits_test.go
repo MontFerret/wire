@@ -40,6 +40,7 @@ func TestServerLimitsRequireEveryValueToBePositive(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			limits := server.DefaultLimits()
 			invalidate(&limits)
+
 			if _, err := server.NewServer(runtime, server.WithLimits(limits)); err == nil {
 				t.Fatal("NewServer accepted a non-positive limit")
 			}
@@ -47,6 +48,7 @@ func TestServerLimitsRequireEveryValueToBePositive(t *testing.T) {
 	}
 
 	limits := server.DefaultLimits()
+
 	limits.MaxConnections = 3
 	if _, err := server.NewServer(runtime, server.WithLimits(limits)); err != nil {
 		t.Fatalf("NewServer rejected a complete positive override: %v", err)

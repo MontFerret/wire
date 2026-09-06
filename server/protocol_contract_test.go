@@ -6,8 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
 	"google.golang.org/protobuf/reflect/protoreflect"
+
+	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
 )
 
 func TestProtocolDescriptorsReserveRemovedV1Surface(t *testing.T) {
@@ -116,15 +117,18 @@ func TestProtocolDescriptorsReserveRemovedV1Surface(t *testing.T) {
 				t.Errorf("%s.%s is missing", test.message.FullName(), name)
 			}
 		}
+
 		for _, number := range test.numbers {
 			if !test.message.ReservedRanges().Has(number) {
 				t.Errorf("%s does not reserve field %d", test.message.FullName(), number)
 			}
 		}
+
 		for _, name := range test.reserved {
 			if !test.message.ReservedNames().Has(name) {
 				t.Errorf("%s does not reserve field name %s", test.message.FullName(), name)
 			}
+
 			if test.message.Fields().ByName(name) != nil {
 				t.Errorf("%s still declares removed field %s", test.message.FullName(), name)
 			}
@@ -144,6 +148,7 @@ func TestProtocolDescriptorsReserveRemovedV1Surface(t *testing.T) {
 			t.Errorf("ErrorCategory does not reserve value %d", number)
 		}
 	}
+
 	for _, name := range []protoreflect.Name{
 		"ERROR_CATEGORY_INVALID_REQUEST",
 		"ERROR_CATEGORY_UNSUPPORTED_CAPABILITY",
@@ -177,6 +182,7 @@ func TestProtocolDescriptorsReserveRemovedV1Surface(t *testing.T) {
 			t.Errorf("Diagnostic.%s does not use field %d", name, number)
 		}
 	}
+
 	annotation := wirev1.File_ferret_wire_v1_runtime_proto.Messages().ByName("DiagnosticAnnotation")
 	for name, number := range map[protoreflect.Name]protoreflect.FieldNumber{
 		"range": 1, "message": 2, "primary": 3,
@@ -185,10 +191,12 @@ func TestProtocolDescriptorsReserveRemovedV1Surface(t *testing.T) {
 			t.Errorf("DiagnosticAnnotation.%s does not use field %d", name, number)
 		}
 	}
+
 	diagnosticSet := wirev1.File_ferret_wire_v1_runtime_proto.Messages().ByName("DiagnosticSet")
 	if field := diagnosticSet.Fields().ByName("diagnostics"); field == nil || field.Number() != 1 {
 		t.Error("DiagnosticSet.diagnostics does not use field 1")
 	}
+
 	failure := wirev1.File_ferret_wire_v1_runtime_proto.Messages().ByName("Failure")
 	if field := failure.Fields().ByName("diagnostic_set"); field == nil || field.Number() != 4 {
 		t.Error("Failure.diagnostic_set does not use field 4")
@@ -198,6 +206,7 @@ func TestProtocolDescriptorsReserveRemovedV1Surface(t *testing.T) {
 	if created := debugEventKind.Values().ByName("DEBUG_EVENT_KIND_CREATED"); created == nil || created.Number() != 7 {
 		t.Error("DebugEventKind does not expose CREATED at value 7")
 	}
+
 	breakpointMode := wirev1.File_ferret_wire_v1_debug_proto.Enums().ByName("BreakpointBindingMode")
 	if next := breakpointMode.Values().ByName("BREAKPOINT_BINDING_MODE_NEXT_EXECUTABLE_IN_SOURCE"); next == nil || next.Number() != 1 {
 		t.Error("BreakpointBindingMode does not expose source-neutral default at value 1")
@@ -212,18 +221,22 @@ func TestProtocolDescriptorsReserveRemovedV1Surface(t *testing.T) {
 	for _, operation := range []string{"Continue", "Pause", "StepOver", "StepIn", "StepOut"} {
 		request := debugMessages.ByName(protoreflect.Name(operation + "Request"))
 		response := debugMessages.ByName(protoreflect.Name(operation + "Response"))
+
 		if request == nil || !request.ReservedRanges().Has(1) || !request.ReservedNames().Has("command") {
 			t.Errorf("%sRequest does not reserve the removed command envelope", operation)
 		}
+
 		if response == nil || !response.ReservedRanges().Has(1) || !response.ReservedNames().Has("session") {
 			t.Errorf("%sResponse does not reserve the removed session snapshot", operation)
 		}
 	}
+
 	for _, removed := range []protoreflect.Name{"NextRequest", "NextResponse", "StepRequest", "StepResponse", "OutRequest", "OutResponse"} {
 		if debugMessages.ByName(removed) != nil {
 			t.Errorf("DebugService still declares removed envelope %s", removed)
 		}
 	}
+
 	setBreakpoint := debugMessages.ByName("SetBreakpointRequest")
 	if setBreakpoint == nil || !setBreakpoint.ReservedRanges().Has(3) {
 		t.Error("SetBreakpointRequest does not reserve the old SourceLocation field tag")
@@ -259,31 +272,37 @@ func TestProtocolDescriptorsReserveRemovedV1Surface(t *testing.T) {
 	if runExecution == nil || runExecution.Number() != 1 || runExecution.Message().FullName() != "ferret.wire.v1.Execution" {
 		t.Error("RunResponse does not preserve the Execution response")
 	}
+
 	planMethods := wirev1.File_ferret_wire_v1_plan_proto.Services().ByName("PlanService").Methods()
 	if planMethods.ByName("Compile") == nil || planMethods.ByName("CompileDebug") == nil {
 		t.Error("PlanService does not expose distinct normal and debug compilation")
 	}
+
 	sessionMethods := wirev1.File_ferret_wire_v1_session_proto.Services().ByName("SessionService").Methods()
 	for _, required := range []protoreflect.Name{"CreateSession", "ReleaseSession"} {
 		if sessionMethods.ByName(required) == nil {
 			t.Errorf("SessionService is missing RPC %s", required)
 		}
 	}
+
 	executionMethods := wirev1.File_ferret_wire_v1_execution_proto.Services().ByName("ExecutionService").Methods()
 	if executionMethods.Len() != 5 {
 		t.Error("ExecutionService retained a direct Runtime invocation RPC")
 	}
+
 	for _, required := range []protoreflect.Name{"Execute", "RunSession"} {
 		if executionMethods.ByName(required) == nil {
 			t.Errorf("ExecutionService is missing RPC %s", required)
 		}
 	}
+
 	debugMethods := wirev1.File_ferret_wire_v1_debug_proto.Services().ByName("DebugService").Methods()
 	for _, required := range []protoreflect.Name{"StepOver", "StepIn", "StepOut"} {
 		if debugMethods.ByName(required) == nil {
 			t.Errorf("DebugService is missing RPC %s", required)
 		}
 	}
+
 	for _, removed := range []protoreflect.Name{"OpenDebugSession", "StartDebug", "StopDebug", "Next", "Step", "Out"} {
 		if debugMethods.ByName(removed) != nil {
 			t.Errorf("DebugService still exposes removed RPC %s", removed)
@@ -300,6 +319,7 @@ func TestProtocolSourcesContainNoNativeMetadataOrFakeCapabilities(t *testing.T) 
 		"enum Capability",
 		"enum ResourceKind",
 	}
+
 	files, err := filepath.Glob(filepath.Join("..", "proto", "ferret", "wire", "v1", "*.proto"))
 	if err != nil {
 		t.Fatal(err)

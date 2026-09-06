@@ -44,6 +44,7 @@ func newRuntimeAllocationFixture(t *testing.T, operation allocationOperation) *r
 	h := harness.New(t)
 	f := &runtimeAllocationFixture{t: t, h: h, gate: h.Faults(), record: h.RuntimeSpy().Recorder(), remote: h.Runtime(), operation: operation}
 	var err error
+
 	f.other, err = h.OpenRuntime()
 	if err != nil {
 		t.Fatal(err)

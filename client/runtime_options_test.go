@@ -42,6 +42,7 @@ func TestRuntimeOptionsAggregateFailuresAndPortableValidation(t *testing.T) {
 	configured, err := applyRuntimeSessionOptions([]api.SessionOption{
 		func(options api.SessionOptions) error {
 			calls++
+
 			if setErr := options.SetParam("unsupported", make(chan struct{})); setErr != nil {
 				return errors.Join(firstErr, setErr)
 			}
@@ -51,6 +52,7 @@ func TestRuntimeOptionsAggregateFailuresAndPortableValidation(t *testing.T) {
 		nil,
 		func(options api.SessionOptions) error {
 			calls++
+
 			if setErr := options.SetOutputContentType("application/json"); setErr != nil {
 				return errors.Join(secondErr, setErr)
 			}
@@ -58,6 +60,7 @@ func TestRuntimeOptionsAggregateFailuresAndPortableValidation(t *testing.T) {
 			return secondErr
 		},
 	})
+
 	if calls != 2 {
 		t.Fatalf("not all non-nil options were applied: %d", calls)
 	}

@@ -42,6 +42,7 @@ func TestDecodeValueRejectsExcessiveNesting(t *testing.T) {
 	for range maxValueDepth {
 		value = &wirev1.Value{Value: &wirev1.Value_ArrayValue{ArrayValue: &wirev1.ArrayValue{Values: []*wirev1.Value{value}}}}
 	}
+
 	_, err := decodeValue(value, 0)
 	if err == nil || !strings.Contains(err.Error(), "nesting") {
 		t.Fatalf("unexpected error: %v", err)

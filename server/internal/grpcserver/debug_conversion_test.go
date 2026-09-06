@@ -17,6 +17,7 @@ func TestUnifiedDebuggerTypesPreservePortableProtocolFields(t *testing.T) {
 		Location: source.Location{Position: source.Position{Line: 4, Column: 2}, SourceName: "debug.fql"},
 		Span:     source.Span{Start: 10, End: 20},
 	}
+
 	convertedBreakpoint, err := breakpoint(debugger.Breakpoint{
 		Location:          resolved,
 		RequestedLocation: requested,
@@ -29,6 +30,7 @@ func TestUnifiedDebuggerTypesPreservePortableProtocolFields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if convertedBreakpoint.GetId() != 7 || convertedBreakpoint.GetRequestedLocation().GetSourceName() != "debug.fql" ||
 		convertedBreakpoint.GetRequestedLocation().GetPosition().GetLine() != 3 ||
 		convertedBreakpoint.GetLocation().GetLocation().GetPosition().GetLine() != 4 ||
@@ -43,6 +45,7 @@ func TestUnifiedDebuggerTypesPreservePortableProtocolFields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if unboundBreakpoint.GetRequestedLocation().GetSourceName() != "debug.fql" || unboundBreakpoint.GetLocation() != nil ||
 		unboundBreakpoint.GetBound() ||
 		unboundBreakpoint.GetBindingMode() != wirev1.BreakpointBindingMode_BREAKPOINT_BINDING_MODE_NEXT_EXECUTABLE_IN_SOURCE {
@@ -53,6 +56,7 @@ func TestUnifiedDebuggerTypesPreservePortableProtocolFields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if convertedFrame.GetName() != "main" || convertedFrame.GetLocation().GetPosition().GetLine() != 4 ||
 		convertedFrame.GetFunctionId() != 11 {
 		t.Fatalf("unexpected frame transport projection: %#v", convertedFrame)
@@ -64,6 +68,7 @@ func TestUnifiedDebuggerTypesPreservePortableProtocolFields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if convertedVariable.GetName() != "input" || convertedVariable.GetValue().GetReference() != 13 ||
 		!convertedVariable.GetMutable() || !convertedVariable.GetParameter() {
 		t.Fatalf("unexpected variable transport projection: %#v", convertedVariable)
@@ -79,6 +84,7 @@ func TestUnifiedDebuggerTypesPreservePortableProtocolFields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if convertedSession.GetStopReason() != wirev1.DebugStopReason_DEBUG_STOP_REASON_BREAKPOINT ||
 		convertedSession.GetLocation().GetLocation().GetPosition().GetLine() != 4 ||
 		convertedSession.GetLocation().GetSpan().GetStart() != 10 || convertedSession.GetDepth() != 3 ||

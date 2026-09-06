@@ -23,6 +23,7 @@ type (
 	}
 )
 
+// Execution states distinguish a running operation from its terminal outcome.
 const (
 	StateRunning State = iota + 1
 	StateCompleted

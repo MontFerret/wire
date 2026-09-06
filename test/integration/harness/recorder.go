@@ -27,6 +27,7 @@ type (
 		Index    int
 	}
 
+	// Snapshot captures the resources and API calls observed by a Recorder.
 	Snapshot struct {
 		Resources []Resource
 		Calls     []Call
@@ -90,6 +91,7 @@ func (r *Recorder) snapshot() Snapshot {
 	return result
 }
 
+// Snapshot copies observed resource and call slices and their recorded session options.
 func (r *Recorder) Snapshot() Snapshot {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -97,6 +99,7 @@ func (r *Recorder) Snapshot() Snapshot {
 	return r.snapshot()
 }
 
+// Count reports invocations of a method on one hosted resource.
 func (s Snapshot) Count(id int, method string) int {
 	count := 0
 
@@ -109,6 +112,7 @@ func (s Snapshot) Count(id int, method string) int {
 	return count
 }
 
+// OfKind selects hosted resources of a kind in creation order.
 func (s Snapshot) OfKind(kind string) []Resource {
 	var result []Resource
 
@@ -121,6 +125,7 @@ func (s Snapshot) OfKind(kind string) []Resource {
 	return result
 }
 
+// Wait checks observations after each recorder change and reports a bounded timeout.
 func (r *Recorder) Wait(t testing.TB, description string, predicate func(Snapshot) bool) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -145,6 +150,8 @@ func (r *Recorder) Wait(t testing.TB, description string, predicate func(Snapsho
 	}
 }
 
+// AssertClosed waits for hosted work to settle and checks exactly-once descendant cleanup.
+// Borrowed runtimes must remain open.
 func (r *Recorder) AssertClosed(t testing.TB) {
 	t.Helper()
 	r.Wait(t, "hosted resource reclamation", func(s Snapshot) bool {

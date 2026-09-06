@@ -2,6 +2,8 @@ package core
 
 import "github.com/MontFerret/wire/pkg/execution"
 
+// ExecutionSubscription pairs a current snapshot with subsequent ordered events.
+// Cancel releases the watcher slot, including after the event channels close.
 type ExecutionSubscription struct {
 	Current execution.Event
 	Events  <-chan execution.Event

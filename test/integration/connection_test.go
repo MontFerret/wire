@@ -6,17 +6,19 @@ import (
 	"io"
 	"testing"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	"github.com/MontFerret/api"
 	"github.com/MontFerret/api/debugger"
 	"github.com/MontFerret/wire/client"
 	"github.com/MontFerret/wire/pkg/failure"
 	"github.com/MontFerret/wire/test/integration/harness"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 func TestUnavailableServer(t *testing.T) {
 	h := harness.New(t, harness.WithUnavailableServer())
+
 	runtime, err := h.OpenRuntime()
 	if runtime != nil || status.Code(err) != codes.Unavailable {
 		t.Fatalf("unavailable handshake: runtime=%T err=%v", runtime, err)
@@ -194,8 +196,9 @@ func TestWatchTerminationReturnsError(t *testing.T) {
 				}
 
 				h.Faults().EndWatch(operation, watchErr, block.Started)
+
 				err := run()
-				if err == nil || (watchErr == io.EOF && !errors.Is(err, io.EOF)) || (watchErr != io.EOF && status.Code(err) != codes.Unavailable) {
+				if err == nil || (watchErr == io.EOF && !errors.Is(err, io.EOF)) || (watchErr != io.EOF && status.Code(err) != codes.Unavailable) { //nolint:errorlint // Distinguish the exact EOF fixture from injected transport failures.
 					t.Fatalf("watch failure=%v", err)
 				}
 
@@ -217,6 +220,7 @@ func TestDebuggerCommandFailure(t *testing.T) {
 	h := harness.New(t, harness.WithBehavior(harness.RuntimeBehavior{Plan: harness.PlanBehavior{Debugger: harness.DebuggerBehavior{Command: func(context.Context, string, int) (*debugger.Event, error) {
 		return nil, errors.New("private command failure")
 	}}}}))
+
 	plan, err := h.Runtime().CompileDebug(h.Context(), api.Source{Content: "RETURN 1"})
 	if err != nil {
 		t.Fatal(err)
@@ -228,6 +232,7 @@ func TestDebuggerCommandFailure(t *testing.T) {
 	}
 
 	_, err = session.Start(h.Context())
+
 	var remote *failure.Failure
 	if !errors.As(err, &remote) || remote.Category != failure.CategoryInternalRuntime || remote.Message != "runtime operation failed" {
 		t.Fatalf("debug command failure=%v", err)

@@ -9,6 +9,12 @@ import (
 	"testing"
 	"time"
 
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
+	"google.golang.org/grpc/test/bufconn"
+
 	"github.com/MontFerret/api"
 	"github.com/MontFerret/api/diagnostics"
 	"github.com/MontFerret/api/source"
@@ -16,11 +22,6 @@ import (
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
 	"github.com/MontFerret/wire/pkg/failure"
 	"github.com/MontFerret/wire/server"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/status"
-	"google.golang.org/grpc/test/bufconn"
 )
 
 type integrationEnv struct {
@@ -53,6 +54,7 @@ func TestUnifiedRuntimeCompileExecuteAndBorrowedOwnership(t *testing.T) {
 	streamCtx, cancel := context.WithCancel(testContext(t))
 	defer cancel()
 	rpc := wirev1.NewRuntimeServiceClient(env.conn)
+
 	stream, err := rpc.Connect(streamCtx, &wirev1.ConnectRequest{})
 	if err != nil {
 		t.Fatal(err)
@@ -119,6 +121,7 @@ func TestUnifiedRuntimeCompileExecuteAndBorrowedOwnership(t *testing.T) {
 	sources := append([]api.Source(nil), runtime.sources...)
 	debug := append([]bool(nil), runtime.debug...)
 	runtime.mu.Unlock()
+
 	if len(sources) != 1 || sources[0] != (api.Source{Name: "unified.fql", Content: "RETURN @input"}) || debug[0] {
 		t.Fatalf("unexpected compile delegation: %#v %#v", sources, debug)
 	}
@@ -126,6 +129,7 @@ func TestUnifiedRuntimeCompileExecuteAndBorrowedOwnership(t *testing.T) {
 	plan.mu.Lock()
 	options := append([]apiSessionOptions(nil), plan.sessionOptions...)
 	plan.mu.Unlock()
+
 	if len(options) != 2 || options[0].contentType != "application/json" || options[1].contentType != "application/json" {
 		t.Fatalf("plan was not reusable with expected options: %#v", options)
 	}
@@ -148,6 +152,7 @@ func TestUnifiedRuntimeCompileExecuteAndBorrowedOwnership(t *testing.T) {
 	plan.mu.Lock()
 	planCloseCalls := plan.closeCalls
 	plan.mu.Unlock()
+
 	if planCloseCalls != 1 {
 		t.Fatalf("Wire closed API plan %d times", planCloseCalls)
 	}
@@ -155,6 +160,7 @@ func TestUnifiedRuntimeCompileExecuteAndBorrowedOwnership(t *testing.T) {
 	runtime.mu.Lock()
 	runtimeCloseCalls := runtime.closeCalls
 	runtime.mu.Unlock()
+
 	if runtimeCloseCalls != 0 {
 		t.Fatalf("Wire closed borrowed API runtime %d times", runtimeCloseCalls)
 	}
@@ -179,6 +185,7 @@ func TestServerShutdownClosesOwnedResourcesWithoutClosingRuntime(t *testing.T) {
 		return plan, nil
 	}}
 	env := newIntegrationEnv(t, runtime)
+
 	compiled, err := env.client.Compile(context.Background(), api.Source{Name: "shutdown.fql", Content: "RETURN 1"})
 	if err != nil {
 		t.Fatal(err)
@@ -220,6 +227,7 @@ func TestServerShutdownClosesOwnedResourcesWithoutClosingRuntime(t *testing.T) {
 	session.mu.Lock()
 	sessionCloseCalls := session.closeCalls
 	session.mu.Unlock()
+
 	if sessionCloseCalls != 1 {
 		t.Fatalf("shutdown closed API session %d times", sessionCloseCalls)
 	}
@@ -227,6 +235,7 @@ func TestServerShutdownClosesOwnedResourcesWithoutClosingRuntime(t *testing.T) {
 	plan.mu.Lock()
 	planCloseCalls := plan.closeCalls
 	plan.mu.Unlock()
+
 	if planCloseCalls != 1 {
 		t.Fatalf("shutdown closed API plan %d times", planCloseCalls)
 	}
@@ -234,6 +243,7 @@ func TestServerShutdownClosesOwnedResourcesWithoutClosingRuntime(t *testing.T) {
 	runtime.mu.Lock()
 	runtimeCloseCalls := runtime.closeCalls
 	runtime.mu.Unlock()
+
 	if runtimeCloseCalls != 0 {
 		t.Fatalf("shutdown closed borrowed API runtime %d times", runtimeCloseCalls)
 	}
@@ -264,6 +274,7 @@ func TestGenericRuntimeFailuresAreStructuredAndSanitized(t *testing.T) {
 	}}
 	env := newIntegrationEnv(t, runtime)
 	_, err := env.client.Compile(context.Background(), api.Source{Content: "broken"})
+
 	var wireErr *client.Error
 	if !errors.As(err, &wireErr) || wireErr.Category != failure.CategoryCompilation {
 		t.Fatalf("unexpected compile error: %v", err)
@@ -284,6 +295,7 @@ func TestPortableDiagnosticsCrossImmediateAndAsynchronousFailures(t *testing.T) 
 		env := newIntegrationEnv(t, runtime)
 
 		_, err := env.client.Compile(context.Background(), api.Source{Name: "query.fql", Content: "RETURN"})
+
 		var wireErr *client.Error
 		if !errors.As(err, &wireErr) || wireErr.Category != failure.CategoryCompilation {
 			t.Fatalf("unexpected compile error: %v", err)
@@ -318,6 +330,7 @@ func TestPortableDiagnosticsCrossImmediateAndAsynchronousFailures(t *testing.T) 
 		}
 
 		output, err := session.Run(testContext(t))
+
 		var terminalFailure *failure.Failure
 		if !errors.As(err, &terminalFailure) || terminalFailure.Category != failure.CategoryExecution {
 			t.Fatalf("unexpected execution failure: %v", err)
@@ -367,6 +380,7 @@ func TestMessageLimitsRemainAtTheGRPCBoundary(t *testing.T) {
 
 	streamCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
 	stream, err := wirev1.NewRuntimeServiceClient(env.conn).Connect(streamCtx, &wirev1.ConnectRequest{})
 	if err != nil {
 		t.Fatal(err)
@@ -405,6 +419,7 @@ func TestMessageLimitsRemainAtTheGRPCBoundary(t *testing.T) {
 
 func newIntegrationEnv(t testing.TB, runtime api.Runtime, options ...server.Option) *integrationEnv {
 	t.Helper()
+
 	server, err := server.NewServer(runtime, options...)
 	if err != nil {
 		t.Fatal(err)
@@ -413,6 +428,7 @@ func newIntegrationEnv(t testing.TB, runtime api.Runtime, options ...server.Opti
 	listener := bufconn.Listen(8 << 20)
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- server.Serve(context.Background(), listener) }()
+
 	conn, err := grpc.NewClient(
 		"passthrough:///ferret-wire-test",
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
@@ -433,6 +449,7 @@ func newIntegrationEnv(t testing.TB, runtime api.Runtime, options ...server.Opti
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
+
 		if err := wireClient.Close(); err != nil && !errors.Is(err, client.ErrClosed) && !env.shutdown {
 			t.Errorf("client cleanup failed: %v", err)
 		}
@@ -462,6 +479,7 @@ func newIntegrationEnv(t testing.TB, runtime api.Runtime, options ...server.Opti
 
 func assertTransportNeutralParams(t *testing.T, values map[string]any) {
 	t.Helper()
+
 	input, ok := values["input"].(map[string]any)
 	if !ok {
 		t.Fatalf("unexpected parameter map: %#v", values)

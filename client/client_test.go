@@ -11,14 +11,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/MontFerret/api"
-	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
-	"github.com/MontFerret/wire/pkg/failure"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
+
+	"github.com/MontFerret/api"
+	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
+	"github.com/MontFerret/wire/pkg/failure"
 )
 
 type (
@@ -116,10 +117,12 @@ func (s *clientTestServer) compile(connectionID *wirev1.ConnectionId, source *wi
 	s.lastCompileDebuggable = debug
 	s.lastCompileSourceName = source.GetName()
 	s.lastCompileContent = source.GetContent()
+
 	err := s.compileErr
 	if err == nil {
 		s.plans++
 	}
+
 	planID := fmt.Sprintf("plan-%d", s.plans)
 	s.mu.Unlock()
 
@@ -162,6 +165,7 @@ func (s *clientTestServer) startExecution(operation, connectionID, parentID, con
 	defer s.mu.Unlock()
 
 	s.calls = append(s.calls, call(operation, connectionID, parentID))
+
 	s.lastOutputContentType = contentType
 	if s.executeErr != nil {
 		return nil, s.executeErr
@@ -210,9 +214,11 @@ func (s *clientTestServer) WatchExecution(request *wirev1.WatchExecutionRequest,
 	index := s.watchCalls
 	s.watchCalls++
 	var script executionWatchScript
+
 	if index < len(s.watchScripts) {
 		script = s.watchScripts[index]
 	}
+
 	s.mu.Unlock()
 
 	for _, event := range script.events {
@@ -289,6 +295,7 @@ func TestRuntimeRunOwnsItsExecution(t *testing.T) {
 		debuggable := server.lastCompileDebuggable
 		contentType := server.lastOutputContentType
 		server.mu.Unlock()
+
 		if !slices.Equal(calls, want) || debuggable || contentType != "application/json" || releaseExecutionCalls != 1 || releasePlanCalls != 0 {
 			t.Fatalf("Runtime.Run orchestration: calls=%v debug=%v content=%q releases=%d/%d", calls, debuggable, contentType, releaseExecutionCalls, releasePlanCalls)
 		}
@@ -299,10 +306,12 @@ func TestRuntimeRunOwnsItsExecution(t *testing.T) {
 		client := openTestRuntime(t, startClientTestServer(t, server))
 
 		_, err := client.Compile(testClientContext(t), api.Source{Content: "invalid"})
+
 		var wireErr *Error
 		if !errors.As(err, &wireErr) || wireErr.Message != "compile failed" {
 			t.Fatalf("unexpected compile failure: %v", err)
 		}
+
 		calls, watchCalls, releaseExecutionCalls, releasePlanCalls := server.callSnapshot()
 		if !slices.Equal(calls, []string{call("compile", "connection", "")}) || watchCalls != 0 || releaseExecutionCalls != 0 || releasePlanCalls != 0 {
 			t.Fatalf("compile failure leaked cleanup calls: %v", calls)
@@ -314,11 +323,14 @@ func TestRuntimeRunOwnsItsExecution(t *testing.T) {
 		client := openTestRuntime(t, startClientTestServer(t, server))
 
 		_, err := client.Run(testClientContext(t), api.Source{Content: "RETURN 1"})
+
 		var wireErr *Error
 		if !errors.As(err, &wireErr) || wireErr.Message != "execute failed" {
 			t.Fatalf("unexpected execute failure: %v", err)
 		}
+
 		calls, watchCalls, releaseExecutionCalls, releasePlanCalls := server.callSnapshot()
+
 		want := []string{
 			call("run", "connection", ""),
 		}
@@ -356,6 +368,7 @@ func TestRuntimeRunOwnsItsExecution(t *testing.T) {
 		case <-time.After(10 * time.Second):
 			t.Fatal("Runtime.Run cleanup did not settle")
 		}
+
 		_, _, releaseExecutionCalls, releasePlanCalls := server.callSnapshot()
 		if releaseExecutionCalls != 1 || releasePlanCalls != 0 {
 			t.Fatalf("cancelled Runtime.Run cleanup: execution=%d plan=%d", releaseExecutionCalls, releasePlanCalls)
@@ -363,6 +376,7 @@ func TestRuntimeRunOwnsItsExecution(t *testing.T) {
 
 		executionDeadline, planDeadline := server.releaseDeadlineSnapshot()
 		assertCleanupDeadline(t, "execution", executionDeadline)
+
 		if !planDeadline.IsZero() {
 			t.Fatal("direct run released a plan")
 		}
@@ -376,10 +390,12 @@ func TestRuntimeRunOwnsItsExecution(t *testing.T) {
 		client := openTestRuntime(t, startClientTestServer(t, server))
 
 		_, err := client.Run(testClientContext(t), api.Source{Content: "RETURN 1"})
+
 		var wireErr *Error
 		if !errors.As(err, &wireErr) || status.Code(err) != codes.Unavailable || wireErr.Message != "watch transport failed" {
 			t.Fatalf("Runtime.Run lost the stream failure: %v", err)
 		}
+
 		_, _, releaseExecutionCalls, releasePlanCalls := server.callSnapshot()
 		if releaseExecutionCalls != 1 || releasePlanCalls != 0 {
 			t.Fatalf("stream-failed Runtime.Run cleanup: execution=%d plan=%d", releaseExecutionCalls, releasePlanCalls)
@@ -399,11 +415,13 @@ func TestRuntimeRunOwnsItsExecution(t *testing.T) {
 		client := openTestRuntime(t, startClientTestServer(t, server))
 
 		output, err := client.Run(testClientContext(t), api.Source{Content: "RETURN 1"})
+
 		var terminalFailure *failure.Failure
 		if string(output.Content) != "partial" || !errors.As(err, &terminalFailure) || terminalFailure.Message != "execution failed" ||
 			!strings.Contains(err.Error(), "execution cleanup failed") {
 			t.Fatalf("Runtime.Run did not preserve all errors: %#v, %v", output, err)
 		}
+
 		_, _, releaseExecutionCalls, releasePlanCalls := server.callSnapshot()
 		if releaseExecutionCalls != 1 || releasePlanCalls != 0 {
 			t.Fatalf("failed Runtime.Run cleanup: execution=%d plan=%d", releaseExecutionCalls, releasePlanCalls)
@@ -413,10 +431,12 @@ func TestRuntimeRunOwnsItsExecution(t *testing.T) {
 
 func openTestClient(t *testing.T, connection grpc.ClientConnInterface) *connectionHandle {
 	t.Helper()
+
 	client, err := newConnection(testClientContext(t), connection)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	t.Cleanup(func() {
 		if err := client.Close(testClientContext(t)); err != nil {
 			t.Errorf("client cleanup failed: %v", err)
@@ -447,8 +467,10 @@ func startClientTestServer(t *testing.T, implementation *clientTestServer) *grpc
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	t.Cleanup(func() {
 		server.Stop()
+
 		if err := connection.Close(); err != nil {
 			t.Errorf("transport cleanup failed: %v", err)
 		}
@@ -472,6 +494,7 @@ func startClientTestServer(t *testing.T, implementation *clientTestServer) *grpc
 
 func openTestRuntime(t *testing.T, connection grpc.ClientConnInterface) api.Runtime {
 	t.Helper()
+
 	runtime, err := New(testClientContext(t), connection)
 	if err != nil {
 		t.Fatal(err)

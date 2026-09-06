@@ -5,11 +5,12 @@ import (
 	"strings"
 	"testing"
 
+	"google.golang.org/grpc"
+
 	"github.com/MontFerret/api/debugger"
 	"github.com/MontFerret/api/source"
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
 	wiredebugger "github.com/MontFerret/wire/pkg/debugger"
-	"google.golang.org/grpc"
 )
 
 type debugResponseStream struct {
@@ -71,6 +72,7 @@ func TestDebugStateAndEventKindConversionsMapEveryProtocolValue(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		if got != test.want {
 			t.Errorf("convertDebugState(%v) = %v, want %v", test.protocol, got, test.want)
 		}
@@ -93,6 +95,7 @@ func TestDebugStateAndEventKindConversionsMapEveryProtocolValue(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		if got != test.want {
 			t.Errorf("convertDebugEventKind(%v) = %v, want %v", test.protocol, got, test.want)
 		}
@@ -101,6 +104,7 @@ func TestDebugStateAndEventKindConversionsMapEveryProtocolValue(t *testing.T) {
 	if _, err := convertDebugState(wirev1.DebugState(99)); err == nil {
 		t.Fatal("unknown debug state was accepted")
 	}
+
 	if _, err := convertDebugEventKind(wirev1.DebugEventKind(99)); err == nil {
 		t.Fatal("unknown debug event kind was accepted")
 	}
@@ -119,6 +123,7 @@ func TestDebugEventsDistinguishStartedFromContinued(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	continued, err := convertDebugEvent(&wirev1.WatchDebugResponse{
 		Sequence: 2,
 		Kind:     wirev1.DebugEventKind_DEBUG_EVENT_KIND_CONTINUED,
@@ -184,10 +189,12 @@ func TestDebugConversionsUseUnifiedAPITypesAndPreserveTransportFields(t *testing
 			7,
 		},
 	}
+
 	snapshot, err := convertDebugSessionSnapshot(value)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if snapshot.StopReason != debugger.ReasonBreakpoint || snapshot.Location == nil ||
 		snapshot.Location.Location != (source.Location{Position: source.Position{Line: 4, Column: 2}, SourceName: "debug.fql"}) ||
 		snapshot.Location.Span != (source.Span{Start: 12, End: 18}) || snapshot.Depth != 3 ||
@@ -197,7 +204,8 @@ func TestDebugConversionsUseUnifiedAPITypesAndPreserveTransportFields(t *testing
 
 	value.Location.Location.SourceName = "changed.fql"
 	value.HitBreakpointIds[0] = 99
-	if snapshot.Location.Location.SourceName != "debug.fql" || snapshot.HitBreakpointIDs[0] != 7 {
+
+	if snapshot.Location.SourceName != "debug.fql" || snapshot.HitBreakpointIDs[0] != 7 {
 		t.Fatalf("debug snapshot retained protobuf storage: %#v", snapshot)
 	}
 
@@ -213,6 +221,7 @@ func TestDebugConversionsUseUnifiedAPITypesAndPreserveTransportFields(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if breakpoint.ID != 9 || !breakpoint.Bound || breakpoint.RequestedLocation.Line != 3 || breakpoint.Location.Line != 4 ||
 		breakpoint.Location.Span != (source.Span{Start: 12, End: 18}) || breakpoint.PointID != 10 ||
 		breakpoint.FunctionID != 11 || breakpoint.BindingMode != debugger.BreakpointBindExact {
@@ -225,6 +234,7 @@ func TestDebugConversionsUseUnifiedAPITypesAndPreserveTransportFields(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if frame.Name != "main" || frame.Location.Line != 4 || frame.FunctionID != 12 {
 		t.Fatalf("unexpected Unified API frame: %#v", frame)
 	}
@@ -235,6 +245,7 @@ func TestDebugConversionsUseUnifiedAPITypesAndPreserveTransportFields(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if variable.Name != "input" || variable.Value.Reference != 11 || !variable.Mutable || !variable.Param {
 		t.Fatalf("unexpected Unified API variable: %#v", variable)
 	}

@@ -9,6 +9,9 @@ import (
 	"testing"
 	"time"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	"github.com/MontFerret/api"
 	"github.com/MontFerret/api/debugger"
 	"github.com/MontFerret/api/diagnostics"
@@ -17,8 +20,6 @@ import (
 	"github.com/MontFerret/wire/pkg/failure"
 	"github.com/MontFerret/wire/server"
 	"github.com/MontFerret/wire/test/integration/harness"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 func TestDiagnosticsAndFailureClassification(t *testing.T) {
@@ -144,6 +145,7 @@ func TestErrorFamilies(t *testing.T) {
 	})
 	t.Run("not found and invalid debug state", func(t *testing.T) {
 		h := harness.New(t)
+
 		plan, err := h.Runtime().CompileDebug(h.Context(), api.Source{Content: "RETURN 1"})
 		if err != nil {
 			t.Fatal(err)
@@ -155,6 +157,7 @@ func TestErrorFamilies(t *testing.T) {
 		}
 
 		err = session.DeleteBreakpoint(987)
+
 		var remote *client.Error
 		if !errors.As(err, &remote) || remote.Category != failure.CategoryBreakpointNotFound || status.Code(err) != codes.NotFound {
 			t.Fatalf("not-found classification=%v", err)
@@ -214,6 +217,7 @@ func TestConstructorPanicPreservesParent(t *testing.T) {
 
 		return nil
 	}}}))
+
 	plan, err := h.Runtime().Compile(h.Context(), api.Source{Content: "RETURN 1"})
 	if err != nil {
 		t.Fatal(err)
@@ -286,6 +290,7 @@ func TestPanicContainmentAndResourcePoisoning(t *testing.T) {
 					}
 
 					h.RuntimeSpy().Recorder().Wait(t, "panicked debugger closes", func(s harness.Snapshot) bool { return s.Count(s.OfKind("debugger")[0].ID, "Close") == 1 })
+
 					snapshot := h.RuntimeSpy().Recorder().Snapshot()
 					if snapshot.Count(snapshot.OfKind("debugger")[0].ID, "Frames") != 1 {
 						t.Fatal("a poisoned hosted debugger received another inspection call")

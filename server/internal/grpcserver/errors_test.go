@@ -3,10 +3,11 @@ package grpcserver
 import (
 	"testing"
 
-	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
-	"github.com/MontFerret/wire/server/internal/core"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+
+	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
+	"github.com/MontFerret/wire/server/internal/core"
 )
 
 func TestRPCErrorUsesGRPCStatusAndMinimalWireCategory(t *testing.T) {
@@ -45,9 +46,11 @@ func TestRPCErrorUsesGRPCStatusAndMinimalWireCategory(t *testing.T) {
 			for _, value := range converted.Details() {
 				if typed, detailOK := value.(*wirev1.ErrorDetail); detailOK {
 					detail = typed
+
 					break
 				}
 			}
+
 			if test.category == wirev1.ErrorCategory_ERROR_CATEGORY_UNSPECIFIED {
 				if detail != nil {
 					t.Fatalf("gRPC-native failure carried redundant detail: %#v", detail)

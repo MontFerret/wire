@@ -4,14 +4,16 @@ import (
 	"fmt"
 	"math"
 
-	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
 	"google.golang.org/protobuf/types/known/structpb"
+
+	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
 )
 
 const maxValueDepth = 64
 
 func decodeParameters(input *wirev1.Parameters) (map[string]any, error) {
 	result := make(map[string]any)
+
 	if input == nil {
 		return result, nil
 	}
@@ -66,12 +68,14 @@ func decodeValue(input *wirev1.Value, depth int) (any, error) {
 		if value.ArrayValue == nil {
 			return nil, fmt.Errorf("array value is required")
 		}
+
 		items := make([]any, len(value.ArrayValue.GetValues()))
 		for i, item := range value.ArrayValue.GetValues() {
 			converted, err := decodeValue(item, depth+1)
 			if err != nil {
 				return nil, fmt.Errorf("array item %d: %w", i, err)
 			}
+
 			items[i] = converted
 		}
 

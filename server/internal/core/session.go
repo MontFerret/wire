@@ -6,10 +6,11 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/google/uuid"
+
 	"github.com/MontFerret/api"
 	"github.com/MontFerret/wire/server/internal/lifecycle"
 	"github.com/MontFerret/wire/server/internal/panicboundary"
-	"github.com/google/uuid"
 )
 
 // Session owns one durable hosted session. Its execution slot remains occupied
@@ -39,10 +40,12 @@ func newSession(plan *Plan, hosted api.Session) *Session {
 	}
 }
 
+// ID identifies this durable session within its logical connection.
 func (s *Session) ID() SessionID {
 	return s.id
 }
 
+// Execute starts a run only when the session's previous execution has been released.
 func (s *Session) Execute(ctx context.Context) (*Execution, error) {
 	if err := s.plan.store.operationError(ctx); err != nil {
 		return nil, err
@@ -100,6 +103,7 @@ func (s *Session) run(ctx context.Context) (api.Output, error) {
 	output, err := panicboundary.Call(func() (api.Output, error) {
 		return s.session.Run(ctx)
 	})
+
 	var panicErr *panicboundary.Error
 	if errors.As(err, &panicErr) {
 		s.poisoned.Store(true)
@@ -108,15 +112,19 @@ func (s *Session) run(ctx context.Context) (api.Output, error) {
 	return output, runtimePanicError("run runtime session", err)
 }
 
+// Release cancels the session, releases its execution, and closes the hosted session.
+// Caller cancellation stops waiting without abandoning teardown.
 func (s *Session) Release(ctx context.Context) error {
 	r := s.plan.store
 	r.mu.Lock()
+
 	started := s.release.Begin()
 	if started {
 		s.cancel(context.Canceled)
 	}
 
 	r.mu.Unlock()
+
 	if started {
 		go s.settleRelease()
 	}
@@ -141,6 +149,7 @@ func (s *Session) settleRelease() {
 	r.mu.Lock()
 	execution := s.active
 	r.mu.Unlock()
+
 	if execution != nil {
 		err = execution.Release(context.Background())
 	}

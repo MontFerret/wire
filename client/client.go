@@ -6,9 +6,10 @@ import (
 	"io"
 	"sync"
 
+	"google.golang.org/grpc"
+
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
 	"github.com/MontFerret/wire/pkg/failure"
-	"google.golang.org/grpc"
 )
 
 type (
@@ -47,6 +48,7 @@ func newConnection(ctx context.Context, connection grpc.ClientConnInterface) (*c
 
 	runtimeClient := wirev1.NewRuntimeServiceClient(connection)
 	streamCtx, streamCancel := context.WithCancel(context.WithoutCancel(ctx))
+
 	stream, err := runtimeClient.Connect(streamCtx, &wirev1.ConnectRequest{})
 	if err != nil {
 		streamCancel()
@@ -163,6 +165,7 @@ func (c *connectionHandle) checkOpen() error {
 	c.closeMu.Lock()
 	closing := c.closing
 	c.closeMu.Unlock()
+
 	if closing {
 		return ErrClosed
 	}
@@ -172,6 +175,7 @@ func (c *connectionHandle) checkOpen() error {
 		c.streamMu.Lock()
 		err := c.streamErr
 		c.streamMu.Unlock()
+
 		if err != nil {
 			return err
 		}
@@ -190,6 +194,7 @@ func (c *connectionHandle) closeResult(ctx context.Context) (bool, error) {
 	c.closeMu.Lock()
 	closing := c.closing
 	c.closeMu.Unlock()
+
 	if !closing {
 		return false, nil
 	}

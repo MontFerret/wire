@@ -48,6 +48,7 @@ func TestPlanReleaseSettlesAbandonedSessionBeforeReclaimingCapacity(t *testing.T
 	limits := testLimits().resources()
 	limits.Sessions = 1
 	registry := NewConnectionRegistry(1, limits)
+
 	connection, err := registry.Open()
 	if err != nil {
 		t.Fatal(err)
@@ -58,6 +59,7 @@ func TestPlanReleaseSettlesAbandonedSessionBeforeReclaimingCapacity(t *testing.T
 			t.Error(err)
 		}
 	})
+
 	plan, err := CompilePlan(ctx, runtime, connection.Resources(), api.Source{Name: "parent", Content: "RETURN 1"}, false)
 	if err != nil {
 		t.Fatal(err)

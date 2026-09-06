@@ -15,6 +15,7 @@ type DebugService struct {
 
 var _ wirev1.DebugServiceServer = (*DebugService)(nil)
 
+// CreateDebugSession decodes options and creates a debugger under the requested plan.
 func (s *DebugService) CreateDebugSession(
 	ctx context.Context,
 	request *wirev1.CreateDebugSessionRequest,
@@ -49,6 +50,7 @@ func (s *DebugService) CreateDebugSession(
 	return &wirev1.CreateDebugSessionResponse{Session: converted}, nil
 }
 
+// ReleaseDebugSession reclaims a debugger through its logical connection.
 func (s *DebugService) ReleaseDebugSession(
 	ctx context.Context,
 	request *wirev1.ReleaseDebugSessionRequest,

@@ -4,18 +4,22 @@ import (
 	"context"
 	"sync"
 
-	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
+
+	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
 )
 
 type (
 	// Operation names faults without exposing protobuf services to contract tests.
 	Operation string
-	Outcome   string
 
+	// Outcome selects how a committed unary response is delivered or lost.
+	Outcome string
+
+	// ResponseGate exposes server commitment and holds client delivery until explicitly released.
 	ResponseGate struct {
 		Committed chan struct{}
 		deliver   chan struct{}
@@ -49,6 +53,7 @@ type (
 	}
 )
 
+// Operations identify intercepted RPCs; outcomes describe delivery after server commitment.
 const (
 	Compile          Operation = "compile"
 	CompileDebug     Operation = "compile debug"
@@ -118,6 +123,7 @@ func newFaults(connection grpc.ClientConnInterface) *Faults {
 	}
 }
 
+// Arm holds the next matching unary response after the real server has committed it.
 func (f *Faults) Arm(operation Operation, outcome Outcome) *ResponseGate {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -129,10 +135,12 @@ func (f *Faults) Arm(operation Operation, outcome Outcome) *ResponseGate {
 	return gate
 }
 
+// Deliver releases a held response with its configured outcome; repeated calls are safe.
 func (g *ResponseGate) Deliver() {
 	g.once.Do(func() { close(g.deliver) })
 }
 
+// Invoke records unary call order and applies configured failures around real dispatch.
 func (f *Faults) Invoke(ctx context.Context, method string, request, response any, options ...grpc.CallOption) error {
 	operation := operationFor(method)
 	f.mu.Lock()
@@ -181,6 +189,7 @@ func (f *Faults) Invoke(ctx context.Context, method string, request, response an
 	return nil
 }
 
+// NewStream forwards the call and optionally injects a receive failure after its first snapshot.
 func (f *Faults) NewStream(ctx context.Context, description *grpc.StreamDesc, method string, options ...grpc.CallOption) (grpc.ClientStream, error) {
 	f.mu.Lock()
 	failure, injected := f.watchFailures[operationFor(method)]
@@ -192,6 +201,7 @@ func (f *Faults) NewStream(ctx context.Context, description *grpc.StreamDesc, me
 	}
 
 	streamCtx, cancel := context.WithCancel(ctx)
+
 	stream, err := f.ClientConnInterface.NewStream(streamCtx, description, method, options...)
 	if err != nil {
 		cancel()
@@ -227,12 +237,14 @@ func (s *failingStream) RecvMsg(message any) error {
 	return err
 }
 
+// Fail injects an error before dispatch for matching unary calls.
 func (f *Faults) Fail(operation Operation, err error) {
 	f.mu.Lock()
 	f.failures[operation] = err
 	f.mu.Unlock()
 }
 
+// FailResponse injects an error after a matching unary call succeeds on the server.
 func (f *Faults) FailResponse(operation Operation, err error) {
 	f.mu.Lock()
 	f.responseFailures[operation] = err
@@ -247,6 +259,7 @@ func (f *Faults) EndWatch(operation Operation, err error, after <-chan struct{})
 	f.mu.Unlock()
 }
 
+// Count reports recorded unary invocations for the given operation.
 func (f *Faults) Count(operation Operation) int {
 	count := 0
 
@@ -259,6 +272,7 @@ func (f *Faults) Count(operation Operation) int {
 	return count
 }
 
+// Sequence returns a copy of unary invocation order for cleanup-order assertions.
 func (f *Faults) Sequence() []Operation {
 	f.mu.Lock()
 	defer f.mu.Unlock()

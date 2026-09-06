@@ -143,6 +143,7 @@ func TestDebugSessionInspectionDetachesHostedSlices(t *testing.T) {
 	hosted := &borrowedInspectionDebugger{frames: frames, locals: locals, values: variables}
 	session := newTestCoreDebugSession(t, hosted, 1)
 	session.state.status = wiredebugger.StateStopped
+
 	gotFrames, err := session.Frames(testContext(t))
 	if err != nil {
 		t.Fatal(err)

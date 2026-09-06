@@ -5,9 +5,10 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/google/uuid"
+
 	"github.com/MontFerret/api"
 	"github.com/MontFerret/wire/server/internal/panicboundary"
-	"github.com/google/uuid"
 )
 
 // CompilePlan creates a connection-owned plan using the borrowed hosted runtime.
@@ -32,6 +33,7 @@ func CompilePlan(ctx context.Context, runtime api.Runtime, store *ResourceStore,
 	defer func() { store.finishCreation(planResource, nil, committed) }()
 
 	compile := runtime.Compile
+
 	if debug {
 		compile = runtime.CompileDebug
 	}
@@ -46,6 +48,7 @@ func CompilePlan(ctx context.Context, runtime api.Runtime, store *ResourceStore,
 		}
 
 		compileErr := compilationError("compilation failed", err)
+
 		if !isNil(compiled) {
 			return nil, errors.Join(compileErr, closeAPIPlan(compiled))
 		}

@@ -5,6 +5,8 @@ import (
 	"github.com/MontFerret/wire/server/internal/core"
 )
 
+// WatchDebug sends the current snapshot followed by ordered debugger transitions.
+// Stream completion releases the bounded subscription.
 func (s *DebugService) WatchDebug(request *wirev1.WatchDebugRequest, stream wirev1.DebugService_WatchDebugServer) error {
 	operation, resources, cancel, err := prepareOperation(stream.Context(), s.connections, request.GetConnectionId())
 	if err != nil {

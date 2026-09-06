@@ -57,7 +57,7 @@ func (d *boundaryDebugger) Frames() ([]debugger.Frame, error) {
 	return []debugger.Frame{{Name: "main"}}, nil
 }
 
-func (d *boundaryDebugger) FrameLocals(frame int) ([]debugger.Variable, error) {
+func (d *boundaryDebugger) FrameLocals(_ int) ([]debugger.Variable, error) {
 	if err := d.record("frame-locals"); err != nil {
 		return nil, err
 	}
@@ -65,7 +65,7 @@ func (d *boundaryDebugger) FrameLocals(frame int) ([]debugger.Variable, error) {
 	return []debugger.Variable{{Name: "frame"}}, nil
 }
 
-func (d *boundaryDebugger) Variables(reference debugger.ValueReference) ([]debugger.Variable, error) {
+func (d *boundaryDebugger) Variables(_ debugger.ValueReference) ([]debugger.Variable, error) {
 	if err := d.record("variables"); err != nil {
 		return nil, err
 	}

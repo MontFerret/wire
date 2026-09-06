@@ -6,11 +6,12 @@ import (
 	"testing"
 	"time"
 
-	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
-	"github.com/MontFerret/wire/server/internal/core"
 	"github.com/google/uuid"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+
+	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
+	"github.com/MontFerret/wire/server/internal/core"
 )
 
 func TestOperationContextRejectsInvalidAndUnknownConnections(t *testing.T) {
@@ -38,10 +39,12 @@ func TestOperationContextCombinesLifetimesAndPreservesValues(t *testing.T) {
 	for _, lifetime := range []string{"request", "connection", "operation"} {
 		t.Run(lifetime, func(t *testing.T) {
 			registry := core.NewConnectionRegistry(1, core.ResourceLimits{})
+
 			connection, err := registry.Open()
 			if err != nil {
 				t.Fatal(err)
 			}
+
 			t.Cleanup(func() {
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer cancel()
@@ -55,6 +58,7 @@ func TestOperationContextCombinesLifetimesAndPreservesValues(t *testing.T) {
 			request, cancelRequest := context.WithTimeout(context.WithValue(context.Background(), contextKey{}, "retained"), 5*time.Second)
 			defer cancelRequest()
 			id := &wirev1.ConnectionId{Value: string(connection.ID())}
+
 			operation, resources, cancel, err := prepareOperation(request, registry, id)
 			if err != nil {
 				t.Fatal(err)
@@ -63,6 +67,7 @@ func TestOperationContextCombinesLifetimesAndPreservesValues(t *testing.T) {
 			defer cancel()
 
 			deadline, _ := request.Deadline()
+
 			operationDeadline, present := operation.Deadline()
 			if resources != connection.Resources() || operation.Value(contextKey{}) != "retained" || !present || !operationDeadline.Equal(deadline) {
 				t.Fatal("operation lost its connection, request value, or deadline")

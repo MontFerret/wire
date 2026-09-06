@@ -60,6 +60,7 @@ func TestProtocolResourceOperationsRemainAvailable(t *testing.T) {
 	connectCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	runtimeRPC := wirev1.NewRuntimeServiceClient(env.conn)
+
 	stream, err := runtimeRPC.Connect(connectCtx, &wirev1.ConnectRequest{})
 	if err != nil {
 		t.Fatal(err)
@@ -77,6 +78,7 @@ func TestProtocolResourceOperationsRemainAvailable(t *testing.T) {
 		}
 	}()
 	planRPC := wirev1.NewPlanServiceClient(env.conn)
+
 	compiled, err := planRPC.CompileDebug(ctx, &wirev1.CompileDebugRequest{ConnectionId: connectionID, Source: &wirev1.Source{Content: "RETURN @input"}})
 	if err != nil {
 		t.Fatal(err)
@@ -84,6 +86,7 @@ func TestProtocolResourceOperationsRemainAvailable(t *testing.T) {
 
 	planID := compiled.GetPlan().GetId()
 	executionRPC := wirev1.NewExecutionServiceClient(env.conn)
+
 	created, err := executionRPC.Execute(ctx, &wirev1.ExecuteRequest{
 		ConnectionId: connectionID, PlanId: planID, OutputContentType: "text/plain",
 		Parameters: &wirev1.Parameters{Values: map[string]*wirev1.Value{"input": {Value: &wirev1.Value_IntegerValue{IntegerValue: 7}}}},
@@ -118,6 +121,7 @@ func TestProtocolResourceOperationsRemainAvailable(t *testing.T) {
 	}
 
 	debugRPC := wirev1.NewDebugServiceClient(env.conn)
+
 	debugCreated, err := debugRPC.CreateDebugSession(ctx, &wirev1.CreateDebugSessionRequest{ConnectionId: connectionID, PlanId: planID})
 	if err != nil {
 		t.Fatal(err)

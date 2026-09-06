@@ -19,6 +19,7 @@ func TestBreakpointSetOwnsOnlyBookkeepingAndCapacity(t *testing.T) {
 	}
 
 	set.add(value)
+
 	got, err := set.get(value.ID)
 	if err != nil || got != value {
 		t.Fatalf("unexpected stored breakpoint: %#v, %v", got, err)
@@ -29,6 +30,7 @@ func TestBreakpointSetOwnsOnlyBookkeepingAndCapacity(t *testing.T) {
 	}
 
 	set.delete(value.ID)
+
 	if _, err := set.get(value.ID); !hasCategory(err, ErrorKindBreakpointNotFound) {
 		t.Fatalf("deleted breakpoint remained registered: %v", err)
 	}
@@ -61,6 +63,7 @@ func TestDebugSessionCommitsBreakpointBookkeepingOnlyAfterRuntimeSuccess(t *test
 	}
 
 	setFailure = nil
+
 	value, err := session.SetBreakpointAt(context.Background(), location, debugger.BreakpointOptions{})
 	if err != nil {
 		t.Fatalf("failed set consumed local capacity: %v", err)
@@ -75,6 +78,7 @@ func TestDebugSessionCommitsBreakpointBookkeepingOnlyAfterRuntimeSuccess(t *test
 	}
 
 	deleteFailure = nil
+
 	if err := session.DeleteBreakpoint(context.Background(), value.ID); err != nil {
 		t.Fatalf("failed delete corrupted local state: %v", err)
 	}

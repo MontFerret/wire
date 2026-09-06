@@ -12,6 +12,7 @@ func TestRuntimeAllocationContextRetainsValuesAndBoundsDetachedAcquisition(t *te
 	parent, cancelParent := context.WithCancel(context.WithValue(context.Background(), contextKey{}, "retained"))
 	defer cancelParent()
 	before := time.Now()
+
 	allocation, cancel, err := runtimeAllocationContext(parent)
 	if err != nil {
 		t.Fatal(err)
@@ -19,6 +20,7 @@ func TestRuntimeAllocationContextRetainsValuesAndBoundsDetachedAcquisition(t *te
 	defer cancel()
 
 	cancelParent()
+
 	if allocation.Err() != nil || allocation.Value(contextKey{}) != "retained" {
 		t.Fatal("allocation lost context values or inherited caller cancellation")
 	}
@@ -29,6 +31,7 @@ func TestRuntimeAllocationContextRetainsValuesAndBoundsDetachedAcquisition(t *te
 	}
 
 	cancel()
+
 	if !errors.Is(allocation.Err(), context.Canceled) {
 		t.Fatal("allocation cancellation did not terminate its context")
 	}

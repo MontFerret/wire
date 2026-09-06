@@ -16,6 +16,7 @@ func TestRunUsesBorrowedRuntimeWithoutPlan(t *testing.T) {
 		return api.Output{ContentType: options.contentType, Content: []byte("direct")}, nil
 	}}
 	connection := newTestConnection(t, hosted)
+
 	run, err := connection.Run(context.Background(), runRequest{
 		Source:            api.Source{Name: "direct.fql", Content: "RETURN @input"},
 		Parameters:        map[string]any{"input": int64(7)},
@@ -25,7 +26,7 @@ func TestRunUsesBorrowedRuntimeWithoutPlan(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if run.Snapshot.State != wireexecution.StateRunning {
+	if run.State != wireexecution.StateRunning {
 		t.Fatalf("direct Run did not return the initial running snapshot: %+v", run)
 	}
 
@@ -44,6 +45,7 @@ func TestRunUsesBorrowedRuntimeWithoutPlan(t *testing.T) {
 	options := make([]sessionOptions, len(hosted.runOptions))
 	copy(options, hosted.runOptions)
 	hosted.mu.Unlock()
+
 	if !reflect.DeepEqual(sources, []api.Source{{Name: "direct.fql", Content: "RETURN @input"}}) ||
 		len(options) != 1 || options[0].contentType != "text/plain" ||
 		!reflect.DeepEqual(options[0].params, map[string]any{"input": int64(7)}) {
@@ -60,12 +62,14 @@ func TestRunPanicIsContainedAsInternalFailure(t *testing.T) {
 		panic("runtime secret")
 	}}
 	connection := newTestConnection(t, hosted)
+
 	run, err := connection.Run(context.Background(), runRequest{
 		Source: api.Source{Content: "RETURN 1"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	terminal := waitExecution(t, connection, run.ID)
 	if terminal.State != wireexecution.StateFailed || terminal.Output != nil || terminal.Failure == nil ||
 		terminal.Failure.Category != failure.CategoryInternalRuntime ||
@@ -76,6 +80,7 @@ func TestRunPanicIsContainedAsInternalFailure(t *testing.T) {
 	if err := connection.ReleaseExecution(testContext(t), run.ID); err != nil {
 		t.Fatal(err)
 	}
+
 	_, _, closeCalls := hosted.snapshot()
 	if closeCalls != 0 {
 		t.Fatalf("direct execution closed borrowed Runtime %d times", closeCalls)
@@ -87,6 +92,7 @@ func TestRunRejectsCancelledAndInvalidRequestsBeforeAllocation(t *testing.T) {
 	connection := newTestConnection(t, hosted)
 	cancelled, cancel := context.WithCancel(context.Background())
 	cancel()
+
 	if _, err := connection.Run(cancelled, runRequest{Source: api.Source{Content: "RETURN 1"}}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled direct run was admitted: %v", err)
 	}

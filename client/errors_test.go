@@ -5,12 +5,13 @@ import (
 	"reflect"
 	"testing"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	"github.com/MontFerret/api/diagnostics"
 	"github.com/MontFerret/api/source"
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
 	"github.com/MontFerret/wire/pkg/failure"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 func TestDecodeErrorPreservesDomainDetailsAndTransportStatus(t *testing.T) {
@@ -32,10 +33,12 @@ func TestDecodeErrorPreservesDomainDetailsAndTransportStatus(t *testing.T) {
 			Primary: true,
 		}},
 	}}}
+
 	withDetails, err := status.New(codes.InvalidArgument, "compilation failed").WithDetails(detail, diagnosticSet)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	transportErr := withDetails.Err()
 	decoded := decodeError(transportErr)
 
@@ -95,6 +98,7 @@ func TestDecodeErrorLeavesNativeTransportStatusesCategoryFree(t *testing.T) {
 		codes.ResourceExhausted,
 	} {
 		decoded := decodeError(status.Error(code, "transport failure"))
+
 		var wireErr *Error
 		if !errors.As(decoded, &wireErr) || wireErr.Category != 0 || status.Code(decoded) != code {
 			t.Errorf("status %s decoded as %#v", code, decoded)
@@ -125,6 +129,7 @@ func TestErrorCategoryConversionMapsEveryProtocolDetail(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		if got != test.want {
 			t.Errorf("convertErrorCategory(%v) = %v, want %v", test.protocol, got, test.want)
 		}
@@ -133,6 +138,7 @@ func TestErrorCategoryConversionMapsEveryProtocolDetail(t *testing.T) {
 	if _, err := convertErrorCategory(wirev1.ErrorCategory_ERROR_CATEGORY_UNSPECIFIED, false); err == nil {
 		t.Fatal("terminal failure accepted an unspecified category")
 	}
+
 	if _, err := convertErrorCategory(wirev1.ErrorCategory(99), true); err == nil {
 		t.Fatal("unknown protocol error category was accepted")
 	}

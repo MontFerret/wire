@@ -4,8 +4,9 @@ import (
 	"reflect"
 	"testing"
 
-	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
 	"google.golang.org/grpc"
+
+	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
 )
 
 func TestServerRegistersDedicatedProtocolServices(t *testing.T) {

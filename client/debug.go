@@ -102,6 +102,7 @@ func (d *debugSessionHandle) Watch(ctx context.Context) (*debugEvents, error) {
 	}
 
 	watchCtx, cancel := d.client.watchContext(ctx)
+
 	stream, err := d.client.debugClient.WatchDebug(watchCtx, &wirev1.WatchDebugRequest{
 		ConnectionId: d.client.connectionProto(), DebugSessionId: &wirev1.DebugSessionId{Value: d.id},
 	})

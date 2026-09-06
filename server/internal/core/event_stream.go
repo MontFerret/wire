@@ -59,6 +59,7 @@ func (s *eventStream[T]) subscribe() (eventSubscription[T], error) {
 	id := s.nextWatcher
 
 	var current T
+
 	if s.hasLatest {
 		current = s.clone(s.latest)
 	}
@@ -111,6 +112,7 @@ func (s *eventStream[T]) publish(event T, terminal bool) {
 	s.sequence++
 	s.latest = s.withSequence(event, s.sequence)
 	s.hasLatest = true
+
 	if terminal {
 		s.closed = true
 	}

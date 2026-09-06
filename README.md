@@ -183,6 +183,7 @@ does not synthesize intermediate output from logs.
 ```sh
 make fmt              # format handwritten Go
 make check-fmt        # verify formatting without changing files
+make lint             # verify configuration and lint the complete Go baseline
 make generate         # regenerate checked-in Go/gRPC bindings
 make check-generate   # fail when generation changes the checkout
 make proto-lint       # Buf STANDARD lint
@@ -194,6 +195,34 @@ make test-race
 make build
 ```
 
+The Makefile pins golangci-lint and installs its official, checksum-verified
+release under ignored `bin/tools/golangci-lint/<version>/`. `make fmt`,
+`make check-fmt`, and `make lint` install it automatically when the selected
+version's executable is absent and reuse it afterward. Explicit installation
+with `make install-lint` is optional. First use requires download access, `curl`,
+and a POSIX shell (such as Git Bash on Windows). Tool selection uses the host
+platform even when Go cross-compilation variables are set. `make build` remains
+a compilation-only target.
+
+[The lint configuration](.golangci.yml) enables correctness, error handling,
+resource cleanup, spelling, API documentation and naming, grouped type
+declarations, and control-flow spacing checks. Its explicit linter list is
+`errcheck`, `govet`, `ineffassign`, `staticcheck`, `unused`, `bodyclose`,
+`errorlint`, `copyloopvar`, `nolintlint`, `revive`, `grouper`, `misspell`,
+and `wsl_v5`. Formatting uses `gofmt` and `goimports`, with
+`github.com/MontFerret` imports grouped together. Tests are covered; generated
+code and vendor directories are excluded from lint and formatting. Linting is
+read-only and analyzes the full baseline.
+
+Fix findings at their source. When a check conflicts with an intentional
+contract, use a narrow directive such as
+`//nolint:errorlint // Verify the original error is returned unchanged.`
+Suppressions must name the linter, explain the reason, and suppress a real
+finding. Preserve exact-error and panic-identity assertions. A configuration
+exception covers only capitalization warnings for error literals beginning
+with the proper name "Wire"; other Staticcheck checks remain enabled.
+Architectural and ownership rules still require review.
+
 The [Universal API integration suite](test/integration/README.md) exercises the
 public client/server boundary over real gRPC using an in-memory `bufconn`
 transport and hosted API spies. Run it independently with
@@ -201,6 +230,6 @@ transport and hosted API spies. Run it independently with
 Package-local tests retain component, conversion, and low-level protocol coverage.
 
 CI invokes these Make targets on Linux, macOS, and Windows; Linux additionally
-runs the race detector, Buf lint, checked generation, and pull-request breaking
-checks against the fetched base branch. The integration suite is included in
-the existing `./...` targets without build tags or extra services.
+runs Go lint, the race detector, Buf lint, checked generation, and pull-request
+breaking checks against the fetched base branch. The integration suite is included
+in the existing `./...` targets without build tags or extra services.

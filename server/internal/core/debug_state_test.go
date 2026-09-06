@@ -23,6 +23,7 @@ func TestDebugSessionStateBuildsDefensiveSnapshots(t *testing.T) {
 
 	snapshot := state.snapshot()
 	state.hitIDs[0] = 2
+
 	state.output.Content[0] = '2'
 	if snapshot.HitBreakpointIDs[0] != 1 || string(snapshot.Output.Content) != "1" {
 		t.Fatalf("snapshot retained live state storage: %#v", snapshot)
@@ -36,6 +37,7 @@ func TestDebugSessionStateBuildsDefensiveSnapshots(t *testing.T) {
 		retained.Location == nil || *retained.Location != *state.location || retained.Location == state.location || retained.Depth != 2 {
 		t.Fatalf("unexpected debug snapshot: %#v", retained)
 	}
+
 	if retained.HitBreakpointIDs[0] != 2 || string(retained.Output.Content) != "2" {
 		t.Fatalf("snapshot did not own mutable values: %#v", retained)
 	}
@@ -53,6 +55,7 @@ func TestDebugSessionStateTransitionsPreserveSupportingValues(t *testing.T) {
 	}
 
 	state.beginRunning()
+
 	if state.status != wiredebugger.StateRunning || state.reason != "" || state.location != nil ||
 		state.hitIDs != nil || state.depth != 0 || state.failure != nil || state.output == nil {
 		t.Fatalf("unexpected running state: %#v", state)
@@ -61,6 +64,7 @@ func TestDebugSessionStateTransitionsPreserveSupportingValues(t *testing.T) {
 	state.hitIDs = []debugger.BreakpointID{2}
 	state.failure = &failure.Failure{Category: failure.CategoryExecution}
 	state.terminate()
+
 	if state.status != wiredebugger.StateTerminated || state.reason != "" || state.location != nil ||
 		state.depth != 0 || state.failure != nil || len(state.hitIDs) != 1 || state.output == nil {
 		t.Fatalf("unexpected terminated state: %#v", state)

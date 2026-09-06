@@ -4,8 +4,9 @@ import (
 	"context"
 	"errors"
 
-	"github.com/MontFerret/wire/server/internal/lifecycle"
 	"github.com/google/uuid"
+
+	"github.com/MontFerret/wire/server/internal/lifecycle"
 )
 
 // Connection is the logical identity and lifetime established by the Connect
@@ -29,14 +30,17 @@ func newConnection(limits ResourceLimits) *Connection {
 	}
 }
 
+// ID identifies this logical connection independently of its physical transport.
 func (c *Connection) ID() ConnectionID {
 	return c.id
 }
 
+// Context is cancelled when logical connection teardown begins.
 func (c *Connection) Context() context.Context {
 	return c.ctx
 }
 
+// Resources returns the store owned by this logical connection.
 func (c *Connection) Resources() *ResourceStore {
 	return c.resources
 }
