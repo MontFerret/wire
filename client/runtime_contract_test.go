@@ -6,8 +6,6 @@ import (
 	"go/parser"
 	"go/token"
 	"os"
-	"path/filepath"
-	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -29,13 +27,8 @@ func TestNewRejectsMissingTransport(t *testing.T) {
 }
 
 func TestPublicSurface(t *testing.T) {
-	_, filename, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("cannot locate client sources")
-	}
-
-	root := filepath.Dir(filename)
-	entries, err := os.ReadDir(root)
+	// go test runs in the package directory, including when built with -trimpath.
+	entries, err := os.ReadDir(".")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +39,7 @@ func TestPublicSurface(t *testing.T) {
 			continue
 		}
 
-		file, err := parser.ParseFile(token.NewFileSet(), filepath.Join(root, entry.Name()), nil, 0)
+		file, err := parser.ParseFile(token.NewFileSet(), entry.Name(), nil, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
