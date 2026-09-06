@@ -3,8 +3,8 @@ package grpcserver
 import (
 	"context"
 	"errors"
+	"fmt"
 
-	"github.com/MontFerret/api/diagnostics"
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
 	"github.com/MontFerret/wire/server/internal/core"
 	"google.golang.org/grpc/codes"
@@ -70,7 +70,15 @@ func rpcError(err error) error {
 		)
 	}
 
-	return statusWithDiagnostics(code, message, errorCategory(domain.Kind), diagnosticSet)
+	category := wirev1.ErrorCategory_ERROR_CATEGORY_UNSPECIFIED
+	if value := domain.Category(); value != 0 {
+		category, conversionErr = failureCategory(value)
+		if conversionErr != nil {
+			return statusWithCategory(codes.Internal, "internal runtime failure", wirev1.ErrorCategory_ERROR_CATEGORY_INTERNAL_RUNTIME_FAILURE)
+		}
+	}
+
+	return statusWithDiagnostics(code, message, category, diagnosticSet)
 }
 
 func statusWithCategory(code codes.Code, message string, category wirev1.ErrorCategory) error {
@@ -106,44 +114,13 @@ func statusWithDiagnostics(
 }
 
 func diagnosticSetFromError(err error) (*wirev1.DiagnosticSet, error) {
-	var values diagnostics.Diagnostics
-	if errors.As(err, &values) {
-		return diagnosticsToProto(values)
-	}
-
-	var pointer *diagnostics.Diagnostics
-	if errors.As(err, &pointer) && pointer != nil {
-		return diagnosticsToProto(*pointer)
-	}
-
-	return nil, nil
+	return diagnosticsToProto(core.DiagnosticsFromError(err))
 }
 
-func errorCategory(value core.ErrorKind) wirev1.ErrorCategory {
-	switch value {
-	case core.ErrorKindCompilation:
-		return wirev1.ErrorCategory_ERROR_CATEGORY_COMPILATION_FAILURE
-	case core.ErrorKindExecution:
-		return wirev1.ErrorCategory_ERROR_CATEGORY_EXECUTION_FAILURE
-	case core.ErrorKindPlanNotFound:
-		return wirev1.ErrorCategory_ERROR_CATEGORY_PLAN_NOT_FOUND
-	case core.ErrorKindExecutionNotFound:
-		return wirev1.ErrorCategory_ERROR_CATEGORY_EXECUTION_NOT_FOUND
-	case core.ErrorKindDebugSessionNotFound:
-		return wirev1.ErrorCategory_ERROR_CATEGORY_DEBUG_SESSION_NOT_FOUND
-	case core.ErrorKindConnectionNotFound:
-		return wirev1.ErrorCategory_ERROR_CATEGORY_CONNECTION_NOT_FOUND
-	case core.ErrorKindInvalidState:
-		return wirev1.ErrorCategory_ERROR_CATEGORY_INVALID_STATE
-	case core.ErrorKindWatcherLagged:
-		return wirev1.ErrorCategory_ERROR_CATEGORY_WATCHER_LAGGED
-	case core.ErrorKindBreakpointNotFound:
-		return wirev1.ErrorCategory_ERROR_CATEGORY_BREAKPOINT_NOT_FOUND
-	case core.ErrorKindInternal:
-		return wirev1.ErrorCategory_ERROR_CATEGORY_INTERNAL_RUNTIME_FAILURE
-	case core.ErrorKindSessionNotFound:
-		return wirev1.ErrorCategory_ERROR_CATEGORY_SESSION_NOT_FOUND
-	default:
-		return wirev1.ErrorCategory_ERROR_CATEGORY_UNSPECIFIED
+func runtimeConversionError(format string, args ...any) error {
+	return &core.DomainError{
+		Kind:    core.ErrorKindInternal,
+		Message: "internal runtime failure",
+		Cause:   fmt.Errorf(format, args...),
 	}
 }

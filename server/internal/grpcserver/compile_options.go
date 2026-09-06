@@ -30,3 +30,16 @@ func optimizationLevel(options *wirev1.CompileOptions) (api.OptimizationLevel, b
 
 	return level, true, nil
 }
+
+func decodeCompileOptions(options *wirev1.CompileOptions) ([]api.PlanOption, error) {
+	level, present, err := optimizationLevel(options)
+	if err != nil {
+		return nil, err
+	}
+
+	if !present {
+		return nil, nil
+	}
+
+	return []api.PlanOption{api.WithOptimizationLevel(level)}, nil
+}

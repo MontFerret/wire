@@ -3,8 +3,6 @@ package core
 import (
 	"context"
 	"errors"
-	wiredebugger "github.com/MontFerret/wire/pkg/debugger"
-	"github.com/MontFerret/wire/pkg/failure"
 	"reflect"
 	"sync/atomic"
 	"testing"
@@ -13,11 +11,13 @@ import (
 	"github.com/MontFerret/api/debugger"
 	"github.com/MontFerret/api/diagnostics"
 	"github.com/MontFerret/api/source"
+	wiredebugger "github.com/MontFerret/wire/pkg/debugger"
+	"github.com/MontFerret/wire/pkg/failure"
 	"github.com/MontFerret/wire/server/internal/panicboundary"
 )
 
 func TestDebugSessionRejectsInvalidCommandWithoutRuntimeOrEvent(t *testing.T) {
-	runtime := &controllerDebugger{}
+	runtime := &boundaryDebugger{}
 	session := newTestCoreDebugSession(t, runtime, 1)
 	subscription, err := session.Watch()
 	if err != nil {
@@ -121,7 +121,7 @@ func TestDebugWatchDisconnectDoesNotCancelSession(t *testing.T) {
 		t.Fatalf("watch disconnect settled runtime command; cancelled=%v", wasCancelled)
 	case <-time.After(25 * time.Millisecond):
 	}
-	if snapshot := session.snapshot(); snapshot.State != wiredebugger.StateRunning {
+	if snapshot := session.Snapshot(); snapshot.State != wiredebugger.StateRunning {
 		t.Fatalf("watch disconnect changed debug state: %#v", snapshot)
 	}
 
@@ -276,7 +276,7 @@ func TestDebugSessionPauseFailurePreservesRunningStateWithoutEvent(t *testing.T)
 		t.Fatalf("runtime pause failure was not propagated: %v", err)
 	}
 
-	if snapshot := session.snapshot(); snapshot.State != wiredebugger.StateRunning {
+	if snapshot := session.Snapshot(); snapshot.State != wiredebugger.StateRunning {
 		t.Fatalf("failed pause changed state: %#v", snapshot)
 	}
 
@@ -290,7 +290,7 @@ func TestDebugSessionPauseFailurePreservesRunningStateWithoutEvent(t *testing.T)
 }
 
 func TestDebugSessionCommandPanicPublishesFailureAndClosesRuntime(t *testing.T) {
-	runtime := &controllerDebugger{panicOn: "start"}
+	runtime := &boundaryDebugger{panicOn: "start"}
 	session := newTestCoreDebugSession(t, runtime, 1)
 	subscription, err := session.Watch()
 	if err != nil {
@@ -314,7 +314,7 @@ func TestDebugSessionCommandPanicPublishesFailureAndClosesRuntime(t *testing.T) 
 		t.Fatalf("runtime panic did not commit an internal failure: %#v", settled)
 	}
 
-	waitControllerCalls(t, runtime, []string{"start", "close"})
+	waitDebuggerCalls(t, runtime, []string{"start", "close"})
 	if _, err := session.Continue(context.Background()); !hasCategory(err, ErrorKindInvalidState) {
 		t.Fatalf("poisoned session accepted another command: %v", err)
 	}
@@ -368,7 +368,7 @@ func TestDebugSessionSynchronousPanicPoisonsAndClosesRuntime(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			runtime := &controllerDebugger{panicOn: test.panicOn}
+			runtime := &boundaryDebugger{panicOn: test.panicOn}
 			session := newTestCoreDebugSession(t, runtime, 1)
 			session.state.status = test.state
 			subscription, err := session.Watch()
@@ -393,7 +393,7 @@ func TestDebugSessionSynchronousPanicPoisonsAndClosesRuntime(t *testing.T) {
 				t.Fatalf("runtime panic did not publish a terminal failure: %#v", failed)
 			}
 
-			waitControllerCalls(t, runtime, []string{test.panicOn, "close"})
+			waitDebuggerCalls(t, runtime, []string{test.panicOn, "close"})
 			if err := test.call(session); !hasCategory(err, ErrorKindInvalidState) {
 				t.Fatalf("poisoned session accepted another operation: %v", err)
 			}
@@ -438,8 +438,8 @@ func TestDebugSessionStoppedOperationsSerializeWithoutHoldingStateLock(t *testin
 	}()
 	<-entered
 
-	snapshotResult := make(chan DebugSessionRecord, 1)
-	go func() { snapshotResult <- session.snapshot() }()
+	snapshotResult := make(chan wiredebugger.Snapshot, 1)
+	go func() { snapshotResult <- session.Snapshot() }()
 	select {
 	case snapshot := <-snapshotResult:
 		if snapshot.State != wiredebugger.StateCreated {
@@ -575,7 +575,7 @@ func TestDebugSessionCloseReachesRuntimeDuringBlockedStoppedOperation(t *testing
 	if err := <-closeResult; err != nil {
 		t.Fatal(err)
 	}
-	if snapshot := session.snapshot(); snapshot.State != wiredebugger.StateTerminated {
+	if snapshot := session.Snapshot(); snapshot.State != wiredebugger.StateTerminated {
 		t.Fatalf("close did not commit terminal state: %#v", snapshot)
 	}
 }
@@ -593,12 +593,12 @@ func receiveDebugEvent(t *testing.T, events <-chan wiredebugger.Event) wiredebug
 	}
 }
 
-func waitCoreDebugState(t *testing.T, session *DebugSession, state wiredebugger.State) DebugSessionRecord {
+func waitCoreDebugState(t *testing.T, session *DebugSession, state wiredebugger.State) wiredebugger.Snapshot {
 	t.Helper()
 
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		snapshot := session.snapshot()
+		snapshot := session.Snapshot()
 		if snapshot.State == state {
 			return snapshot
 		}
@@ -608,10 +608,10 @@ func waitCoreDebugState(t *testing.T, session *DebugSession, state wiredebugger.
 
 	t.Fatalf("debug session did not reach state %d", state)
 
-	return DebugSessionRecord{}
+	return wiredebugger.Snapshot{}
 }
 
-func waitControllerCalls(t *testing.T, runtime *controllerDebugger, want []string) {
+func waitDebuggerCalls(t *testing.T, runtime *boundaryDebugger, want []string) {
 	t.Helper()
 
 	deadline := time.Now().Add(5 * time.Second)

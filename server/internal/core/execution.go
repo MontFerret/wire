@@ -10,82 +10,77 @@ import (
 	"github.com/MontFerret/wire/pkg/failure"
 	"github.com/MontFerret/wire/server/internal/lifecycle"
 	"github.com/MontFerret/wire/server/internal/panicboundary"
+	"github.com/google/uuid"
 )
 
 type Execution struct {
-	mu          sync.Mutex
-	id          ExecutionID
-	owner       ConnectionID
-	planID      PlanID
-	sessionID   SessionID
-	plan        api.Plan
-	operation   func(context.Context) (api.Output, error)
-	ctx         context.Context
-	cancel      context.CancelCauseFunc
-	parameters  map[string]any
-	contentType string
-	state       wireexecution.State
-	output      *api.Output
-	failure     *failure.Failure
-	events      *eventStream[wireexecution.Event]
-	done        chan struct{}
-	close       lifecycle.Close
-	release     lifecycle.Close
+	mu        sync.Mutex
+	id        ExecutionID
+	store     *ResourceStore
+	plan      *Plan
+	session   *Session
+	operation func(context.Context) (api.Output, error)
+	ctx       context.Context
+	cancel    context.CancelCauseFunc
+	options   []api.SessionOption
+	state     wireexecution.State
+	output    *api.Output
+	failure   *failure.Failure
+	events    *eventStream[wireexecution.Event]
+	done      chan struct{}
+	release   lifecycle.Close
 }
 
-func newExecution(
-	id ExecutionID,
-	owner ConnectionID,
-	planID PlanID,
-	plan api.Plan,
-	ctx context.Context,
-	cancel context.CancelCauseFunc,
-	input ExecuteInput,
-	maxWatchers int,
-) *Execution {
-	execution := &Execution{
-		id:          id,
-		owner:       owner,
-		planID:      planID,
-		plan:        plan,
-		ctx:         ctx,
-		cancel:      cancel,
-		parameters:  cloneParameters(input.Parameters),
-		contentType: input.OutputContentType,
-		state:       wireexecution.StateRunning,
-		events:      newEventStream(maxWatchers, cloneExecutionEvent, sequenceExecutionEvent),
-		done:        make(chan struct{}),
+func newExecution(store *ResourceStore, plan *Plan, session *Session, operation func(context.Context) (api.Output, error), options []api.SessionOption) *Execution {
+	lifetime := store.ctx
+	if session != nil {
+		lifetime = session.ctx
 	}
-	execution.publishLocked(false)
 
-	return execution
-}
-
-func newOperationExecution(
-	id ExecutionID,
-	owner ConnectionID,
-	planID PlanID,
-	sessionID SessionID,
-	ctx context.Context,
-	cancel context.CancelCauseFunc,
-	operation func(context.Context) (api.Output, error),
-	maxWatchers int,
-) *Execution {
+	ctx, cancel := context.WithCancelCause(lifetime)
 	execution := &Execution{
-		id:        id,
-		owner:     owner,
-		planID:    planID,
-		sessionID: sessionID,
+		id:        ExecutionID(uuid.NewString()),
+		store:     store,
+		plan:      plan,
+		session:   session,
 		operation: operation,
+		options:   options,
 		ctx:       ctx,
 		cancel:    cancel,
 		state:     wireexecution.StateRunning,
-		events:    newEventStream(maxWatchers, cloneExecutionEvent, sequenceExecutionEvent),
+		events:    newEventStream(store.limits.Watchers, cloneExecutionEvent, sequenceExecutionEvent),
 		done:      make(chan struct{}),
 	}
 	execution.publishLocked(false)
 
 	return execution
+}
+
+func (e *Execution) Release(ctx context.Context) error {
+	e.store.mu.Lock()
+	started := e.release.Begin()
+	e.store.mu.Unlock()
+	if started {
+		go e.settleRelease()
+	}
+
+	return e.release.Wait(ctx)
+}
+
+func (e *Execution) settleRelease() {
+	var err error
+	defer func() {
+		if recover() != nil {
+			err = errors.Join(err, internalError(errors.New("execution release panicked")))
+		}
+
+		e.store.removeExecution(e)
+		e.release.Finish(err)
+	}()
+
+	e.cancel(context.Canceled)
+	<-e.done
+	e.events.close()
 }
 
 func (e *Execution) run() {
@@ -95,9 +90,8 @@ func (e *Execution) run() {
 		return
 	}
 
-	options := apiSessionOptions(e.parameters, e.contentType)
 	session, err := panicboundary.Call(func() (api.Session, error) {
-		return e.plan.NewSession(e.ctx, options...)
+		return e.plan.plan.NewSession(e.ctx, e.options...)
 	})
 	if err != nil {
 		if !isNil(session) {
@@ -121,7 +115,10 @@ func (e *Execution) run() {
 	closeErr := closeAPISession(session)
 	err = errors.Join(runErr, closeErr)
 
-	result := &api.Output{ContentType: output.ContentType, Content: append([]byte(nil), output.Content...)}
+	result := &api.Output{
+		ContentType: output.ContentType,
+		Content:     append([]byte(nil), output.Content...),
+	}
 	var panicErr *panicboundary.Error
 	if errors.As(runErr, &panicErr) {
 		result = nil
@@ -137,7 +134,10 @@ func (e *Execution) run() {
 
 func (e *Execution) runOperation() {
 	output, runErr := e.operation(e.ctx)
-	result := &api.Output{ContentType: output.ContentType, Content: append([]byte(nil), output.Content...)}
+	result := &api.Output{
+		ContentType: output.ContentType,
+		Content:     append([]byte(nil), output.Content...),
+	}
 	category := failure.CategoryExecution
 
 	var domain *DomainError
@@ -172,7 +172,7 @@ func (e *Execution) finish(output *api.Output, err error, category failure.Categ
 	}
 }
 
-func (e *Execution) Cancel() ExecutionRecord {
+func (e *Execution) Cancel() wireexecution.Snapshot {
 	e.cancel(context.Canceled)
 
 	return e.Snapshot()
@@ -182,30 +182,7 @@ func (e *Execution) ID() ExecutionID {
 	return e.id
 }
 
-func (e *Execution) Close(ctx context.Context) error {
-	if e.close.Begin() {
-		go e.settleClose()
-	}
-
-	return e.close.Wait(ctx)
-}
-
-func (e *Execution) settleClose() {
-	var err error
-	defer func() {
-		if recover() != nil {
-			err = errors.Join(err, internalError(errors.New("execution cleanup panicked")))
-		}
-
-		e.close.Finish(err)
-	}()
-
-	e.cancel(context.Canceled)
-	<-e.done
-	e.events.close()
-}
-
-func (e *Execution) Snapshot() ExecutionRecord {
+func (e *Execution) Snapshot() wireexecution.Snapshot {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
@@ -226,19 +203,16 @@ func (e *Execution) Watch() (ExecutionSubscription, error) {
 	}, nil
 }
 
-func (e *Execution) snapshotLocked() ExecutionRecord {
-	return ExecutionRecord{
-		ID: e.id,
-		Snapshot: cloneExecutionSnapshot(wireexecution.Snapshot{
-			State:   e.state,
-			Output:  e.output,
-			Failure: e.failure,
-		}),
-	}
+func (e *Execution) snapshotLocked() wireexecution.Snapshot {
+	return cloneExecutionSnapshot(wireexecution.Snapshot{
+		State:   e.state,
+		Output:  e.output,
+		Failure: e.failure,
+	})
 }
 
 func (e *Execution) publishLocked(terminal bool) {
-	e.events.publish(wireexecution.Event{Snapshot: e.snapshotLocked().Snapshot}, terminal)
+	e.events.publish(wireexecution.Event{Snapshot: e.snapshotLocked()}, terminal)
 
 	if terminal {
 		close(e.done)

@@ -20,7 +20,7 @@ host → server → server/internal ──┘→ Unified API → runtime impleme
 | FQL, runtime, output encoding, and debugger semantics | Unified API and runtime implementation |
 | Runtime construction, configuration, policies, and application state | Host application |
 | Versioned RPC contract | Protobuf definitions |
-| Shared execution, debugger, identity, and failure semantics | `pkg/execution`, `pkg/debugger`, and `pkg/failure` |
+| Shared execution, debugger, and failure semantics | `pkg/execution`, `pkg/debugger`, and `pkg/failure` |
 | RPC adaptation | `server/internal/grpcserver` |
 | Logical connections and resources | `server/internal/core` |
 | Public server lifecycle | `server` package |
@@ -41,7 +41,8 @@ private within the owning client package.
 
 The caller supplies and owns the physical transport. Runtime and resource
 `Close` methods release logical resources with bounded detached cleanup.
-`server.Runtime` continues to alias `api.Runtime`; host ownership is unchanged.
+`server.NewServer` accepts `api.Runtime` directly. Optional host identity is
+`server.RuntimeIdentity`, supplied through `WithRuntimeIdentity`.
 
 ## gRPC service composition
 
@@ -49,21 +50,26 @@ The caller supplies and owns the physical transport. Runtime and resource
 It contains only those service instances and owns no RPC handlers. Each service
 embeds its corresponding generated service base and adapts one protocol domain.
 
-| Service | Core dependencies beyond request-context preparation |
+| Service | Invocation and ownership |
 | --- | --- |
-| RuntimeService | RuntimeInfo, ConnectionRegistry, Executor, Lifecycle |
-| PlanService | Compiler, Lifecycle |
-| SessionService | Executor, Lifecycle |
-| ExecutionService | Executor, Lifecycle |
-| DebugService | Debugger, Lifecycle |
+| RuntimeService | Opens/closes logical connections; calls `core.Run` with the borrowed runtime and connection store |
+| PlanService | Calls `core.CompilePlan` with the borrowed runtime and connection store; releases plans through that store |
+| SessionService | Resolves a Plan in the connection store and calls its `NewSession` |
+| ExecutionService | Resolves a Plan or Session for execution creation; resolves Execution for watches, cancellation, and release |
+| DebugService | Resolves a Plan for debugger creation; resolves DebugSession for commands, inspection, watches, and release |
 
-A shared private `operationContextFactory` owns only the connection registry.
-It resolves the logical connection, maps lookup errors, and constructs the core
-operation context; each handler cancels that context when it finishes.
-Services retain their own resource lookup, validation, and domain adaptation.
-Stateless conversion, error mapping, recovery, and subscription functions remain
-shared transport infrastructure. DebugService groups its cohesive lifecycle,
-commands, inspection, and events across focused files.
+`prepareOperation` resolves the connection and returns its resource store plus
+an ordinary `context.Context`. The context preserves request values and deadlines
+and joins connection cancellation; each handler cancels it to detach the lifetime
+callback. There is no dependency-carrying operation context.
+
+Services convert protobuf sources and options to canonical API types before
+calling core. Source/diagnostic, option/value, output, execution, debugger, and
+failure conversions are grouped at the transport boundary. Handshake metadata
+belongs to transport configuration, not resource management. Domain errors
+supply shared Wire categories; gRPC owns status mapping and uses the same
+category serialization as terminal failures. Canonical diagnostic extraction
+is shared within server error handling.
 
 ## Execution and host boundaries
 
@@ -201,22 +207,25 @@ Wire connection
     └── debug sessions
 ```
 
-Internally, `Connection` owns only its opaque ID, cancellation context, open or
-closing state, and admission of in-flight operations. Server-scoped
-`ConnectionRegistry`, `PlanRegistry`, `SessionRegistry`, `ExecutionRegistry`,
-and `DebugSessionRegistry` instances own storage, indexes, and capacity
-accounting. Every resource records its owning connection ID. Plan children also
-record the Plan ID, and normal-session executions record their Session ID. An
-ID lookup always includes the requesting connection, so knowledge of another
-connection's ID never grants access.
+`ConnectionRegistry` is the only server-wide resource index. It owns connection
+capacity, active/closing membership, and shutdown admission. `Connection` owns
+its ID, cancellation context, retained close result, and one `ResourceStore`.
 
-The server-scoped `Compiler`, `Executor`, and `Debugger` components own resource
-creation. `Compiler` uses `api.Runtime` for compilation and `Executor` uses it
-only for the explicit direct-runtime path; Plan execution and debugging use the
-`api.Plan` obtained from `PlanRegistry`. `Lifecycle` owns cleanup spanning
-resource types. Individual resources retain their own state machines, runtime
-handles, watches, and local close invariants. A per-operation Wire `Context`
-combines the unary or stream context with the resolved logical connection.
+The store contains typed maps for plans, normal sessions, executions, and debug
+sessions. IDs resolve only in the requesting connection's store; there are no
+global resource maps or owner-ID indexes. Plans hold their child collections,
+normal sessions hold their active execution, and children retain direct parent
+references. Resources remain in the store while closing and are removed only
+when cleanup settles.
+
+`CompilePlan` and `Run` take the borrowed `api.Runtime` and store explicitly.
+They own root allocation; neither introduces another runtime wrapper. A Plan
+owns its hosted `api.Plan`, parameter metadata, child creation, and descendant
+cleanup. A normal Session owns its hosted `api.Session`, poisoning state, and
+execution admission. Execution owns asynchronous work, snapshots, cancellation,
+and watches. DebugSession directly owns its hosted `debugger.Session`, command
+state, breakpoint bookkeeping, watches, and close. No operation managers,
+debugger controller, or cross-resource lifecycle manager intervene.
 
 The client adapter uses the same ownership tree to reclaim allocations whose
 responses are lost. Unknown Session IDs invalidate their Plan; unknown
@@ -233,71 +242,43 @@ narrow cleanup preserves siblings outside its subtree and never closes the
 borrowed physical transport. See [Client Handles](client.md)
 for the cancellation contract.
 
-```text
-Compiler ──► api.Runtime
-Compiler ──► PlanRegistry ◄── Executor ──► api.Runtime.Run
-                            ◄── Debugger
-Executor ──► SessionRegistry
-Executor ──► ExecutionRegistry
-Debugger ──► DebugSessionRegistry
-Lifecycle ──► all five resource registries
+`Execution` and `DebugSession` share a private event stream that owns sequence
+allocation, latest-event replay, bounded buffers, subscription accounting, lag
+eviction, and channel shutdown. It has no execution/debugger semantics.
+DebugSession also retains a cohesive state value and breakpoint set; the set
+owns the Wire limit and successful breakpoint records.
 
-ConnectionRegistry ──► Connection ◄── operation Context
-```
+Creation reserves capacity before invoking the hosted API. Pending, published,
+and closing resources all count toward the connection's limit. Publication
+checks request cancellation, connection admission, and live ancestors under
+the store mutex. Failure or abandonment closes returned hosted resources before
+releasing the pending reservation. Constructors return real resource handles;
+shared snapshots carry no ownership identity.
 
-The arrows show dependencies: components depend on registries, registries do
-not depend on components, and `Connection` has no dependency on either.
+The store mutex protects maps, reservations, parent links, and allocation/release
+admission. Creation gates are incremented under that mutex before release can
+start waiting. Connection cancellation shares this admission lock. Resource
+state locks must never be held while acquiring the store mutex. Hosted calls,
+recursive release, and cleanup waits run without it.
 
-`Execution` and `DebugSession` retain their lifecycle and state-machine
-semantics while delegating reusable subscription mechanics to a package-private
-generic event stream. The stream owns sequence allocation, latest-event replay,
-bounded watcher buffers, subscription accounting, fan-out, lag eviction, and
-channel shutdown; it has no knowledge of execution or debugger event meaning.
-`DebugSession` groups its current stop/result values in one cohesive state value
-and orchestrates a session-local breakpoint set, event stream, and
-`DebugController`. The controller exclusively owns and operates the Unified API
-`debugger.Session`; it contains only runtime-facing commands, inspection,
-breakpoint mutation, and idempotent close. The breakpoint set owns only the
-Wire-side limit and successful breakpoint records. The aggregate owns command
-eligibility, lifecycle and cancellation, breakpoint policy, serialization, and
-semantic event construction.
+Release belongs to each resource. Plan release gates new descendants and waits
+for admitted constructors, releases executions, normal sessions, and debug
+sessions, then closes its hosted plan. Session release cancels its lifetime,
+waits for execution publication, releases its execution, then closes its hosted
+session. The execution slot remains occupied until release finishes, even after
+a terminal result. Execution/debugger release detaches storage only after local
+cleanup settles. All removals also update direct parent links.
 
-```text
-DebugSession
-├── debugSessionState
-├── breakpointSet
-├── eventStream[debugger.Event]
-└── DebugController
-    └── debugger.Session
-```
+Connection teardown cancels in-flight work, closes store admission, waits for
+pending creation, and settles executions, sessions, debuggers, and plans. Server
+shutdown rejects new connections and closes the existing connections. Neither
+path closes the borrowed runtime.
 
-Creation uses reserve, create, and commit phases. Pending capacity is reserved
-before calling the Unified API, registry locks are released for runtime calls,
-and publication is committed only while the connection and parent plan still
-accept children. A normal Session calls `api.Plan.NewSession` once, owns that
-hosted session until release, and admits one Execution at a time. Plan release
-gates new children, waits for in-flight child constructors, releases direct
-executions, normal sessions and their executions, and debug sessions, and only
-then closes the Unified API plan.
-
-Each registry owns its collection lock, each resource owns its state lock, and
-the event stream owns the lock protecting subscriptions and publication.
-`DebugSession` has a state mutex that protects only snapshots and transitions,
-plus a dedicated operation mutex that serializes stopped-state commands,
-inspection, breakpoint bookkeeping, pause requests, and command completion.
-The breakpoint set is accessed only under that operation mutex and therefore
-has no redundant lock. No debug-session state lock is held while invoking the
-Unified API. The nested normal-run publication order is Plan registry, Plan,
-Session registry, Session, then Execution registry. Connection shutdown first
-closes operation admission
-and waits for admitted creation to settle. Release paths never hold registry
-locks while waiting for constructors, children, or Unified API cleanup.
-
-When the Connect stream terminates, cleanup rejects new operations and cancels
-in-flight creation, waits for creation to settle, cancels and releases
-executions, closes normal and debug sessions, releases plans, and terminates
-owned state and goroutines. Parent and connection traversal uses registry owner,
-plan, and session indexes rather than nested resource collections.
+DebugSession has separate operation and state mutexes. Its operation mutex
+serializes stopped-state commands, inspection, breakpoint bookkeeping, pause,
+and command completion. The breakpoint set uses that mutex without adding a
+redundant lock. The state mutex protects snapshots and transitions and never
+spans a hosted API call.
 
 Release is committed teardown. Concurrent callers observing the same in-flight
 release wait for its retained result. After teardown finishes, the resource ID
@@ -310,10 +291,10 @@ Every stateful resource has explicit synchronization, cancellation, ownership,
 and termination. Context cancellation propagates into Unified API operations.
 Debug inspection cannot wait through a resume and then inspect a later stop.
 An asynchronous resume releases the operation mutex while the runtime command
-is active so `Pause` and close can reach the controller. Command completion
+is active so `Pause` and close can reach the hosted debugger. Command completion
 reacquires the operation mutex before committing state, which keeps pause
 responses and event ordering deterministic. Close cancels the session and calls
-the controller without waiting behind a potentially blocking stopped-state
+the hosted debugger without waiting behind a potentially blocking stopped-state
 operation, then serializes the final state and event commit.
 
 Event buffers are bounded and producers are non-blocking. Each watch first
@@ -326,11 +307,11 @@ until the stream handler exits, including after lag or a terminal snapshot.
 Detached cleanup has a named owner, is panic-safe, and terminates
 deterministically.
 
-`Lifecycle.settleSession` follows the existing detached-release terminal policy:
-its recovery settles release waiters and registry bookkeeping if Wire
+Each resource release follows the existing detached-release terminal policy:
+its recovery settles release waiters and store bookkeeping if Wire
 orchestration panics. This is distinct from `panicboundary`, which guards only
-external implementation calls. Session-local close relies on the existing
-external `api.Session.Close` boundary without adding another raw recovery site.
+external implementation calls. Normal-session release invokes the hosted
+`api.Session.Close` through that boundary and retains the cleanup result.
 
 Direct Plan execution, normal Session run, and direct Runtime run construction
 publish running state. Debug-session construction
@@ -344,7 +325,7 @@ completion then publishes stopped or terminal state with a monotonic sequence.
 Every Wire server is a potential remote-code-execution boundary, including over
 local IPC. Requests and lifecycle identifiers are untrusted.
 
-`DefaultServerLimits` supplies the secure baseline:
+`DefaultLimits` supplies the secure baseline:
 
 | Resource | Default limit |
 | --- | ---: |

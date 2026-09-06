@@ -113,6 +113,9 @@ Execution and debugger completion preserve Unified API encoded output exactly:
 
 The handwritten Go adapters use `pkg/execution`, `pkg/debugger`, and
 `pkg/failure` for shared Wire semantics, without protocol resource IDs.
+Host identity is configured with `server.RuntimeIdentity`; its protobuf shape
+is unchanged. Each logical connection owns its server resource store; resource
+IDs are resolved only within that store.
 The public client projects execution and debugging onto canonical Universal
 API interfaces and events; Wire snapshots and watch streams remain private to
 its implementation. The adapters copy mutable output, diagnostic, range, and

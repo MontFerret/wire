@@ -7,7 +7,7 @@ import (
 	"github.com/MontFerret/api"
 )
 
-func BenchmarkExecutorCancelExecution(b *testing.B) {
+func BenchmarkCancelExecution(b *testing.B) {
 	plan := &spyPlan{newSession: func(context.Context, sessionOptions) (api.Session, error) {
 		return &spySession{run: func(context.Context) (api.Output, error) {
 			return api.Output{}, nil
@@ -23,15 +23,15 @@ func BenchmarkExecutorCancelExecution(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	compiled, err := connection.Compile(context.Background(), CompileInput{Source: api.Source{Content: "RETURN 1"}})
+	compiled, err := connection.Compile(context.Background(), compileRequest{Source: api.Source{Content: "RETURN 1"}})
 	if err != nil {
 		b.Fatal(err)
 	}
-	execution, err := connection.Execute(context.Background(), ExecuteInput{PlanID: compiled.ID})
+	execution, err := connection.Execute(context.Background(), executeRequest{PlanID: compiled.ID})
 	if err != nil {
 		b.Fatal(err)
 	}
-	retained, err := connection.executions.lookup(execution.ID)
+	retained, err := connection.resources.Execution(context.Background(), execution.ID)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -47,7 +47,7 @@ func BenchmarkExecutorCancelExecution(b *testing.B) {
 	defer cancel()
 	b.ResetTimer()
 	for b.Loop() {
-		retained, err := connection.host.executor.Execution(operation, execution.ID)
+		retained, err := connection.resources.Execution(operation, execution.ID)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -56,7 +56,7 @@ func BenchmarkExecutorCancelExecution(b *testing.B) {
 	}
 }
 
-func BenchmarkExecutorRunDurableSession(b *testing.B) {
+func BenchmarkRunDurableSession(b *testing.B) {
 	plan := &spyPlan{newSession: func(context.Context, sessionOptions) (api.Session, error) {
 		return &spySession{run: func(context.Context) (api.Output, error) {
 			return api.Output{ContentType: "text/plain", Content: []byte("ok")}, nil
@@ -72,11 +72,11 @@ func BenchmarkExecutorRunDurableSession(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	compiled, err := connection.Compile(context.Background(), CompileInput{Source: api.Source{Content: "RETURN 1"}})
+	compiled, err := connection.Compile(context.Background(), compileRequest{Source: api.Source{Content: "RETURN 1"}})
 	if err != nil {
 		b.Fatal(err)
 	}
-	session, err := connection.CreateSession(context.Background(), CreateSessionInput{PlanID: compiled.ID})
+	session, err := connection.CreateSession(context.Background(), sessionRequest{PlanID: compiled.ID})
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -93,7 +93,7 @@ func BenchmarkExecutorRunDurableSession(b *testing.B) {
 		if err != nil {
 			b.Fatal(err)
 		}
-		retained, err := connection.executions.lookup(run.ID)
+		retained, err := connection.resources.Execution(context.Background(), run.ID)
 		if err != nil {
 			b.Fatal(err)
 		}

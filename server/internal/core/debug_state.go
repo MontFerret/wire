@@ -35,17 +35,14 @@ func (s *debugSessionState) terminate() {
 	s.failure = nil
 }
 
-func (s *debugSessionState) snapshot(id DebugSessionID) DebugSessionRecord {
-	return DebugSessionRecord{
-		ID: id,
-		Snapshot: cloneDebugSnapshot(wiredebugger.Snapshot{
-			State:            s.status,
-			StopReason:       s.reason,
-			Location:         s.location,
-			HitBreakpointIDs: s.hitIDs,
-			Depth:            s.depth,
-			Output:           s.output,
-			Failure:          s.failure,
-		}),
-	}
+func (s *debugSessionState) snapshot() wiredebugger.Snapshot {
+	return cloneDebugSnapshot(wiredebugger.Snapshot{
+		State:            s.status,
+		StopReason:       s.reason,
+		Location:         s.location,
+		HitBreakpointIDs: s.hitIDs,
+		Depth:            s.depth,
+		Output:           s.output,
+		Failure:          s.failure,
+	})
 }

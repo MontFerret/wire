@@ -5,12 +5,11 @@ import (
 	"testing"
 
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
-	"github.com/MontFerret/wire/server/internal/core"
 	"google.golang.org/grpc"
 )
 
 func TestServerRegistersDedicatedProtocolServices(t *testing.T) {
-	server := New(core.RuntimeInfo{}, nil, nil, nil, nil, nil)
+	server := New(nil, Handshake{}, nil)
 	registrar := &registrationRecorder{services: make(map[string]any)}
 	server.Register(registrar)
 

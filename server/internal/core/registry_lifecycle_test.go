@@ -3,7 +3,6 @@ package core
 import (
 	"context"
 	"errors"
-	"github.com/MontFerret/wire/pkg/execution"
 	"reflect"
 	"sync"
 	"testing"
@@ -11,6 +10,7 @@ import (
 
 	"github.com/MontFerret/api"
 	"github.com/MontFerret/api/debugger"
+	"github.com/MontFerret/wire/pkg/execution"
 )
 
 func TestConnectionCloseIsIdempotentAndRejectsNewResources(t *testing.T) {
@@ -25,7 +25,7 @@ func TestConnectionCloseIsIdempotentAndRejectsNewResources(t *testing.T) {
 	connection := newTestConnection(t, &spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 		return plan, nil
 	}})
-	compiled, err := connection.Compile(context.Background(), CompileInput{
+	compiled, err := connection.Compile(context.Background(), compileRequest{
 		Source:     api.Source{Content: "RETURN 1"},
 		Debuggable: true,
 	})
@@ -38,15 +38,15 @@ func TestConnectionCloseIsIdempotentAndRejectsNewResources(t *testing.T) {
 	go func() { first <- connection.Close(context.Background()) }()
 	<-closeStarted
 
-	if _, err := connection.Compile(context.Background(), CompileInput{Source: api.Source{Content: "RETURN 2"}}); !hasCategory(err, ErrorKindInvalidState) {
+	if _, err := connection.Compile(context.Background(), compileRequest{Source: api.Source{Content: "RETURN 2"}}); !hasCategory(err, ErrorKindInvalidState) {
 		t.Fatalf("compile was accepted while connection was closing: %v", err)
 	}
 
-	if _, err := connection.Execute(context.Background(), ExecuteInput{PlanID: compiled.ID}); !hasCategory(err, ErrorKindInvalidState) {
+	if _, err := connection.Execute(context.Background(), executeRequest{PlanID: compiled.ID}); !hasCategory(err, ErrorKindInvalidState) {
 		t.Fatalf("execution was accepted while connection was closing: %v", err)
 	}
 
-	if _, err := connection.OpenDebugSession(context.Background(), OpenDebugInput{PlanID: compiled.ID}); !hasCategory(err, ErrorKindInvalidState) {
+	if _, err := connection.OpenDebugSession(context.Background(), debugRequest{PlanID: compiled.ID}); !hasCategory(err, ErrorKindInvalidState) {
 		t.Fatalf("debug session was accepted while connection was closing: %v", err)
 	}
 
@@ -107,21 +107,21 @@ func TestPlanReleaseWaitsForInFlightDebugCreation(t *testing.T) {
 	connection := newTestConnection(t, &spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 		return plan, nil
 	}})
-	compiled, err := connection.Compile(context.Background(), CompileInput{
+	compiled, err := connection.Compile(context.Background(), compileRequest{
 		Source:     api.Source{Content: "RETURN 1"},
 		Debuggable: true,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	retained, err := connection.plans.lookup(compiled.ID)
+	retained, err := connection.resources.Plan(context.Background(), compiled.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	openResult := make(chan error, 1)
 	go func() {
-		_, openErr := connection.OpenDebugSession(context.Background(), OpenDebugInput{PlanID: compiled.ID})
+		_, openErr := connection.OpenDebugSession(context.Background(), debugRequest{PlanID: compiled.ID})
 		openResult <- openErr
 	}()
 	<-constructorStarted
@@ -130,10 +130,10 @@ func TestPlanReleaseWaitsForInFlightDebugCreation(t *testing.T) {
 	go func() { releaseResult <- connection.ReleasePlan(context.Background(), compiled.ID) }()
 	waitPlanClosing(t, retained)
 
-	if _, err := connection.Execute(context.Background(), ExecuteInput{PlanID: compiled.ID}); !hasCategory(err, ErrorKindPlanNotFound) {
+	if _, err := connection.Execute(context.Background(), executeRequest{PlanID: compiled.ID}); !hasCategory(err, ErrorKindPlanNotFound) {
 		t.Fatalf("closing plan accepted an execution: %v", err)
 	}
-	if _, err := connection.OpenDebugSession(context.Background(), OpenDebugInput{PlanID: compiled.ID}); !hasCategory(err, ErrorKindPlanNotFound) {
+	if _, err := connection.OpenDebugSession(context.Background(), debugRequest{PlanID: compiled.ID}); !hasCategory(err, ErrorKindPlanNotFound) {
 		t.Fatalf("closing plan accepted another debug session: %v", err)
 	}
 
@@ -202,15 +202,15 @@ func TestPlanReleaseWaitsForChildrenAlreadyClosing(t *testing.T) {
 		connection := newTestConnection(t, &spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 			return plan, nil
 		}})
-		compiled, err := connection.Compile(context.Background(), CompileInput{Source: api.Source{Content: "RETURN 1"}})
+		compiled, err := connection.Compile(context.Background(), compileRequest{Source: api.Source{Content: "RETURN 1"}})
 		if err != nil {
 			t.Fatal(err)
 		}
-		retained, err := connection.plans.lookup(compiled.ID)
+		retained, err := connection.resources.Plan(context.Background(), compiled.ID)
 		if err != nil {
 			t.Fatal(err)
 		}
-		execution, err := connection.Execute(context.Background(), ExecuteInput{PlanID: compiled.ID})
+		execution, err := connection.Execute(context.Background(), executeRequest{PlanID: compiled.ID})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -277,18 +277,18 @@ func TestPlanReleaseWaitsForChildrenAlreadyClosing(t *testing.T) {
 		connection := newTestConnection(t, &spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 			return plan, nil
 		}})
-		compiled, err := connection.Compile(context.Background(), CompileInput{
+		compiled, err := connection.Compile(context.Background(), compileRequest{
 			Source:     api.Source{Content: "RETURN 1"},
 			Debuggable: true,
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
-		retained, err := connection.plans.lookup(compiled.ID)
+		retained, err := connection.resources.Plan(context.Background(), compiled.ID)
 		if err != nil {
 			t.Fatal(err)
 		}
-		opened, err := connection.OpenDebugSession(context.Background(), OpenDebugInput{PlanID: compiled.ID})
+		opened, err := connection.OpenDebugSession(context.Background(), debugRequest{PlanID: compiled.ID})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -348,11 +348,11 @@ func TestConcurrentChildReleaseSharesCleanup(t *testing.T) {
 		connection := newTestConnection(t, &spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 			return plan, nil
 		}})
-		compiled, err := connection.Compile(context.Background(), CompileInput{Source: api.Source{Content: "RETURN 1"}})
+		compiled, err := connection.Compile(context.Background(), compileRequest{Source: api.Source{Content: "RETURN 1"}})
 		if err != nil {
 			t.Fatal(err)
 		}
-		execution, err := connection.Execute(context.Background(), ExecuteInput{PlanID: compiled.ID})
+		execution, err := connection.Execute(context.Background(), executeRequest{PlanID: compiled.ID})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -433,11 +433,11 @@ func TestExecutionTerminalStateSurvivesCancellationOrdering(t *testing.T) {
 		connection := newTestConnection(t, &spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 			return plan, nil
 		}})
-		compiled, err := connection.Compile(context.Background(), CompileInput{Source: api.Source{Content: "RETURN 1"}})
+		compiled, err := connection.Compile(context.Background(), compileRequest{Source: api.Source{Content: "RETURN 1"}})
 		if err != nil {
 			t.Fatal(err)
 		}
-		started, err := connection.Execute(context.Background(), ExecuteInput{PlanID: compiled.ID})
+		started, err := connection.Execute(context.Background(), executeRequest{PlanID: compiled.ID})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -462,11 +462,11 @@ func TestExecutionTerminalStateSurvivesCancellationOrdering(t *testing.T) {
 		connection := newTestConnection(t, &spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 			return plan, nil
 		}})
-		compiled, err := connection.Compile(context.Background(), CompileInput{Source: api.Source{Content: "RETURN 1"}})
+		compiled, err := connection.Compile(context.Background(), compileRequest{Source: api.Source{Content: "RETURN 1"}})
 		if err != nil {
 			t.Fatal(err)
 		}
-		started, err := connection.Execute(context.Background(), ExecuteInput{PlanID: compiled.ID})
+		started, err := connection.Execute(context.Background(), executeRequest{PlanID: compiled.ID})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -489,9 +489,7 @@ func waitPlanClosing(t *testing.T, plan *Plan) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		plan.mu.Lock()
-		closing := plan.closing
-		plan.mu.Unlock()
+		closing := plan.release.Started()
 		if closing {
 			return
 		}

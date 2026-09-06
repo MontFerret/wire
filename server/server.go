@@ -8,33 +8,30 @@ import (
 	"time"
 
 	"github.com/MontFerret/api"
-	"github.com/MontFerret/wire/pkg/execution"
 	"github.com/MontFerret/wire/server/internal/core"
 	"github.com/MontFerret/wire/server/internal/grpcserver"
 	"github.com/MontFerret/wire/server/internal/lifecycle"
 	"google.golang.org/grpc"
 )
 
-type (
-	// Runtime is the canonical api.Runtime contract accepted by NewServer.
-	// The host configures and owns the implementation; Wire never closes it.
-	Runtime = api.Runtime
+// Server hosts Ferret Wire over a caller-supplied listener. It borrows the
+// runtime passed to NewServer and never closes it.
+type Server struct {
+	grpcServer  *grpc.Server
+	connections *core.ConnectionRegistry
 
-	// Server hosts Ferret Wire over a caller-supplied listener. It borrows the
-	// runtime passed to NewServer and never closes it.
-	Server struct {
-		grpcServer *grpc.Server
-		lifecycle  *core.Lifecycle
-
-		serveMu  sync.Mutex
-		serving  bool
-		shutdown lifecycle.Close
-	}
-)
+	serveMu  sync.Mutex
+	serving  bool
+	shutdown lifecycle.Close
+}
 
 // NewServer adapts a caller-configured runtime without taking ownership
 // or creating a listener. Limits default to DefaultLimits.
-func NewServer(runtime Runtime, options ...Option) (*Server, error) {
+func NewServer(runtime api.Runtime, options ...Option) (*Server, error) {
+	if isNilRuntime(runtime) {
+		return nil, errors.New("runtime is required")
+	}
+
 	configured := config{limits: DefaultLimits()}
 	for _, option := range options {
 		if option == nil {
@@ -46,45 +43,30 @@ func NewServer(runtime Runtime, options ...Option) (*Server, error) {
 		}
 	}
 
-	info := core.RuntimeInfo{
-		ProtocolName:    protocolName,
-		ProtocolVersion: protocolVersion,
-		RuntimeIdentity: execution.Identity{
-			Name:       configured.runtimeIdentity.Name,
-			Version:    configured.runtimeIdentity.Version,
-			InstanceID: configured.runtimeIdentity.InstanceID,
-		},
+	info := grpcserver.Handshake{
+		ProtocolName:      protocolName,
+		ProtocolVersion:   protocolVersion,
+		RuntimeName:       configured.runtimeIdentity.Name,
+		RuntimeVersion:    configured.runtimeIdentity.Version,
+		RuntimeInstanceID: configured.runtimeIdentity.InstanceID,
 	}
-	connections := core.NewConnectionRegistry(configured.limits.MaxConnections)
-	plans := core.NewPlanRegistry(configured.limits.MaxPlansPerConnection)
-	sessions := core.NewSessionRegistry(configured.limits.MaxSessionsPerConnection)
-	executions := core.NewExecutionRegistry(
-		configured.limits.MaxExecutionsPerConnection,
-		configured.limits.MaxWatchersPerResource,
-	)
-	debugSessions := core.NewDebugSessionRegistry(
-		configured.limits.MaxDebugSessionsPerConnection,
-		configured.limits.MaxWatchersPerResource,
-		configured.limits.MaxBreakpointsPerDebugSession,
-	)
-
-	compiler, err := core.NewCompiler(runtime, plans)
-	if err != nil {
-		return nil, err
-	}
-
-	executor := core.NewExecutor(runtime, plans, sessions, executions)
-	debugger := core.NewDebugger(plans, debugSessions)
-	lifecycleManager := core.NewLifecycle(connections, plans, sessions, executions, debugSessions)
+	connections := core.NewConnectionRegistry(configured.limits.MaxConnections, core.ResourceLimits{
+		Plans:         configured.limits.MaxPlansPerConnection,
+		Sessions:      configured.limits.MaxSessionsPerConnection,
+		Executions:    configured.limits.MaxExecutionsPerConnection,
+		DebugSessions: configured.limits.MaxDebugSessionsPerConnection,
+		Watchers:      configured.limits.MaxWatchersPerResource,
+		Breakpoints:   configured.limits.MaxBreakpointsPerDebugSession,
+	})
 	grpcServer := grpc.NewServer(
 		grpc.MaxRecvMsgSize(configured.limits.MaxInboundMessageBytes),
 		grpc.MaxSendMsgSize(configured.limits.MaxOutboundMessageBytes),
 		grpc.UnaryInterceptor(grpcserver.UnaryRecoveryInterceptor),
 		grpc.StreamInterceptor(grpcserver.StreamRecoveryInterceptor),
 	)
-	grpcserver.New(info, connections, compiler, executor, debugger, lifecycleManager).Register(grpcServer)
+	grpcserver.New(runtime, info, connections).Register(grpcServer)
 
-	return &Server{grpcServer: grpcServer, lifecycle: lifecycleManager}, nil
+	return &Server{grpcServer: grpcServer, connections: connections}, nil
 }
 
 // Serve serves the caller-owned listener until it fails, ctx is cancelled, or
@@ -171,7 +153,7 @@ func (s *Server) settleShutdown(deadline time.Time) {
 		}()
 	}
 
-	err = s.lifecycle.Close(context.Background())
+	err = s.connections.Close(context.Background())
 	s.grpcServer.GracefulStop()
 }
 

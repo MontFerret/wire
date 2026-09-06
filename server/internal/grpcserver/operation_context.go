@@ -7,22 +7,13 @@ import (
 	"github.com/MontFerret/wire/server/internal/core"
 )
 
-// operationContextFactory resolves the logical owner and combines its lifetime
-// with the request. Callers must cancel the returned context after the operation.
-type operationContextFactory struct {
-	connections *core.ConnectionRegistry
-}
-
-func (f *operationContextFactory) New(
-	parent context.Context,
-	id *wirev1.ConnectionId,
-) (*core.Context, context.CancelFunc, error) {
-	connection, err := f.connections.Get(core.ConnectionID(id.GetValue()))
+func prepareOperation(parent context.Context, connections *core.ConnectionRegistry, id *wirev1.ConnectionId) (context.Context, *core.ResourceStore, context.CancelFunc, error) {
+	connection, err := connections.Get(core.ConnectionID(id.GetValue()))
 	if err != nil {
-		return nil, nil, rpcError(err)
+		return nil, nil, nil, rpcError(err)
 	}
 
-	ctx, cancel := core.NewContext(parent, connection)
+	ctx, cancel := core.OperationContext(parent, connection.Context())
 
-	return ctx, cancel, nil
+	return ctx, connection.Resources(), cancel, nil
 }

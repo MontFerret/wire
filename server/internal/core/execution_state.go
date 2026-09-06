@@ -6,13 +6,6 @@ import (
 	"github.com/MontFerret/wire/pkg/failure"
 )
 
-// ExecutionRecord combines server-private identity with a shared semantic
-// snapshot. Registry and parent metadata never enters the shared model.
-type ExecutionRecord struct {
-	ID ExecutionID
-	execution.Snapshot
-}
-
 func cloneExecutionSnapshot(snapshot execution.Snapshot) execution.Snapshot {
 	result := snapshot
 

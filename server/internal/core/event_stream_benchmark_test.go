@@ -41,7 +41,6 @@ func BenchmarkExecutionEventPublication(b *testing.B) {
 func newPublicationBenchmarkExecution() *Execution {
 	return &Execution{
 		id:     ExecutionID("execution"),
-		planID: PlanID("plan"),
 		state:  execution.StateRunning,
 		events: newEventStream(1, cloneExecutionEvent, sequenceExecutionEvent),
 		done:   make(chan struct{}),

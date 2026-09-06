@@ -51,6 +51,16 @@ contained implementation panic is not a normal API error, and a stateful
 runtime resource whose operation panics must not be reused unless its owner can
 prove that reuse is safe.
 
+Connection-scoped resource stores own lookup and quota accounting. Plans and
+sessions own descendant creation and release; Connection remains the logical
+lifetime boundary. Keep admission and parent links under the store mutex, and
+never hold a resource-state lock while acquiring it. Hosted calls and cleanup
+waits run outside the store lock. See the architecture document for details.
+
+The server accepts `api.Runtime` directly and owns its optional `RuntimeIdentity`
+configuration type. Do not reintroduce runtime aliases, operation managers,
+controller facades, or dependency-carrying context wrappers.
+
 ## Generated code
 
 Protobuf definitions and Buf configuration are source. Files under
@@ -72,7 +82,7 @@ changes are suspicious and require explanation.
 The `server` package, the `client` package, the shared `pkg/execution`,
 `pkg/debugger`, and `pkg/failure` packages, and the versioned protobuf service
 are API-sensitive. The module root intentionally has no Go compatibility
-package. Follow [Client Handles](docs/client.md) for the facade ownership and
+package. Follow [Client Handles](docs/client.md) for the API adapter ownership and
 lifecycle contract.
 
 Export only externally required symbols, keep logical connection and resource

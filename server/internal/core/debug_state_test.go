@@ -21,7 +21,7 @@ func TestDebugSessionStateBuildsDefensiveSnapshots(t *testing.T) {
 		failure:  &failure.Failure{Category: failure.CategoryExecution, Message: "runtime operation failed"},
 	}
 
-	snapshot := state.snapshot("session")
+	snapshot := state.snapshot()
 	state.hitIDs[0] = 2
 	state.output.Content[0] = '2'
 	if snapshot.HitBreakpointIDs[0] != 1 || string(snapshot.Output.Content) != "1" {
@@ -31,8 +31,8 @@ func TestDebugSessionStateBuildsDefensiveSnapshots(t *testing.T) {
 	snapshot.HitBreakpointIDs[0] = 3
 	snapshot.Output.Content[0] = '3'
 
-	retained := state.snapshot("session")
-	if retained.ID != "session" || retained.State != wiredebugger.StateStopped || retained.StopReason != debugger.ReasonBreakpoint ||
+	retained := state.snapshot()
+	if retained.State != wiredebugger.StateStopped || retained.StopReason != debugger.ReasonBreakpoint ||
 		retained.Location == nil || *retained.Location != *state.location || retained.Location == state.location || retained.Depth != 2 {
 		t.Fatalf("unexpected debug snapshot: %#v", retained)
 	}

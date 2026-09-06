@@ -6,13 +6,6 @@ import (
 	"github.com/MontFerret/wire/pkg/failure"
 )
 
-// DebugSessionRecord combines server-private identity with a shared semantic
-// snapshot. Registry and parent metadata never enters the shared model.
-type DebugSessionRecord struct {
-	ID DebugSessionID
-	wiredebugger.Snapshot
-}
-
 func cloneDebugSnapshot(snapshot wiredebugger.Snapshot) wiredebugger.Snapshot {
 	result := snapshot
 	result.HitBreakpointIDs = append(result.HitBreakpointIDs[:0:0], snapshot.HitBreakpointIDs...)

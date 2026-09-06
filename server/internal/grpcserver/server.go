@@ -1,6 +1,7 @@
 package grpcserver
 
 import (
+	"github.com/MontFerret/api"
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
 	"github.com/MontFerret/wire/server/internal/core"
 	"google.golang.org/grpc"
@@ -15,22 +16,13 @@ type Server struct {
 	debug      *DebugService
 }
 
-func New(
-	info core.RuntimeInfo,
-	connections *core.ConnectionRegistry,
-	compiler *core.Compiler,
-	executor *core.Executor,
-	debugger *core.Debugger,
-	lifecycle *core.Lifecycle,
-) *Server {
-	operations := &operationContextFactory{connections: connections}
-
+func New(runtime api.Runtime, info Handshake, connections *core.ConnectionRegistry) *Server {
 	return &Server{
-		runtime:    &RuntimeService{info: info, connections: connections, executor: executor, lifecycle: lifecycle, operations: operations},
-		plans:      &PlanService{compiler: compiler, lifecycle: lifecycle, operations: operations},
-		sessions:   &SessionService{executor: executor, lifecycle: lifecycle, operations: operations},
-		executions: &ExecutionService{executor: executor, lifecycle: lifecycle, operations: operations},
-		debug:      &DebugService{debugger: debugger, lifecycle: lifecycle, operations: operations},
+		runtime:    &RuntimeService{runtime: runtime, info: info, connections: connections},
+		plans:      &PlanService{runtime: runtime, connections: connections},
+		sessions:   &SessionService{connections: connections},
+		executions: &ExecutionService{connections: connections},
+		debug:      &DebugService{connections: connections},
 	}
 }
 

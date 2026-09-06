@@ -16,7 +16,7 @@ func TestRunUsesBorrowedRuntimeWithoutPlan(t *testing.T) {
 		return api.Output{ContentType: options.contentType, Content: []byte("direct")}, nil
 	}}
 	connection := newTestConnection(t, hosted)
-	run, err := connection.Run(context.Background(), RunInput{
+	run, err := connection.Run(context.Background(), runRequest{
 		Source:            api.Source{Name: "direct.fql", Content: "RETURN @input"},
 		Parameters:        map[string]any{"input": int64(7)},
 		OutputContentType: "text/plain",
@@ -35,7 +35,7 @@ func TestRunUsesBorrowedRuntimeWithoutPlan(t *testing.T) {
 		t.Fatalf("unexpected direct runtime execution: %#v", terminal)
 	}
 
-	if ids := connection.host.plans.listByOwner(connection.ID()); len(ids) != 0 {
+	if ids := connection.resources.plans; len(ids) != 0 {
 		t.Fatalf("direct Runtime.Run created Plans: %#v", ids)
 	}
 
@@ -60,7 +60,7 @@ func TestRunPanicIsContainedAsInternalFailure(t *testing.T) {
 		panic("runtime secret")
 	}}
 	connection := newTestConnection(t, hosted)
-	run, err := connection.Run(context.Background(), RunInput{
+	run, err := connection.Run(context.Background(), runRequest{
 		Source: api.Source{Content: "RETURN 1"},
 	})
 	if err != nil {
@@ -87,15 +87,15 @@ func TestRunRejectsCancelledAndInvalidRequestsBeforeAllocation(t *testing.T) {
 	connection := newTestConnection(t, hosted)
 	cancelled, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := connection.Run(cancelled, RunInput{Source: api.Source{Content: "RETURN 1"}}); !errors.Is(err, context.Canceled) {
+	if _, err := connection.Run(cancelled, runRequest{Source: api.Source{Content: "RETURN 1"}}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled direct run was admitted: %v", err)
 	}
 
-	if _, err := connection.Run(context.Background(), RunInput{}); !hasCategory(err, ErrorKindInvalidRequest) {
+	if _, err := connection.Run(context.Background(), runRequest{}); !hasCategory(err, ErrorKindInvalidRequest) {
 		t.Fatalf("empty direct source was admitted: %v", err)
 	}
 
-	if ids := connection.host.executions.listByOwner(connection.ID()); len(ids) != 0 {
+	if ids := connection.resources.executions; len(ids) != 0 {
 		t.Fatalf("rejected direct runs leaked executions: %#v", ids)
 	}
 }

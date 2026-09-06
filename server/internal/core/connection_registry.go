@@ -1,47 +1,46 @@
 package core
 
-import "sync"
+import (
+	"context"
+	"errors"
+	"sync"
+)
 
 // ConnectionRegistry owns the global logical-connection index and capacity.
 type ConnectionRegistry struct {
 	mu      sync.RWMutex
 	max     int
+	limits  ResourceLimits
 	active  map[ConnectionID]*Connection
 	closing map[ConnectionID]*Connection
 	closed  bool
 }
 
-func NewConnectionRegistry(maxConnections int) *ConnectionRegistry {
+func NewConnectionRegistry(maxConnections int, limits ResourceLimits) *ConnectionRegistry {
 	return &ConnectionRegistry{
 		max:     maxConnections,
+		limits:  limits,
 		active:  make(map[ConnectionID]*Connection),
 		closing: make(map[ConnectionID]*Connection),
 	}
 }
 
-func (r *ConnectionRegistry) Register(connection *Connection) error {
+func (r *ConnectionRegistry) Open() (*Connection, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if connection == nil {
-		return invalidRequest("connection is required")
-	}
-
 	if r.closed {
-		return invalidState("server is shutting down", nil)
-	}
-
-	if r.active[connection.ID()] != nil || r.closing[connection.ID()] != nil {
-		return invalidState("connection is already registered", nil)
+		return nil, invalidState("server is shutting down", nil)
 	}
 
 	if len(r.active)+len(r.closing) >= r.max {
-		return resourceExhausted("logical connection limit reached")
+		return nil, resourceExhausted("logical connection limit reached")
 	}
 
+	connection := newConnection(r.limits)
 	r.active[connection.ID()] = connection
 
-	return nil
+	return connection, nil
 }
 
 func (r *ConnectionRegistry) Get(id ConnectionID) (*Connection, error) {
@@ -108,4 +107,31 @@ func (r *ConnectionRegistry) beginShutdown() []ConnectionID {
 	r.mu.Unlock()
 
 	return ids
+}
+
+func (r *ConnectionRegistry) CloseConnection(ctx context.Context, id ConnectionID) error {
+	connection, started, err := r.beginClose(id)
+	if err != nil {
+		return err
+	}
+
+	if started {
+		go func() {
+			closeErr := connection.settleClose()
+			r.remove(id, connection)
+			connection.finishClose(closeErr)
+		}()
+	}
+
+	return connection.waitClose(ctx)
+}
+
+func (r *ConnectionRegistry) Close(ctx context.Context) error {
+	var result error
+	for _, id := range r.beginShutdown() {
+		err := r.CloseConnection(ctx, id)
+		result = errors.Join(result, ignoreMissingResource(err, ErrorKindConnectionNotFound))
+	}
+
+	return result
 }

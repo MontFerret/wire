@@ -14,7 +14,7 @@ import (
 )
 
 func TestOperationContextRejectsInvalidAndUnknownConnections(t *testing.T) {
-	factory := &operationContextFactory{connections: core.NewConnectionRegistry(1)}
+	registry := core.NewConnectionRegistry(1, core.ResourceLimits{})
 	for _, test := range []struct {
 		name string
 		id   *wirev1.ConnectionId
@@ -26,8 +26,8 @@ func TestOperationContextRejectsInvalidAndUnknownConnections(t *testing.T) {
 		{name: "unknown", id: &wirev1.ConnectionId{Value: uuid.NewString()}, code: codes.NotFound},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			operation, cancel, err := factory.New(context.Background(), test.id)
-			if status.Code(err) != test.code || operation != nil || cancel != nil {
+			operation, resources, cancel, err := prepareOperation(context.Background(), registry, test.id)
+			if status.Code(err) != test.code || operation != nil || resources != nil || cancel != nil {
 				t.Fatalf("context result = (%v, %v, %v), want %v", operation, cancel == nil, err, test.code)
 			}
 		})
@@ -37,18 +37,16 @@ func TestOperationContextRejectsInvalidAndUnknownConnections(t *testing.T) {
 func TestOperationContextCombinesLifetimesAndPreservesValues(t *testing.T) {
 	for _, lifetime := range []string{"request", "connection", "operation"} {
 		t.Run(lifetime, func(t *testing.T) {
-			registry := core.NewConnectionRegistry(1)
-			connection := core.NewConnection()
-			if err := registry.Register(connection); err != nil {
+			registry := core.NewConnectionRegistry(1, core.ResourceLimits{})
+			connection, err := registry.Open()
+			if err != nil {
 				t.Fatal(err)
 			}
-
-			lifecycle := core.NewLifecycle(registry, core.NewPlanRegistry(1), core.NewSessionRegistry(1), core.NewExecutionRegistry(1, 1), core.NewDebugSessionRegistry(1, 1, 1))
 			t.Cleanup(func() {
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer cancel()
 
-				if err := lifecycle.Close(ctx); err != nil {
+				if err := registry.Close(ctx); err != nil {
 					t.Error(err)
 				}
 			})
@@ -56,9 +54,8 @@ func TestOperationContextCombinesLifetimesAndPreservesValues(t *testing.T) {
 			type contextKey struct{}
 			request, cancelRequest := context.WithTimeout(context.WithValue(context.Background(), contextKey{}, "retained"), 5*time.Second)
 			defer cancelRequest()
-			factory := &operationContextFactory{connections: registry}
 			id := &wirev1.ConnectionId{Value: string(connection.ID())}
-			operation, cancel, err := factory.New(request, id)
+			operation, resources, cancel, err := prepareOperation(request, registry, id)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -67,7 +64,7 @@ func TestOperationContextCombinesLifetimesAndPreservesValues(t *testing.T) {
 
 			deadline, _ := request.Deadline()
 			operationDeadline, present := operation.Deadline()
-			if operation.Connection() != connection || operation.Value(contextKey{}) != "retained" || !present || !operationDeadline.Equal(deadline) {
+			if resources != connection.Resources() || operation.Value(contextKey{}) != "retained" || !present || !operationDeadline.Equal(deadline) {
 				t.Fatal("operation lost its connection, request value, or deadline")
 			}
 
@@ -75,11 +72,11 @@ func TestOperationContextCombinesLifetimesAndPreservesValues(t *testing.T) {
 			case "request":
 				cancelRequest()
 			case "connection":
-				if err := lifecycle.CloseConnection(request, connection.ID()); err != nil {
+				if err := registry.CloseConnection(request, connection.ID()); err != nil {
 					t.Fatal(err)
 				}
 
-				if _, _, err := factory.New(request, id); status.Code(err) != codes.NotFound {
+				if _, _, _, err := prepareOperation(request, registry, id); status.Code(err) != codes.NotFound {
 					t.Fatalf("closed connection was resolved: %v", err)
 				}
 			case "operation":
