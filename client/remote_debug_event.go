@@ -36,6 +36,7 @@ func remoteDebuggerEvent(event wiredebugger.Event) (*debugger.Event, bool, error
 		return result, true, nil
 	case wiredebugger.StateCompleted:
 		result := &debugger.Event{Reason: debugger.ReasonCompleted}
+
 		if snapshot.Output != nil {
 			result.Output = &api.Output{
 				ContentType: snapshot.Output.ContentType,

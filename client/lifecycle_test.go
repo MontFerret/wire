@@ -8,14 +8,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/MontFerret/api"
-	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
-	wireexecution "github.com/MontFerret/wire/pkg/execution"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
+
+	"github.com/MontFerret/api"
+	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
+	wireexecution "github.com/MontFerret/wire/pkg/execution"
 )
 
 func TestBoundedCleanup(t *testing.T) {
@@ -87,6 +88,7 @@ func (s *lifecycleServer) CloseConnection(context.Context, *wirev1.CloseConnecti
 		detail := &wirev1.ErrorDetail{
 			Category: wirev1.ErrorCategory_ERROR_CATEGORY_CONNECTION_NOT_FOUND,
 		}
+
 		withDetails, err := status.New(codes.NotFound, "resource not found").WithDetails(detail)
 		if err != nil {
 			return nil, err
@@ -121,10 +123,12 @@ func (s *lifecycleServer) WatchExecution(_ *wirev1.WatchExecutionRequest, stream
 func TestCloseAfterServerDisconnectTreatsMissingConnectionAsSettled(t *testing.T) {
 	server := &lifecycleServer{disconnect: true}
 	connection := startLifecycleServer(t, server)
+
 	client, err := newConnection(testClientContext(t), connection)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	select {
 	case <-client.streamDone:
 	case <-time.After(10 * time.Second):
@@ -134,8 +138,10 @@ func TestCloseAfterServerDisconnectTreatsMissingConnectionAsSettled(t *testing.T
 	if err := client.Close(testClientContext(t)); err != nil {
 		t.Fatalf("close-after-disconnect did not settle successfully: %v", err)
 	}
+
 	cancelled, cancel := context.WithCancel(context.Background())
 	cancel()
+
 	if err := client.Close(cancelled); err != nil {
 		t.Fatalf("completed close did not retain its result: %v", err)
 	}
@@ -144,13 +150,16 @@ func TestCloseAfterServerDisconnectTreatsMissingConnectionAsSettled(t *testing.T
 func TestCloseRejectsNewOperationsAndCancelsFacadeWatchers(t *testing.T) {
 	server := &lifecycleServer{closeEntered: make(chan struct{}), allowClose: make(chan struct{})}
 	connection := startLifecycleServer(t, server)
+
 	client, err := newConnection(testClientContext(t), connection)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	plan := &planHandle{client: client, id: "plan", close: &closeState{}}
 	session := &sessionHandle{client: client, plan: plan, id: "session", close: &closeState{}}
 	execution := &executionHandle{client: client, session: session, id: "execution", close: &closeState{}}
+
 	events, err := execution.Watch(testClientContext(t))
 	if err != nil {
 		t.Fatal(err)
@@ -172,7 +181,9 @@ func TestCloseRejectsNewOperationsAndCancelsFacadeWatchers(t *testing.T) {
 	if _, err := client.compileConfigured(context.Background(), api.Source{Content: "RETURN 1"}, false, runtimePlanOptions{}); !errors.Is(err, ErrClosed) {
 		t.Fatalf("client accepted a new operation after close started: %v", err)
 	}
+
 	close(server.allowClose)
+
 	if err := <-closeResult; err != nil {
 		t.Fatal(err)
 	}
@@ -206,8 +217,10 @@ func startLifecycleServer(t *testing.T, implementation *lifecycleServer) *grpc.C
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	t.Cleanup(func() {
 		server.Stop()
+
 		if err := connection.Close(); err != nil {
 			t.Errorf("transport cleanup failed: %v", err)
 		}
@@ -215,6 +228,7 @@ func startLifecycleServer(t *testing.T, implementation *lifecycleServer) *grpc.C
 		if err := listener.Close(); err != nil {
 			t.Errorf("listener cleanup failed: %v", err)
 		}
+
 		select {
 		case err := <-serveDone:
 			if err != nil && !errors.Is(err, grpc.ErrServerStopped) {

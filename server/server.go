@@ -7,11 +7,12 @@ import (
 	"sync"
 	"time"
 
+	"google.golang.org/grpc"
+
 	"github.com/MontFerret/api"
 	"github.com/MontFerret/wire/server/internal/core"
 	"github.com/MontFerret/wire/server/internal/grpcserver"
 	"github.com/MontFerret/wire/server/internal/lifecycle"
-	"google.golang.org/grpc"
 )
 
 // Server hosts Ferret Wire over a caller-supplied listener. It borrows the
@@ -83,8 +84,10 @@ func (s *Server) Serve(ctx context.Context, listener net.Listener) error {
 	s.serveMu.Lock()
 	if s.serving {
 		s.serveMu.Unlock()
+
 		return errors.New("Wire server is already serving")
 	}
+
 	s.serving = true
 	s.serveMu.Unlock()
 
@@ -99,6 +102,7 @@ func (s *Server) Serve(ctx context.Context, listener net.Listener) error {
 
 	err := s.grpcServer.Serve(listener)
 	close(watchDone)
+
 	if errors.Is(err, grpc.ErrServerStopped) || ctx.Err() != nil {
 		err = nil
 	}

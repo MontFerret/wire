@@ -33,6 +33,7 @@ func TestCompileRoundTrip(t *testing.T) {
 				}
 
 				src := api.Source{Name: "folder/query.fql", Content: "RETURN @input + @other\n"}
+
 				plan, err := compile(h.Context(), src, test.options...)
 				if err != nil {
 					t.Fatal(err)
@@ -163,6 +164,7 @@ func TestReusablePlanAndDurableSessions(t *testing.T) {
 			return api.Output{ContentType: options.ContentType, Content: []byte(options.Params["input"].(string))}, nil
 		}}
 	}}}))
+
 	plan, err := h.Runtime().Compile(h.Context(), api.Source{Content: "RETURN @input"})
 	if err != nil {
 		t.Fatal(err)
@@ -187,6 +189,7 @@ func TestReusablePlanAndDurableSessions(t *testing.T) {
 	}
 
 	snapshot := h.RuntimeSpy().Recorder().Snapshot()
+
 	plans, hostedSessions := snapshot.OfKind("plan"), snapshot.OfKind("session")
 	if len(plans) != 1 || len(hostedSessions) != 3 || snapshot.Count(h.RuntimeSpy().ID(), "Compile") != 1 {
 		t.Fatalf("plan or session recreated: %+v", snapshot)

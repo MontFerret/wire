@@ -23,6 +23,7 @@ type spyPlan struct {
 func (p *spyPlan) Params() []string {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+
 	if p.paramsCall != nil {
 		return p.paramsCall()
 	}

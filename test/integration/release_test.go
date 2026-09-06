@@ -4,10 +4,11 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/MontFerret/api"
-	"github.com/MontFerret/wire/test/integration/harness"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+
+	"github.com/MontFerret/api"
+	"github.com/MontFerret/wire/test/integration/harness"
 )
 
 func TestRuntimeCompletedExecutionReleaseFailurePreservesParents(t *testing.T) {
@@ -73,6 +74,7 @@ func TestKnownResourceCloseFailurePreservesSiblings(t *testing.T) {
 		for _, acknowledged := range []bool{false, true} {
 			t.Run(operation.name+map[bool]string{false: "/undelivered", true: "/lost acknowledgement"}[acknowledged], func(t *testing.T) {
 				f := newRuntimeAllocationFixture(t, operation)
+
 				siblingPlan, err := f.remote.Compile(f.h.Context(), api.Source{Content: "RETURN 2"})
 				if err != nil {
 					t.Fatal(err)

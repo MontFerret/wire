@@ -36,10 +36,12 @@ func TestCompileExecuteRetainsReusableAPIPlanAndSessionOptions(t *testing.T) {
 	runtime := &spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 		return plan, nil
 	}}
+
 	host, err := newTestHost(runtime, testLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	connection, err := host.OpenConnection()
 	if err != nil {
 		t.Fatal(err)
@@ -63,9 +65,11 @@ func TestCompileExecuteRetainsReusableAPIPlanAndSessionOptions(t *testing.T) {
 	if err != nil || retained.plan != plan {
 		t.Fatal("Wire plan did not retain the API plan")
 	}
+
 	plan.mu.Lock()
 	plan.params[0] = "changed by runtime"
 	plan.mu.Unlock()
+
 	if got := retained.Params(); !reflect.DeepEqual(got, []string{"input"}) {
 		t.Fatalf("Wire plan retained runtime parameter storage: %#v", got)
 	}
@@ -79,6 +83,7 @@ func TestCompileExecuteRetainsReusableAPIPlanAndSessionOptions(t *testing.T) {
 		if executeErr != nil {
 			t.Fatal(executeErr)
 		}
+
 		finished := waitExecution(t, connection, execution.ID)
 		if finished.State != wireexecution.StateCompleted || finished.Output == nil || finished.Output.ContentType != "application/json" {
 			t.Fatalf("unexpected execution result: %#v", finished)
@@ -92,6 +97,7 @@ func TestCompileExecuteRetainsReusableAPIPlanAndSessionOptions(t *testing.T) {
 		if lookupErr != nil {
 			continue
 		}
+
 		if got := execution.Snapshot().Output.Content[0]; got != '{' {
 			t.Fatalf("execution retained runtime output storage: %q", got)
 		}
@@ -123,6 +129,7 @@ func TestCompileExecuteRetainsReusableAPIPlanAndSessionOptions(t *testing.T) {
 	if err := connection.ReleasePlan(testContext(t), compiled.ID); err != nil {
 		t.Fatal(err)
 	}
+
 	_, _, planCloseCalls := plan.snapshot()
 	if planCloseCalls != 1 {
 		t.Fatalf("API plan closed %d times", planCloseCalls)
@@ -134,10 +141,12 @@ func TestCompileDelegatesDebugSelectionAndClosesAbandonedPlan(t *testing.T) {
 	runtime := &spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 		return compiled, nil
 	}}
+
 	host, err := newTestHost(runtime, testLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	connection, err := host.OpenConnection()
 	if err != nil {
 		t.Fatal(err)
@@ -145,6 +154,7 @@ func TestCompileDelegatesDebugSelectionAndClosesAbandonedPlan(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
+
 	if _, err := connection.Compile(ctx, compileRequest{Source: api.Source{Name: "debug.fql", Content: "RETURN 1"}, Debuggable: true}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("unexpected cancelled compile result: %v", err)
 	}
@@ -153,6 +163,7 @@ func TestCompileDelegatesDebugSelectionAndClosesAbandonedPlan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	sources, debug, _ := runtime.snapshot()
 	if len(sources) != 1 || sources[0] != (api.Source{Name: "debug.fql", Content: "RETURN 1"}) || !debug[0] {
 		t.Fatalf("unexpected compile delegation: %#v %#v", sources, debug)
@@ -161,13 +172,16 @@ func TestCompileDelegatesDebugSelectionAndClosesAbandonedPlan(t *testing.T) {
 	if err := connection.ReleasePlan(testContext(t), plan.ID); err != nil {
 		t.Fatal(err)
 	}
+
 	runtime.compile = func(context.Context, api.Source, bool) (api.Plan, error) {
 		return &spyPlan{}, nil
 	}
+
 	anonymous, err := connection.Compile(context.Background(), compileRequest{Source: api.Source{Content: "RETURN 2"}})
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	sources, debug, _ = runtime.snapshot()
 	if len(sources) != 2 || sources[1] != (api.Source{Name: "anonymous", Content: "RETURN 2"}) || debug[1] {
 		t.Fatalf("unexpected anonymous source delegation: %#v %#v", sources, debug)
@@ -180,7 +194,7 @@ func TestCompileDelegatesDebugSelectionAndClosesAbandonedPlan(t *testing.T) {
 	started := make(chan struct{})
 	release := make(chan struct{})
 	abandoned := &spyPlan{}
-	runtime.compile = func(ctx context.Context, _ api.Source, _ bool) (api.Plan, error) {
+	runtime.compile = func(_ context.Context, _ api.Source, _ bool) (api.Plan, error) {
 		close(started)
 		<-release
 
@@ -195,9 +209,11 @@ func TestCompileDelegatesDebugSelectionAndClosesAbandonedPlan(t *testing.T) {
 	<-started
 	cancelCompile()
 	close(release)
+
 	if err := <-compileResult; !errors.Is(err, context.Canceled) {
 		t.Fatalf("unexpected abandoned compile result: %v", err)
 	}
+
 	_, _, closeCalls := abandoned.snapshot()
 	if closeCalls != 1 {
 		t.Fatalf("abandoned API plan closed %d times", closeCalls)
@@ -208,10 +224,12 @@ func TestCompileForwardsOptionalOptimizationLevel(t *testing.T) {
 	runtime := &spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 		return &spyPlan{}, nil
 	}}
+
 	host, err := newTestHost(runtime, testLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	connection, err := host.OpenConnection()
 	if err != nil {
 		t.Fatal(err)
@@ -243,6 +261,7 @@ func TestCompileForwardsOptionalOptimizationLevel(t *testing.T) {
 	if len(got) != len(levels) {
 		t.Fatalf("recorded %d optimization values, want %d", len(got), len(levels))
 	}
+
 	for index, want := range levels {
 		if got[index] != want {
 			t.Fatalf("optimization %d = %+v, want %+v", index, got[index], want)
@@ -257,6 +276,7 @@ func TestCompilePanicsAreSanitizedAndCloseReturnedPlansOnce(t *testing.T) {
 		}})
 
 		_, err := connection.Compile(context.Background(), compileRequest{Source: api.Source{Content: "RETURN 1"}})
+
 		var panicErr *panicboundary.Error
 		if !hasCategory(err, ErrorKindInternal) || !errors.As(err, &panicErr) || strings.Contains(err.Error(), "secret") {
 			t.Fatalf("compile panic was not sanitized: %v", err)
@@ -270,6 +290,7 @@ func TestCompilePanicsAreSanitizedAndCloseReturnedPlansOnce(t *testing.T) {
 		}})
 
 		_, err := connection.Compile(context.Background(), compileRequest{Source: api.Source{Content: "RETURN 1"}})
+
 		var panicErr *panicboundary.Error
 		if !hasCategory(err, ErrorKindInternal) || !errors.As(err, &panicErr) || strings.Contains(err.Error(), "secret") {
 			t.Fatalf("metadata panic was not sanitized: %v", err)
@@ -309,6 +330,7 @@ func TestSessionConstructionPanicsAreSanitized(t *testing.T) {
 		connection := newTestConnection(t, &spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 			return plan, nil
 		}})
+
 		compiled, err := connection.Compile(context.Background(), compileRequest{Source: api.Source{Content: "RETURN 1"}})
 		if err != nil {
 			t.Fatal(err)
@@ -318,6 +340,7 @@ func TestSessionConstructionPanicsAreSanitized(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		finished := waitExecution(t, connection, execution.ID)
 		if finished.State != wireexecution.StateFailed || finished.Failure == nil || finished.Failure.Category != failure.CategoryInternalRuntime ||
 			strings.Contains(finished.Failure.Message, "secret") {
@@ -332,6 +355,7 @@ func TestSessionConstructionPanicsAreSanitized(t *testing.T) {
 		connection := newTestConnection(t, &spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 			return plan, nil
 		}})
+
 		compiled, err := connection.Compile(context.Background(), compileRequest{
 			Source:     api.Source{Content: "RETURN 1"},
 			Debuggable: true,
@@ -341,6 +365,7 @@ func TestSessionConstructionPanicsAreSanitized(t *testing.T) {
 		}
 
 		_, err = connection.OpenDebugSession(context.Background(), debugRequest{PlanID: compiled.ID})
+
 		var panicErr *panicboundary.Error
 		if !hasCategory(err, ErrorKindInternal) || !errors.As(err, &panicErr) || strings.Contains(err.Error(), "secret") {
 			t.Fatalf("debug constructor panic was not sanitized: %v", err)
@@ -359,6 +384,7 @@ func TestBoundaryPanicsDoNotPoisonReusableParents(t *testing.T) {
 
 			return &spyPlan{}, nil
 		}}
+
 		connection := newTestConnection(t, runtime)
 		if _, err := connection.Compile(context.Background(), compileRequest{Source: api.Source{Content: "RETURN 1"}}); !hasCategory(err, ErrorKindInternal) {
 			t.Fatalf("first compile did not contain panic: %v", err)
@@ -387,6 +413,7 @@ func TestBoundaryPanicsDoNotPoisonReusableParents(t *testing.T) {
 		connection := newTestConnection(t, &spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 			return plan, nil
 		}})
+
 		compiled, err := connection.Compile(context.Background(), compileRequest{Source: api.Source{Content: "RETURN 1"}})
 		if err != nil {
 			t.Fatal(err)
@@ -434,6 +461,7 @@ func TestBoundaryPanicsDoNotPoisonReusableParents(t *testing.T) {
 		connection := newTestConnection(t, &spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 			return plan, nil
 		}})
+
 		compiled, err := connection.Compile(context.Background(), compileRequest{
 			Source:     api.Source{Content: "RETURN 1"},
 			Debuggable: true,
@@ -463,6 +491,7 @@ func TestBoundaryPanicsDoNotPoisonReusableParents(t *testing.T) {
 
 func TestSuccessfulNilAPIResourcesAreRejectedSafely(t *testing.T) {
 	var nilPlan *spyPlan
+
 	connection := newTestConnection(t, &spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 		return nilPlan, nil
 	}})
@@ -477,14 +506,17 @@ func TestSuccessfulNilAPIResourcesAreRejectedSafely(t *testing.T) {
 	connection = newTestConnection(t, &spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 		return plan, nil
 	}})
+
 	compiled, err := connection.Compile(context.Background(), compileRequest{Source: api.Source{Content: "RETURN 1"}})
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	execution, err := connection.Execute(context.Background(), executeRequest{PlanID: compiled.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	finished := waitExecution(t, connection, execution.ID)
 	if finished.State != wireexecution.StateFailed || finished.Failure == nil || finished.Failure.Category != failure.CategoryInternalRuntime {
 		t.Fatalf("typed-nil session was not rejected: %#v", finished)
@@ -518,10 +550,12 @@ func TestAPIResourcesReturnedWithErrorsAreClosedOnce(t *testing.T) {
 		connection := newTestConnection(t, &spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 			return plan, nil
 		}})
+
 		compiled, err := connection.Compile(context.Background(), compileRequest{Source: api.Source{Content: "RETURN 1"}})
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		execution, err := connection.Execute(context.Background(), executeRequest{PlanID: compiled.ID})
 		if err != nil {
 			t.Fatal(err)
@@ -547,6 +581,7 @@ func TestAPIResourcesReturnedWithErrorsAreClosedOnce(t *testing.T) {
 		connection := newTestConnection(t, &spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 			return plan, nil
 		}})
+
 		compiled, err := connection.Compile(context.Background(), compileRequest{Source: api.Source{Content: "RETURN 1"}, Debuggable: true})
 		if err != nil {
 			t.Fatal(err)
@@ -573,6 +608,7 @@ func TestAbandonedDebugSessionCleanupPanicIsSanitized(t *testing.T) {
 	connection := newTestConnection(t, &spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 		return plan, nil
 	}})
+
 	compiled, err := connection.Compile(context.Background(), compileRequest{Source: api.Source{Content: "RETURN 1"}, Debuggable: true})
 	if err != nil {
 		t.Fatal(err)
@@ -621,24 +657,30 @@ func TestExecutionUsesPortableFailureFallbacks(t *testing.T) {
 			connection := newTestConnection(t, &spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 				return plan, nil
 			}})
+
 			compiled, err := connection.Compile(context.Background(), compileRequest{Source: api.Source{Content: "RETURN 1"}})
 			if err != nil {
 				t.Fatal(err)
 			}
+
 			execution, err := connection.Execute(context.Background(), executeRequest{PlanID: compiled.ID})
 			if err != nil {
 				t.Fatal(err)
 			}
+
 			finished := waitExecution(t, connection, execution.ID)
 			if finished.State != wireexecution.StateFailed || finished.Failure == nil || finished.Failure.Category != test.want {
 				t.Fatalf("unexpected failure: %#v", finished)
 			}
+
 			if (finished.Output != nil) != test.wantOutput {
 				t.Fatalf("unexpected output presence: %#v", finished.Output)
 			}
+
 			if strings.Contains(finished.Failure.Message, "secret") {
 				t.Fatalf("runtime detail leaked: %#v", finished.Failure)
 			}
+
 			runCalls, closeCalls := session.counts()
 			if runCalls != 1 || closeCalls != 1 {
 				t.Fatalf("unexpected session lifecycle: run=%d close=%d", runCalls, closeCalls)
@@ -665,10 +707,12 @@ func TestExecutionUsesPortableFailureFallbacks(t *testing.T) {
 
 func newTestConnection(t *testing.T, runtime api.Runtime) *testEnvironment {
 	t.Helper()
+
 	host, err := newTestHost(runtime, testLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	connection, err := host.OpenConnection()
 	if err != nil {
 		t.Fatal(err)
@@ -679,10 +723,12 @@ func newTestConnection(t *testing.T, runtime api.Runtime) *testEnvironment {
 
 func waitExecution(t *testing.T, connection *testEnvironment, id ExecutionID) executionResult {
 	t.Helper()
+
 	execution, err := connection.resources.Execution(context.Background(), id)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	select {
 	case <-execution.done:
 	case <-time.After(5 * time.Second):
@@ -723,13 +769,14 @@ func TestWireOwnedExecutionOperationPanicPropagates(t *testing.T) {
 	execution := &Execution{operation: func(context.Context) (api.Output, error) {
 		panic(sentinel)
 	}}
+
 	recovered := func() (value any) {
 		defer func() { value = recover() }()
 		execution.run()
 
 		return nil
 	}()
-	if recovered != sentinel {
+	if recovered != sentinel { //nolint:errorlint // Verify Wire-owned panics propagate the original value unchanged.
 		t.Fatalf("Wire-owned panic was changed: %#v", recovered)
 	}
 

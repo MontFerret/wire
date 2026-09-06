@@ -19,6 +19,7 @@ type RuntimeService struct {
 
 var _ wirev1.RuntimeServiceServer = (*RuntimeService)(nil)
 
+// Connect keeps a logical connection alive for the stream and reclaims it when the stream ends.
 func (s *RuntimeService) Connect(_ *wirev1.ConnectRequest, stream wirev1.RuntimeService_ConnectServer) error {
 	connection, err := s.connections.Open()
 	if err != nil {
@@ -47,6 +48,7 @@ func (s *RuntimeService) Connect(_ *wirev1.ConnectRequest, stream wirev1.Runtime
 	}
 }
 
+// CloseConnection tears down the logical connection identified by the request.
 func (s *RuntimeService) CloseConnection(ctx context.Context, request *wirev1.CloseConnectionRequest) (*wirev1.CloseConnectionResponse, error) {
 	err := s.connections.CloseConnection(ctx, core.ConnectionID(request.GetConnectionId().GetValue()))
 	if err != nil {
@@ -56,6 +58,7 @@ func (s *RuntimeService) CloseConnection(ctx context.Context, request *wirev1.Cl
 	return &wirev1.CloseConnectionResponse{}, nil
 }
 
+// Run decodes session options and registers a direct hosted-runtime execution.
 func (s *RuntimeService) Run(
 	ctx context.Context,
 	request *wirev1.RunRequest,

@@ -10,9 +10,10 @@ import (
 	"strings"
 	"testing"
 
+	"google.golang.org/grpc"
+
 	"github.com/MontFerret/api"
 	"github.com/MontFerret/wire/client"
-	"google.golang.org/grpc"
 )
 
 // The constructor returns the canonical interface, including a nil interface
@@ -52,6 +53,7 @@ func TestPublicSurface(t *testing.T) {
 	}
 
 	slices.Sort(exported)
+
 	want := []string{"ErrClosed", "ErrExecutionCancelled", "Error", "New"}
 	if !slices.Equal(exported, want) {
 		t.Fatalf("public client surface = %v, want %v", exported, want)

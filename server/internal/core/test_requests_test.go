@@ -55,6 +55,7 @@ type (
 
 func apiSessionOptions(parameters map[string]any, contentType string) []api.SessionOption {
 	options := []api.SessionOption{api.WithParams(cloneParameters(parameters))}
+
 	if contentType != "" {
 		options = append(options, api.WithOutputContentType(contentType))
 	}

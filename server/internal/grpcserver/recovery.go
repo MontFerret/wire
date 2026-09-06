@@ -3,10 +3,12 @@ package grpcserver
 import (
 	"context"
 
-	"github.com/MontFerret/wire/server/internal/core"
 	"google.golang.org/grpc"
+
+	"github.com/MontFerret/wire/server/internal/core"
 )
 
+// UnaryRecoveryInterceptor replaces recovered handler panics with sanitized internal statuses.
 func UnaryRecoveryInterceptor(
 	ctx context.Context,
 	request any,
@@ -23,6 +25,7 @@ func UnaryRecoveryInterceptor(
 	return handler(ctx, request)
 }
 
+// StreamRecoveryInterceptor replaces recovered stream-handler panics with sanitized internal statuses.
 func StreamRecoveryInterceptor(
 	server any,
 	stream grpc.ServerStream,

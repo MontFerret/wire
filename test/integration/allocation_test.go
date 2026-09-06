@@ -6,11 +6,12 @@ import (
 	"slices"
 	"testing"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	"github.com/MontFerret/api"
 	"github.com/MontFerret/wire/client"
 	"github.com/MontFerret/wire/test/integration/harness"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 func TestRuntimeLostAllocationReclaimsNearestParentAndPreservesSiblings(t *testing.T) {
@@ -26,6 +27,7 @@ func TestRuntimeLostAllocationReclaimsNearestParentAndPreservesSiblings(t *testi
 
 					if operation.name != "session run" {
 						var err error
+
 						parent, err = f.remote.Compile(harness.Context(t), api.Source{Content: "RETURN 2"})
 						if err != nil {
 							t.Fatal(err)
@@ -33,6 +35,7 @@ func TestRuntimeLostAllocationReclaimsNearestParentAndPreservesSiblings(t *testi
 					}
 
 					var err error
+
 					sibling, err = parent.NewSession(harness.Context(t))
 					if err != nil {
 						t.Fatal(err)
@@ -47,6 +50,7 @@ func TestRuntimeLostAllocationReclaimsNearestParentAndPreservesSiblings(t *testi
 				}()
 				f.awaitCommitted()
 				f.reply.Deliver()
+
 				err := f.awaitResult(result)
 				if err == nil {
 					t.Fatal("lost or malformed allocation response succeeded")
@@ -111,9 +115,11 @@ func TestRuntimeCancelledKnownAllocationPreservesParentsOnReleaseFailure(t *test
 		for _, acknowledged := range []bool{false, true} {
 			t.Run(operation.name+map[bool]string{false: "/failed delivery", true: "/lost acknowledgement"}[acknowledged], func(t *testing.T) {
 				f := newRuntimeAllocationFixture(t, operation)
+
 				siblingPlan := f.plan
 				if siblingPlan == nil {
 					var err error
+
 					siblingPlan, err = f.remote.Compile(harness.Context(t), api.Source{Content: "RETURN 2"})
 					if err != nil {
 						t.Fatal(err)
@@ -144,6 +150,7 @@ func TestRuntimeCancelledKnownAllocationPreservesParentsOnReleaseFailure(t *test
 				f.awaitCommitted()
 				cancel()
 				f.reply.Deliver()
+
 				err = f.awaitResult(result)
 				if !errors.Is(err, context.Canceled) || !errors.Is(err, releaseErr) {
 					t.Fatalf("cancellation or handle release error was lost: %v", err)
@@ -182,6 +189,7 @@ func TestRuntimeCancelledKnownAllocationPreservesParentsOnReleaseFailure(t *test
 func TestRuntimeLostExecutionTriesPlanBeforeRuntime(t *testing.T) {
 	operation := allocationOperations()[4]
 	f := newRuntimeAllocationFixture(t, operation)
+
 	siblingPlan, err := f.remote.Compile(harness.Context(t), api.Source{Content: "RETURN 2"})
 	if err != nil {
 		t.Fatal(err)
@@ -209,6 +217,7 @@ func TestRuntimeLostExecutionTriesPlanBeforeRuntime(t *testing.T) {
 
 	methods := f.gate.Sequence()
 	sessionRelease := slices.Index(methods, harness.ReleaseSession)
+
 	planRelease := slices.Index(methods, harness.ReleasePlan)
 	if sessionRelease < 0 || planRelease <= sessionRelease ||
 		f.gate.Count(harness.ReleasePlan) != 1 ||
@@ -221,6 +230,7 @@ func TestRuntimeLostExecutionTriesPlanBeforeRuntime(t *testing.T) {
 	}
 
 	f.assertNarrowParentClosed()
+
 	planCloses := f.record.Snapshot().Count(f.record.Snapshot().OfKind("plan")[0].ID, "Close")
 	if planCloses != 1 {
 		t.Fatalf("Plan fallback returned before hosted Plan cleanup: closes=%d", planCloses)
@@ -264,6 +274,7 @@ func TestRuntimeLostAllocationEscalatesFailedParentCleanup(t *testing.T) {
 				}()
 				f.awaitCommitted()
 				f.reply.Deliver()
+
 				err := f.awaitResult(result)
 				if !errors.Is(err, parentErr) ||
 					(operation.name == "session run" && !errors.Is(err, planErr)) ||

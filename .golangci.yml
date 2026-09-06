@@ -1,0 +1,104 @@
+version: "2"
+
+run:
+  timeout: 5m
+  modules-download-mode: readonly
+  tests: true
+
+linters:
+  default: none
+  enable:
+    - bodyclose
+    - copyloopvar
+    - errcheck
+    - errorlint
+    - govet
+    - grouper
+    - ineffassign
+    - misspell
+    - nolintlint
+    - revive
+    - staticcheck
+    - unused
+    - wsl_v5
+  settings:
+    grouper:
+      # A single type may remain standalone; related types share one declaration.
+      type-require-single-type: true
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+      allow-unused: false
+    revive:
+      severity: error
+      confidence: 0.8
+      enable-default-rules: false
+      rules:
+        - name: blank-imports
+        - name: context-as-argument
+        - name: context-keys-type
+        - name: empty-block
+        - name: error-naming
+        - name: error-return
+        - name: error-strings
+        - name: errorf
+        - name: exported
+        - name: if-return
+        - name: increment-decrement
+        - name: indent-error-flow
+        - name: package-comments
+        - name: range
+        - name: receiver-naming
+        - name: superfluous-else
+        - name: time-naming
+        - name: unexported-return
+        - name: unreachable-code
+        - name: unused-parameter
+        - name: var-declaration
+        - name: var-naming
+    wsl_v5:
+      # Enforce the control-flow spacing rules in AGENTS.md.
+      default: none
+      enable:
+        - if
+        - err
+        - return
+        - branch
+        - after-block
+        - leading-whitespace
+        - trailing-whitespace
+      allow-first-in-block: false
+      allow-whole-block: false
+      branch-max-lines: 0
+      case-max-lines: 0
+      cuddle-max-statements: 1
+  exclusions:
+    generated: strict
+    presets: []
+    rules:
+      # Wire is the product name; retain it in existing error messages.
+      - linters:
+          - staticcheck
+        text: '^ST1005: error strings should not be capitalized$'
+        source: '(errors\.New|fmt\.Errorf)\("Wire '
+    paths:
+      - ^gen/
+      - ^vendor/
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/MontFerret
+  exclusions:
+    generated: strict
+    paths:
+      - ^gen/
+      - ^vendor/
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

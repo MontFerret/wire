@@ -13,6 +13,7 @@ func decodeSessionOptions(parameters *wirev1.Parameters, contentType string) ([]
 	}
 
 	options := []api.SessionOption{api.WithParams(values)}
+
 	if contentType != "" {
 		options = append(options, api.WithOutputContentType(contentType))
 	}

@@ -171,6 +171,7 @@ func TestSessionOptionsRoundTrip(t *testing.T) {
 
 func TestRuntimeCloseBorrowsTransportAndHostedRuntime(t *testing.T) {
 	h := harness.New(t)
+
 	other, err := h.OpenRuntime()
 	if err != nil {
 		t.Fatal(err)

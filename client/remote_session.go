@@ -28,6 +28,7 @@ func (s *remoteSession) Run(ctx context.Context) (api.Output, error) {
 
 	execution, err := s.session.run(creationCtx)
 	cancel()
+
 	if err != nil {
 		return api.Output{}, s.session.client.reclaimAllocation(ctx, err, s.session.Close, s.session.plan.Close)
 	}

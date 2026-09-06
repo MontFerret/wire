@@ -4,10 +4,11 @@ import (
 	"errors"
 	"fmt"
 
+	"google.golang.org/grpc/status"
+
 	"github.com/MontFerret/api/diagnostics"
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
 	"github.com/MontFerret/wire/pkg/failure"
-	"google.golang.org/grpc/status"
 )
 
 // Error is a decoded Wire RPC failure. Category is set only when the server

@@ -3,23 +3,27 @@ package harness
 import "github.com/MontFerret/api"
 
 type (
+	// CompileOptions preserves optimization-level presence separately from its value.
 	CompileOptions struct {
 		Level    api.OptimizationLevel
 		HasLevel bool
 	}
 
+	// SessionOptions records parameters and output format supplied through API options.
 	SessionOptions struct {
 		Params      map[string]any
 		ContentType string
 	}
 )
 
+// SetOptimizationLevel records both the value and explicit option presence.
 func (o *CompileOptions) SetOptimizationLevel(level api.OptimizationLevel) error {
 	o.Level, o.HasLevel = level, true
 
 	return nil
 }
 
+// SetParam records one supplied parameter without changing its value type.
 func (o *SessionOptions) SetParam(name string, value any) error {
 	if o.Params == nil {
 		o.Params = make(map[string]any)
@@ -30,6 +34,7 @@ func (o *SessionOptions) SetParam(name string, value any) error {
 	return nil
 }
 
+// SetParams merges the supplied parameters into the recorded option state.
 func (o *SessionOptions) SetParams(values map[string]any) error {
 	for name, value := range values {
 		if err := o.SetParam(name, value); err != nil {
@@ -40,6 +45,7 @@ func (o *SessionOptions) SetParams(values map[string]any) error {
 	return nil
 }
 
+// SetOutputContentType records the requested output format verbatim.
 func (o *SessionOptions) SetOutputContentType(value string) error {
 	o.ContentType = value
 

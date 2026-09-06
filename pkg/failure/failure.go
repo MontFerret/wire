@@ -16,6 +16,7 @@ type (
 	}
 )
 
+// Failure categories preserve the structured conditions represented by the Wire protocol.
 const (
 	CategoryCompilation Category = iota + 1
 	CategoryExecution

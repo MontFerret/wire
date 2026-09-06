@@ -35,6 +35,7 @@ func TestClientOptimizationPresenceRoundTrip(t *testing.T) {
 				}
 
 				compile := env.client.Compile
+
 				if debug {
 					compile = env.client.CompileDebug
 				}
@@ -71,6 +72,7 @@ func TestCompileOptionsApplyOnceBeforeDispatch(t *testing.T) {
 				hosted := &contractRuntime{}
 				env := newIntegrationEnv(t, hosted)
 				gate := &allocationResponseGate{ClientConnInterface: env.conn, calls: make(map[string]int)}
+
 				remote, err := client.New(testContext(t), gate)
 				if err != nil {
 					t.Fatal(err)
@@ -83,6 +85,7 @@ func TestCompileOptionsApplyOnceBeforeDispatch(t *testing.T) {
 				})
 				compile := func(ctx context.Context, options []api.PlanOption) error {
 					compile := remote.Compile
+
 					if debug {
 						compile = remote.CompileDebug
 					}

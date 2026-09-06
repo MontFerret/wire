@@ -25,6 +25,7 @@ func TestConnectionCloseIsIdempotentAndRejectsNewResources(t *testing.T) {
 	connection := newTestConnection(t, &spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 		return plan, nil
 	}})
+
 	compiled, err := connection.Compile(context.Background(), compileRequest{
 		Source:     api.Source{Content: "RETURN 1"},
 		Debuggable: true,
@@ -107,6 +108,7 @@ func TestPlanReleaseWaitsForInFlightDebugCreation(t *testing.T) {
 	connection := newTestConnection(t, &spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 		return plan, nil
 	}})
+
 	compiled, err := connection.Compile(context.Background(), compileRequest{
 		Source:     api.Source{Content: "RETURN 1"},
 		Debuggable: true,
@@ -114,6 +116,7 @@ func TestPlanReleaseWaitsForInFlightDebugCreation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	retained, err := connection.resources.Plan(context.Background(), compiled.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -133,6 +136,7 @@ func TestPlanReleaseWaitsForInFlightDebugCreation(t *testing.T) {
 	if _, err := connection.Execute(context.Background(), executeRequest{PlanID: compiled.ID}); !hasCategory(err, ErrorKindPlanNotFound) {
 		t.Fatalf("closing plan accepted an execution: %v", err)
 	}
+
 	if _, err := connection.OpenDebugSession(context.Background(), debugRequest{PlanID: compiled.ID}); !hasCategory(err, ErrorKindPlanNotFound) {
 		t.Fatalf("closing plan accepted another debug session: %v", err)
 	}
@@ -144,6 +148,7 @@ func TestPlanReleaseWaitsForInFlightDebugCreation(t *testing.T) {
 	}
 
 	close(finishConstructor)
+
 	if err := <-openResult; !hasCategory(err, ErrorKindPlanNotFound) {
 		t.Fatalf("in-flight debug construction committed after plan release: %v", err)
 	}
@@ -155,6 +160,7 @@ func TestPlanReleaseWaitsForInFlightDebugCreation(t *testing.T) {
 	orderMu.Lock()
 	settledOrder := append([]string(nil), order...)
 	orderMu.Unlock()
+
 	if !reflect.DeepEqual(settledOrder, []string{"debug", "plan"}) {
 		t.Fatalf("unexpected cleanup order: %#v", settledOrder)
 	}
@@ -202,18 +208,22 @@ func TestPlanReleaseWaitsForChildrenAlreadyClosing(t *testing.T) {
 		connection := newTestConnection(t, &spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 			return plan, nil
 		}})
+
 		compiled, err := connection.Compile(context.Background(), compileRequest{Source: api.Source{Content: "RETURN 1"}})
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		retained, err := connection.resources.Plan(context.Background(), compiled.ID)
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		execution, err := connection.Execute(context.Background(), executeRequest{PlanID: compiled.ID})
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		<-runStarted
 
 		childResult := make(chan error, 1)
@@ -230,9 +240,11 @@ func TestPlanReleaseWaitsForChildrenAlreadyClosing(t *testing.T) {
 		}
 
 		close(finishChildClose)
+
 		if err := <-childResult; err != nil {
 			t.Fatal(err)
 		}
+
 		if err := <-planResult; err != nil {
 			t.Fatal(err)
 		}
@@ -240,6 +252,7 @@ func TestPlanReleaseWaitsForChildrenAlreadyClosing(t *testing.T) {
 		orderMu.Lock()
 		settledOrder := append([]string(nil), order...)
 		orderMu.Unlock()
+
 		if !reflect.DeepEqual(settledOrder, []string{"execution", "plan"}) {
 			t.Fatalf("unexpected cleanup order: %#v", settledOrder)
 		}
@@ -277,6 +290,7 @@ func TestPlanReleaseWaitsForChildrenAlreadyClosing(t *testing.T) {
 		connection := newTestConnection(t, &spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 			return plan, nil
 		}})
+
 		compiled, err := connection.Compile(context.Background(), compileRequest{
 			Source:     api.Source{Content: "RETURN 1"},
 			Debuggable: true,
@@ -284,10 +298,12 @@ func TestPlanReleaseWaitsForChildrenAlreadyClosing(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		retained, err := connection.resources.Plan(context.Background(), compiled.ID)
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		opened, err := connection.OpenDebugSession(context.Background(), debugRequest{PlanID: compiled.ID})
 		if err != nil {
 			t.Fatal(err)
@@ -307,9 +323,11 @@ func TestPlanReleaseWaitsForChildrenAlreadyClosing(t *testing.T) {
 		}
 
 		close(finishChildClose)
+
 		if err := <-childResult; err != nil {
 			t.Fatal(err)
 		}
+
 		if err := <-planResult; err != nil {
 			t.Fatal(err)
 		}
@@ -317,6 +335,7 @@ func TestPlanReleaseWaitsForChildrenAlreadyClosing(t *testing.T) {
 		orderMu.Lock()
 		settledOrder := append([]string(nil), order...)
 		orderMu.Unlock()
+
 		if !reflect.DeepEqual(settledOrder, []string{"debug", "plan"}) {
 			t.Fatalf("unexpected cleanup order: %#v", settledOrder)
 		}
@@ -348,14 +367,17 @@ func TestConcurrentChildReleaseSharesCleanup(t *testing.T) {
 		connection := newTestConnection(t, &spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 			return plan, nil
 		}})
+
 		compiled, err := connection.Compile(context.Background(), compileRequest{Source: api.Source{Content: "RETURN 1"}})
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		execution, err := connection.Execute(context.Background(), executeRequest{PlanID: compiled.ID})
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		<-runStarted
 
 		first := make(chan error, 1)
@@ -433,20 +455,25 @@ func TestExecutionTerminalStateSurvivesCancellationOrdering(t *testing.T) {
 		connection := newTestConnection(t, &spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 			return plan, nil
 		}})
+
 		compiled, err := connection.Compile(context.Background(), compileRequest{Source: api.Source{Content: "RETURN 1"}})
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		started, err := connection.Execute(context.Background(), executeRequest{PlanID: compiled.ID})
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		<-runStarted
 
 		if _, err := connection.CancelExecution(started.ID); err != nil {
 			t.Fatal(err)
 		}
+
 		close(finishRun)
+
 		settled := waitExecution(t, connection, started.ID)
 		if settled.State != execution.StateCancelled {
 			t.Fatalf("cancellation did not retain the terminal state: %#v", settled)
@@ -462,14 +489,17 @@ func TestExecutionTerminalStateSurvivesCancellationOrdering(t *testing.T) {
 		connection := newTestConnection(t, &spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 			return plan, nil
 		}})
+
 		compiled, err := connection.Compile(context.Background(), compileRequest{Source: api.Source{Content: "RETURN 1"}})
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		started, err := connection.Execute(context.Background(), executeRequest{PlanID: compiled.ID})
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		settled := waitExecution(t, connection, started.ID)
 		if settled.State != execution.StateCompleted {
 			t.Fatalf("execution did not complete: %#v", settled)
@@ -479,6 +509,7 @@ func TestExecutionTerminalStateSurvivesCancellationOrdering(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		if afterCancel.State != execution.StateCompleted {
 			t.Fatalf("late cancellation changed terminal state: %#v", afterCancel)
 		}

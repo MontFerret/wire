@@ -16,6 +16,7 @@ type ConnectionRegistry struct {
 	closed  bool
 }
 
+// NewConnectionRegistry sets connection capacity and the limits inherited by each connection.
 func NewConnectionRegistry(maxConnections int, limits ResourceLimits) *ConnectionRegistry {
 	return &ConnectionRegistry{
 		max:     maxConnections,
@@ -25,6 +26,7 @@ func NewConnectionRegistry(maxConnections int, limits ResourceLimits) *Connectio
 	}
 }
 
+// Open admits a logical connection unless shutdown or connection capacity prevents it.
 func (r *ConnectionRegistry) Open() (*Connection, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -43,6 +45,7 @@ func (r *ConnectionRegistry) Open() (*Connection, error) {
 	return connection, nil
 }
 
+// Get returns an active connection; closing connections are no longer discoverable.
 func (r *ConnectionRegistry) Get(id ConnectionID) (*Connection, error) {
 	if err := validateID(id, "connection ID"); err != nil {
 		return nil, err
@@ -65,6 +68,7 @@ func (r *ConnectionRegistry) beginClose(id ConnectionID) (*Connection, bool, err
 	}
 
 	r.mu.Lock()
+
 	connection := r.active[id]
 	if connection != nil {
 		delete(r.active, id)
@@ -90,6 +94,7 @@ func (r *ConnectionRegistry) remove(id ConnectionID, expected *Connection) {
 	if r.closing[id] == expected {
 		delete(r.closing, id)
 	}
+
 	r.mu.Unlock()
 }
 
@@ -104,11 +109,14 @@ func (r *ConnectionRegistry) beginShutdown() []ConnectionID {
 	for id := range r.closing {
 		ids = append(ids, id)
 	}
+
 	r.mu.Unlock()
 
 	return ids
 }
 
+// CloseConnection commits teardown once and waits using the caller's context.
+// Teardown continues if that context is cancelled.
 func (r *ConnectionRegistry) CloseConnection(ctx context.Context, id ConnectionID) error {
 	connection, started, err := r.beginClose(id)
 	if err != nil {
@@ -126,6 +134,8 @@ func (r *ConnectionRegistry) CloseConnection(ctx context.Context, id ConnectionI
 	return connection.waitClose(ctx)
 }
 
+// Close rejects new connections and starts teardown of all retained connections.
+// The caller's context bounds waiting, not ownership of teardown.
 func (r *ConnectionRegistry) Close(ctx context.Context) error {
 	var result error
 	for _, id := range r.beginShutdown() {

@@ -28,6 +28,7 @@ func (s *DebugService) debugCommand(
 	return operation, cancel, session, nil
 }
 
+// Start acknowledges an initial debugger resume; WatchDebug carries later stops.
 func (s *DebugService) Start(ctx context.Context, request *wirev1.StartRequest) (*wirev1.StartResponse, error) {
 	operation, cancel, session, err := s.debugCommand(ctx, request.GetConnectionId(), request.GetDebugSessionId())
 	if err != nil {
@@ -43,6 +44,7 @@ func (s *DebugService) Start(ctx context.Context, request *wirev1.StartRequest) 
 	return &wirev1.StartResponse{}, nil
 }
 
+// Continue acknowledges a debugger resume; WatchDebug carries later stops.
 func (s *DebugService) Continue(ctx context.Context, request *wirev1.ContinueRequest) (*wirev1.ContinueResponse, error) {
 	operation, cancel, session, err := s.debugCommand(ctx, request.GetConnectionId(), request.GetDebugSessionId())
 	if err != nil {
@@ -58,6 +60,7 @@ func (s *DebugService) Continue(ctx context.Context, request *wirev1.ContinueReq
 	return &wirev1.ContinueResponse{}, nil
 }
 
+// Pause requests interruption; WatchDebug reports the resulting state transition.
 func (s *DebugService) Pause(ctx context.Context, request *wirev1.PauseRequest) (*wirev1.PauseResponse, error) {
 	operation, cancel, session, err := s.debugCommand(ctx, request.GetConnectionId(), request.GetDebugSessionId())
 	if err != nil {
@@ -73,6 +76,7 @@ func (s *DebugService) Pause(ctx context.Context, request *wirev1.PauseRequest) 
 	return &wirev1.PauseResponse{}, nil
 }
 
+// StepOver dispatches a step-over command; WatchDebug carries its result.
 func (s *DebugService) StepOver(ctx context.Context, request *wirev1.StepOverRequest) (*wirev1.StepOverResponse, error) {
 	operation, cancel, session, err := s.debugCommand(ctx, request.GetConnectionId(), request.GetDebugSessionId())
 	if err != nil {
@@ -88,6 +92,7 @@ func (s *DebugService) StepOver(ctx context.Context, request *wirev1.StepOverReq
 	return &wirev1.StepOverResponse{}, nil
 }
 
+// StepIn dispatches a step-in command; WatchDebug carries its result.
 func (s *DebugService) StepIn(ctx context.Context, request *wirev1.StepInRequest) (*wirev1.StepInResponse, error) {
 	operation, cancel, session, err := s.debugCommand(ctx, request.GetConnectionId(), request.GetDebugSessionId())
 	if err != nil {
@@ -103,6 +108,7 @@ func (s *DebugService) StepIn(ctx context.Context, request *wirev1.StepInRequest
 	return &wirev1.StepInResponse{}, nil
 }
 
+// StepOut dispatches a step-out command; WatchDebug carries its result.
 func (s *DebugService) StepOut(ctx context.Context, request *wirev1.StepOutRequest) (*wirev1.StepOutResponse, error) {
 	operation, cancel, session, err := s.debugCommand(ctx, request.GetConnectionId(), request.GetDebugSessionId())
 	if err != nil {
@@ -118,6 +124,7 @@ func (s *DebugService) StepOut(ctx context.Context, request *wirev1.StepOutReque
 	return &wirev1.StepOutResponse{}, nil
 }
 
+// Terminate stops the debugger while retaining its handle until explicit release.
 func (s *DebugService) Terminate(ctx context.Context, request *wirev1.TerminateRequest) (*wirev1.TerminateResponse, error) {
 	operation, cancel, session, err := s.debugCommand(ctx, request.GetConnectionId(), request.GetDebugSessionId())
 	if err != nil {
@@ -133,6 +140,7 @@ func (s *DebugService) Terminate(ctx context.Context, request *wirev1.TerminateR
 	return &wirev1.TerminateResponse{}, nil
 }
 
+// SetBreakpoint validates protocol locations and options before installing a breakpoint.
 func (s *DebugService) SetBreakpoint(ctx context.Context, request *wirev1.SetBreakpointRequest) (*wirev1.SetBreakpointResponse, error) {
 	operation, cancel, session, err := s.debugCommand(ctx, request.GetConnectionId(), request.GetDebugSessionId())
 	if err != nil {
@@ -164,6 +172,7 @@ func (s *DebugService) SetBreakpoint(ctx context.Context, request *wirev1.SetBre
 	return &wirev1.SetBreakpointResponse{Breakpoint: converted}, nil
 }
 
+// DeleteBreakpoint validates the protocol ID before removing the session's breakpoint.
 func (s *DebugService) DeleteBreakpoint(ctx context.Context, request *wirev1.DeleteBreakpointRequest) (*wirev1.DeleteBreakpointResponse, error) {
 	operation, cancel, session, err := s.debugCommand(ctx, request.GetConnectionId(), request.GetDebugSessionId())
 	if err != nil {

@@ -25,6 +25,7 @@ func (e streamTestEvent) withSequence(sequence uint64) streamTestEvent {
 
 func TestEventStreamPublishesMonotonicEventsAndReplaysLatest(t *testing.T) {
 	stream := newStreamTestEventStream(2)
+
 	first, err := stream.subscribe()
 	if err != nil {
 		t.Fatal(err)
@@ -42,13 +43,16 @@ func TestEventStreamPublishesMonotonicEventsAndReplaysLatest(t *testing.T) {
 	if received.sequence != 1 || received.values[0] != 1 {
 		t.Fatalf("unexpected first event: %#v", received)
 	}
+
 	received.values[0] = 8
 
 	stream.publish(streamTestEvent{values: []int{2}}, false)
+
 	received = <-first.events
 	if received.sequence != 2 || received.values[0] != 2 {
 		t.Fatalf("unexpected second event: %#v", received)
 	}
+
 	received.values[0] = 9
 
 	latest, err := stream.subscribe()
@@ -64,6 +68,7 @@ func TestEventStreamPublishesMonotonicEventsAndReplaysLatest(t *testing.T) {
 
 func TestEventStreamUnsubscribeIsIdempotentAndReleasesCapacity(t *testing.T) {
 	stream := newStreamTestEventStream(1)
+
 	subscription, err := stream.subscribe()
 	if err != nil {
 		t.Fatal(err)
@@ -75,9 +80,11 @@ func TestEventStreamUnsubscribeIsIdempotentAndReleasesCapacity(t *testing.T) {
 
 	subscription.cancel()
 	subscription.cancel()
+
 	if _, open := <-subscription.events; open {
 		t.Fatal("events channel remained open after unsubscribe")
 	}
+
 	if _, open := <-subscription.errors; open {
 		t.Fatal("errors channel remained open after unsubscribe")
 	}
@@ -86,11 +93,13 @@ func TestEventStreamUnsubscribeIsIdempotentAndReleasesCapacity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unsubscribe did not release capacity: %v", err)
 	}
+
 	next.cancel()
 }
 
 func TestEventStreamEvictsLaggingWatcherAndRetainsSlotUntilCancel(t *testing.T) {
 	stream := newStreamTestEventStream(1)
+
 	subscription, err := stream.subscribe()
 	if err != nil {
 		t.Fatal(err)
@@ -103,10 +112,12 @@ func TestEventStreamEvictsLaggingWatcherAndRetainsSlotUntilCancel(t *testing.T) 
 	if err := <-subscription.errors; !errors.Is(err, ErrWatcherLagged) {
 		t.Fatalf("unexpected lag error: %v", err)
 	}
+
 	count := 0
 	for range subscription.events {
 		count++
 	}
+
 	if count != watcherBufferSize {
 		t.Fatalf("lagging watcher retained %d buffered events, want %d", count, watcherBufferSize)
 	}
@@ -116,31 +127,38 @@ func TestEventStreamEvictsLaggingWatcherAndRetainsSlotUntilCancel(t *testing.T) 
 	}
 
 	subscription.cancel()
+
 	next, err := stream.subscribe()
 	if err != nil {
 		t.Fatalf("cancel did not release lagged subscription capacity: %v", err)
 	}
+
 	if next.current.sequence != watcherBufferSize+1 {
 		t.Fatalf("unexpected latest sequence after lag: %d", next.current.sequence)
 	}
+
 	next.cancel()
 }
 
 func TestEventStreamTerminalPublishAndClose(t *testing.T) {
 	stream := newStreamTestEventStream(2)
+
 	subscription, err := stream.subscribe()
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	stream.publish(streamTestEvent{values: []int{1}}, true)
+
 	event := <-subscription.events
 	if event.sequence != 1 || event.values[0] != 1 {
 		t.Fatalf("unexpected terminal event: %#v", event)
 	}
+
 	if _, open := <-subscription.events; open {
 		t.Fatal("terminal event did not close the events channel")
 	}
+
 	if _, open := <-subscription.errors; open {
 		t.Fatal("terminal event did not close the errors channel")
 	}
@@ -149,15 +167,19 @@ func TestEventStreamTerminalPublishAndClose(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if late.current.sequence != 1 || late.current.values[0] != 1 {
 		t.Fatalf("late subscription did not receive the terminal event: %#v", late.current)
 	}
+
 	if _, open := <-late.events; open {
 		t.Fatal("late terminal subscription received an open events channel")
 	}
+
 	if _, open := <-late.errors; open {
 		t.Fatal("late terminal subscription received an open errors channel")
 	}
+
 	if _, err := stream.subscribe(); !errors.Is(err, errEventStreamLimit) {
 		t.Fatalf("terminal subscriptions released capacity before cancel: %v", err)
 	}
@@ -167,27 +189,34 @@ func TestEventStreamTerminalPublishAndClose(t *testing.T) {
 	subscription.cancel()
 
 	closed := newStreamTestEventStream(1)
+
 	active, err := closed.subscribe()
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	closed.close()
 	closed.close()
+
 	if _, open := <-active.events; open {
 		t.Fatal("explicit close left an active events channel open")
 	}
+
 	if _, err := closed.subscribe(); !errors.Is(err, errEventStreamLimit) {
 		t.Fatalf("explicit close released capacity before cancel: %v", err)
 	}
+
 	active.cancel()
 
 	lateClosed, err := closed.subscribe()
 	if err != nil {
 		t.Fatalf("cancel did not release explicitly closed capacity: %v", err)
 	}
+
 	if _, open := <-lateClosed.events; open {
 		t.Fatal("late explicitly closed subscription received an open events channel")
 	}
+
 	lateClosed.cancel()
 }
 
@@ -207,6 +236,7 @@ func TestEventStreamSupportsConcurrentPublishSubscribeAndCancel(t *testing.T) {
 
 		go func() {
 			defer wait.Done()
+
 			subscription, err := stream.subscribe()
 			if err != nil {
 				subscriptionErrors <- err
@@ -237,6 +267,7 @@ func TestEventStreamSupportsConcurrentPublishSubscribeAndCancel(t *testing.T) {
 
 func TestResourceWatchersRetainTheirLimitErrors(t *testing.T) {
 	execution := &Execution{events: newEventStream(1, cloneExecutionEvent, sequenceExecutionEvent)}
+
 	executionSubscription, err := execution.Watch()
 	if err != nil {
 		t.Fatal(err)
@@ -248,6 +279,7 @@ func TestResourceWatchersRetainTheirLimitErrors(t *testing.T) {
 	}
 
 	session := &DebugSession{events: newEventStream(1, cloneDebugEvent, sequenceDebugEvent)}
+
 	debugSubscription, err := session.Watch()
 	if err != nil {
 		t.Fatal(err)

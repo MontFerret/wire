@@ -87,6 +87,7 @@ func TestRuntimeAllocationNormalCloseReleasesOnce(t *testing.T) {
 	for _, operation := range allocationOperations() {
 		t.Run(operation.name, func(t *testing.T) {
 			f := newRuntimeAllocationFixture(t, operation)
+
 			closeHandle, err := f.allocate(harness.Context(t), nil)
 			if err != nil {
 				t.Fatal(err)

@@ -3,8 +3,10 @@ package core
 import "github.com/MontFerret/wire/pkg/failure"
 
 type (
+	// ErrorKind distinguishes lifecycle, input, capacity, and hosted-runtime failures.
 	ErrorKind uint8
 
+	// DomainError carries a classified failure and its private cause for transport mapping.
 	DomainError struct {
 		Kind       ErrorKind
 		ResourceID string
@@ -13,6 +15,7 @@ type (
 	}
 )
 
+// Domain error kinds distinguish Wire conditions before transport-specific mapping.
 const (
 	ErrorKindInvalidRequest ErrorKind = iota + 1
 	ErrorKindCompilation

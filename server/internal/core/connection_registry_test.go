@@ -18,6 +18,7 @@ func TestConnectionCapacityIsRetainedThroughCleanupAndShutdownRejectsAdmission(t
 		return nil
 	}}
 	registry := NewConnectionRegistry(1, testLimits().resources())
+
 	connection, err := registry.Open()
 	if err != nil {
 		t.Fatal(err)

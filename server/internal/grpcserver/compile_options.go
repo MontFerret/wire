@@ -8,6 +8,7 @@ import (
 
 func optimizationLevel(options *wirev1.CompileOptions) (api.OptimizationLevel, bool, error) {
 	value := wirev1.OptimizationLevel_OPTIMIZATION_LEVEL_UNSPECIFIED
+
 	if options != nil {
 		value = options.GetOptimizationLevel()
 	}

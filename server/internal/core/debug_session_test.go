@@ -19,6 +19,7 @@ import (
 func TestDebugSessionRejectsInvalidCommandWithoutRuntimeOrEvent(t *testing.T) {
 	runtime := &boundaryDebugger{}
 	session := newTestCoreDebugSession(t, runtime, 1)
+
 	subscription, err := session.Watch()
 	if err != nil {
 		t.Fatal(err)
@@ -52,19 +53,23 @@ func TestDebugSessionPublishesAndReplaysCreatedAndRunningSnapshots(t *testing.T)
 		return &debugger.Event{Reason: debugger.ReasonEntry}, nil
 	}}
 	session := newTestCoreDebugSession(t, runtime, 1)
+
 	created, err := session.Watch()
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if created.Current.Sequence != 1 || created.Current.Kind != wiredebugger.EventCreated ||
 		created.Current.Snapshot.State != wiredebugger.StateCreated {
 		t.Fatalf("unexpected created snapshot: %#v", created.Current)
 	}
+
 	created.Cancel()
 
 	if _, err := session.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
+
 	<-entered
 
 	running, err := session.Watch()
@@ -72,12 +77,14 @@ func TestDebugSessionPublishesAndReplaysCreatedAndRunningSnapshots(t *testing.T)
 		t.Fatal(err)
 	}
 	defer running.Cancel()
+
 	if running.Current.Sequence != 2 || running.Current.Kind != wiredebugger.EventStarted ||
 		running.Current.Snapshot.State != wiredebugger.StateRunning {
 		t.Fatalf("unexpected running replay: %#v", running.Current)
 	}
 
 	close(release)
+
 	stopped := receiveDebugEvent(t, running.Events)
 	if stopped.Sequence != 3 || stopped.Kind != wiredebugger.EventStopped || stopped.Snapshot.State != wiredebugger.StateStopped {
 		t.Fatalf("unexpected stopped event: %#v", stopped)
@@ -104,6 +111,7 @@ func TestDebugWatchDisconnectDoesNotCancelSession(t *testing.T) {
 		}
 	}}
 	session := newTestCoreDebugSession(t, runtime, 1)
+
 	subscription, err := session.Watch()
 	if err != nil {
 		t.Fatal(err)
@@ -112,6 +120,7 @@ func TestDebugWatchDisconnectDoesNotCancelSession(t *testing.T) {
 	if _, err := session.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
+
 	<-entered
 	_ = receiveDebugEvent(t, subscription.Events)
 	subscription.Cancel()
@@ -121,14 +130,17 @@ func TestDebugWatchDisconnectDoesNotCancelSession(t *testing.T) {
 		t.Fatalf("watch disconnect settled runtime command; cancelled=%v", wasCancelled)
 	case <-time.After(25 * time.Millisecond):
 	}
+
 	if snapshot := session.Snapshot(); snapshot.State != wiredebugger.StateRunning {
 		t.Fatalf("watch disconnect changed debug state: %#v", snapshot)
 	}
 
 	close(release)
+
 	if wasCancelled := <-cancelled; wasCancelled {
 		t.Fatal("watch disconnect cancelled the debug operation")
 	}
+
 	_ = waitCoreDebugState(t, session, wiredebugger.StateStopped)
 	closeTestCoreDebugSession(t, session)
 }
@@ -147,12 +159,15 @@ func TestDebugValueReferenceValidationUsesCurrentStoppedState(t *testing.T) {
 	if _, err := session.Variables(context.Background(), 0); !hasCategory(err, ErrorKindInvalidRequest) {
 		t.Fatalf("zero reference did not fail as invalid argument: %v", err)
 	}
+
 	if calls.Load() != 0 {
 		t.Fatal("zero reference reached the runtime")
 	}
+
 	if _, err := session.Variables(context.Background(), 17); !hasCategory(err, ErrorKindInvalidState) || !errors.Is(err, runtimeErr) {
 		t.Fatalf("stale positive reference did not use InvalidState: %v", err)
 	}
+
 	if calls.Load() != 1 {
 		t.Fatalf("positive reference reached the runtime %d times", calls.Load())
 	}
@@ -177,6 +192,7 @@ func TestDebugSessionRuntimeErrorPreservesPortableDiagnostics(t *testing.T) {
 		return &debugger.Event{Reason: debugger.ReasonRuntimeError, Error: errors.Join(errors.New("secret"), values)}, nil
 	}}
 	session := newTestCoreDebugSession(t, runtime, 1)
+
 	subscription, err := session.Watch()
 	if err != nil {
 		t.Fatal(err)
@@ -186,7 +202,9 @@ func TestDebugSessionRuntimeErrorPreservesPortableDiagnostics(t *testing.T) {
 	if _, err := session.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
+
 	_ = receiveDebugEvent(t, subscription.Events)
+
 	stopped := receiveDebugEvent(t, subscription.Events)
 	if stopped.Kind != wiredebugger.EventStopped || stopped.Snapshot.State != wiredebugger.StateStopped ||
 		stopped.Snapshot.Failure == nil || stopped.Snapshot.Failure.Message != "runtime operation failed" ||
@@ -212,6 +230,7 @@ func TestDebugSessionFailurePreservesPortableDiagnostics(t *testing.T) {
 		return &debugger.Event{Reason: debugger.ReasonTerminated, Error: values}, nil
 	}}
 	session := newTestCoreDebugSession(t, runtime, 1)
+
 	subscription, err := session.Watch()
 	if err != nil {
 		t.Fatal(err)
@@ -221,7 +240,9 @@ func TestDebugSessionFailurePreservesPortableDiagnostics(t *testing.T) {
 	if _, err := session.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
+
 	_ = receiveDebugEvent(t, subscription.Events)
+
 	failed := receiveDebugEvent(t, subscription.Events)
 	if failed.Kind != wiredebugger.EventFailed || failed.Snapshot.State != wiredebugger.StateFailed ||
 		failed.Snapshot.Failure == nil || !reflect.DeepEqual(failed.Snapshot.Failure.Diagnostics, values) {
@@ -237,6 +258,7 @@ func TestDebugSessionRuntimeFailurePublishesOrderedTerminalState(t *testing.T) {
 		return nil, runtimeErr
 	}}
 	session := newTestCoreDebugSession(t, runtime, 1)
+
 	subscription, err := session.Watch()
 	if err != nil {
 		t.Fatal(err)
@@ -249,6 +271,7 @@ func TestDebugSessionRuntimeFailurePublishesOrderedTerminalState(t *testing.T) {
 	}
 
 	started := receiveDebugEvent(t, subscription.Events)
+
 	failed := receiveDebugEvent(t, subscription.Events)
 	if started.Kind != wiredebugger.EventStarted || started.Snapshot.State != wiredebugger.StateRunning ||
 		failed.Kind != wiredebugger.EventFailed || failed.Snapshot.State != wiredebugger.StateFailed {
@@ -266,6 +289,7 @@ func TestDebugSessionPauseFailurePreservesRunningStateWithoutEvent(t *testing.T)
 	runtime := &spyDebugger{pause: func() error { return pauseErr }}
 	session := newTestCoreDebugSession(t, runtime, 1)
 	session.state.status = wiredebugger.StateRunning
+
 	subscription, err := session.Watch()
 	if err != nil {
 		t.Fatal(err)
@@ -292,6 +316,7 @@ func TestDebugSessionPauseFailurePreservesRunningStateWithoutEvent(t *testing.T)
 func TestDebugSessionCommandPanicPublishesFailureAndClosesRuntime(t *testing.T) {
 	runtime := &boundaryDebugger{panicOn: "start"}
 	session := newTestCoreDebugSession(t, runtime, 1)
+
 	subscription, err := session.Watch()
 	if err != nil {
 		t.Fatal(err)
@@ -304,6 +329,7 @@ func TestDebugSessionCommandPanicPublishesFailureAndClosesRuntime(t *testing.T) 
 	}
 
 	started := receiveDebugEvent(t, subscription.Events)
+
 	failed := receiveDebugEvent(t, subscription.Events)
 	if started.Kind != wiredebugger.EventStarted || failed.Kind != wiredebugger.EventFailed || failed.Snapshot.State != wiredebugger.StateFailed {
 		t.Fatalf("unexpected panic event order: %#v then %#v", started, failed)
@@ -315,6 +341,7 @@ func TestDebugSessionCommandPanicPublishesFailureAndClosesRuntime(t *testing.T) 
 	}
 
 	waitDebuggerCalls(t, runtime, []string{"start", "close"})
+
 	if _, err := session.Continue(context.Background()); !hasCategory(err, ErrorKindInvalidState) {
 		t.Fatalf("poisoned session accepted another command: %v", err)
 	}
@@ -371,6 +398,7 @@ func TestDebugSessionSynchronousPanicPoisonsAndClosesRuntime(t *testing.T) {
 			runtime := &boundaryDebugger{panicOn: test.panicOn}
 			session := newTestCoreDebugSession(t, runtime, 1)
 			session.state.status = test.state
+
 			subscription, err := session.Watch()
 			if err != nil {
 				t.Fatal(err)
@@ -394,6 +422,7 @@ func TestDebugSessionSynchronousPanicPoisonsAndClosesRuntime(t *testing.T) {
 			}
 
 			waitDebuggerCalls(t, runtime, []string{test.panicOn, "close"})
+
 			if err := test.call(session); !hasCategory(err, ErrorKindInvalidState) {
 				t.Fatalf("poisoned session accepted another operation: %v", err)
 			}
@@ -486,6 +515,7 @@ func TestDebugSessionPauseCanInterruptRunningCommand(t *testing.T) {
 		},
 	}
 	session := newTestCoreDebugSession(t, runtime, 1)
+
 	subscription, err := session.Watch()
 	if err != nil {
 		t.Fatal(err)
@@ -495,12 +525,14 @@ func TestDebugSessionPauseCanInterruptRunningCommand(t *testing.T) {
 	if _, err := session.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
+
 	<-started
 
 	pauseSnapshot, err := session.Pause(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if pauseSnapshot.State != wiredebugger.StateRunning {
 		t.Fatalf("pause response observed command completion early: %#v", pauseSnapshot)
 	}
@@ -569,12 +601,15 @@ func TestDebugSessionCloseReachesRuntimeDuringBlockedStoppedOperation(t *testing
 	}
 
 	close(releaseOperation)
+
 	if err := <-operationResult; err != nil {
 		t.Fatal(err)
 	}
+
 	if err := <-closeResult; err != nil {
 		t.Fatal(err)
 	}
+
 	if snapshot := session.Snapshot(); snapshot.State != wiredebugger.StateTerminated {
 		t.Fatalf("close did not commit terminal state: %#v", snapshot)
 	}

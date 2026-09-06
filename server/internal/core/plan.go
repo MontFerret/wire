@@ -11,6 +11,7 @@ import (
 	"github.com/MontFerret/wire/server/internal/panicboundary"
 )
 
+// Plan owns a compiled hosted plan and the sessions and executions created from it.
 type Plan struct {
 	id         PlanID
 	store      *ResourceStore
@@ -25,14 +26,17 @@ type Plan struct {
 	release       lifecycle.Close
 }
 
+// ID identifies this compiled plan within its logical connection.
 func (p *Plan) ID() PlanID {
 	return p.id
 }
 
+// Params returns a copy of the compiled plan's parameter names.
 func (p *Plan) Params() []string {
 	return append([]string(nil), p.parameters...)
 }
 
+// NewSession creates and registers a durable hosted session owned by this plan.
 func (p *Plan) NewSession(ctx context.Context, options ...api.SessionOption) (*Session, error) {
 	if err := p.store.operationError(ctx); err != nil {
 		return nil, err
@@ -50,6 +54,7 @@ func (p *Plan) NewSession(ctx context.Context, options ...api.SessionOption) (*S
 	})
 	if err != nil {
 		var closeErr error
+
 		if !isNil(hosted) {
 			closeErr = closeAPISession(hosted)
 		}
@@ -77,6 +82,7 @@ func (p *Plan) NewSession(ctx context.Context, options ...api.SessionOption) (*S
 	return created, nil
 }
 
+// Execute registers an asynchronous run using a temporary hosted session.
 func (p *Plan) Execute(ctx context.Context, options ...api.SessionOption) (*Execution, error) {
 	if err := p.store.operationError(ctx); err != nil {
 		return nil, err
@@ -102,6 +108,7 @@ func (p *Plan) Execute(ctx context.Context, options ...api.SessionOption) (*Exec
 	return created, nil
 }
 
+// NewDebugSession creates and registers a hosted debugger for a debuggable plan.
 func (p *Plan) NewDebugSession(ctx context.Context, options ...api.SessionOption) (*DebugSession, error) {
 	if err := p.store.operationError(ctx); err != nil {
 		return nil, err
@@ -123,6 +130,7 @@ func (p *Plan) NewDebugSession(ctx context.Context, options ...api.SessionOption
 	})
 	if err != nil {
 		var closeErr error
+
 		if !isNil(hosted) {
 			closeErr = closeAPIDebugSession(hosted)
 		}
@@ -144,10 +152,13 @@ func (p *Plan) NewDebugSession(ctx context.Context, options ...api.SessionOption
 	return created, nil
 }
 
+// Release closes descendants before releasing the hosted plan and its registry entry.
+// Caller cancellation stops waiting without abandoning teardown.
 func (p *Plan) Release(ctx context.Context) error {
 	p.store.mu.Lock()
 	started := p.release.Begin()
 	p.store.mu.Unlock()
+
 	if started {
 		go p.settleRelease()
 	}

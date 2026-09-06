@@ -24,6 +24,7 @@ func (c *connectionHandle) compileConfigured(ctx context.Context, src api.Source
 	}
 
 	var value *wirev1.Plan
+
 	if debuggable {
 		response, err := c.planClient.CompileDebug(ctx, &wirev1.CompileDebugRequest{
 			ConnectionId: c.connectionProto(),

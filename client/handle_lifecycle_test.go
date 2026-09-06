@@ -7,9 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/MontFerret/api"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+
+	"github.com/MontFerret/api"
 )
 
 func TestHandleCloseContinuesAfterFirstCallerCancellation(t *testing.T) {
@@ -23,10 +24,12 @@ func TestHandleCloseContinuesAfterFirstCallerCancellation(t *testing.T) {
 	}
 	connection := startHandleServer(t, implementation)
 	client := openHandleClient(t, connection)
+
 	plan, err := client.compileConfigured(testClientContext(t), api.Source{Content: "RETURN 1"}, false, runtimePlanOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	execution, err := startTestPlanExecution(testClientContext(t), plan, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -43,9 +46,11 @@ func TestHandleCloseContinuesAfterFirstCallerCancellation(t *testing.T) {
 	}
 
 	cancelFirst()
+
 	if err := receiveCloseResult(t, first, "first execution close"); !errors.Is(err, context.Canceled) {
 		t.Fatalf("first close did not stop waiting after cancellation: %v", err)
 	}
+
 	if _, err := execution.Watch(testClientContext(t)); !errors.Is(err, ErrClosed) {
 		t.Fatalf("closed execution accepted a watch: %v", err)
 	}
@@ -55,10 +60,12 @@ func TestHandleCloseContinuesAfterFirstCallerCancellation(t *testing.T) {
 	go func() { second <- execution.Close(secondCtx) }()
 	unblock(allow)
 	want := receiveCloseResult(t, second, "later execution close")
+
 	var wireErr *Error
 	if !errors.As(want, &wireErr) || status.Code(want) != codes.Internal || wireErr.Message != "retained release failure" {
 		t.Fatalf("unexpected release result: %#v", want)
 	}
+
 	if err := execution.Close(testClientContext(t)); !errors.As(err, &wireErr) || err.Error() != want.Error() {
 		t.Fatalf("repeated close did not retain the first result: %#v", err)
 	}
@@ -66,6 +73,7 @@ func TestHandleCloseContinuesAfterFirstCallerCancellation(t *testing.T) {
 	implementation.mu.Lock()
 	releaseCalls := implementation.releaseExecutionCalls
 	implementation.mu.Unlock()
+
 	if releaseCalls != 1 {
 		t.Fatalf("close issued %d release RPCs", releaseCalls)
 	}
@@ -81,10 +89,12 @@ func TestConcurrentHandleCloseReleasesOnce(t *testing.T) {
 	}
 	connection := startHandleServer(t, implementation)
 	client := openHandleClient(t, connection)
+
 	plan, err := client.compileConfigured(testClientContext(t), api.Source{Content: "RETURN 1"}, false, runtimePlanOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	execution, err := startTestPlanExecution(testClientContext(t), plan, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -107,12 +117,14 @@ func TestConcurrentHandleCloseReleasesOnce(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("execution close did not reach the server")
 	}
+
 	unblock(allow)
 	for range callers {
 		if err := receiveCloseResult(t, results, "concurrent execution close"); err != nil {
 			t.Fatalf("concurrent close changed the retained success: %v", err)
 		}
 	}
+
 	if err := execution.Close(testClientContext(t)); err != nil {
 		t.Fatalf("repeated close changed the retained success: %v", err)
 	}
@@ -120,6 +132,7 @@ func TestConcurrentHandleCloseReleasesOnce(t *testing.T) {
 	implementation.mu.Lock()
 	releaseCalls := implementation.releaseExecutionCalls
 	implementation.mu.Unlock()
+
 	if releaseCalls != 1 {
 		t.Fatalf("concurrent close issued %d release RPCs", releaseCalls)
 	}
@@ -136,14 +149,17 @@ func TestDescendantCloseDuringAncestorCloseObservesRetainedResult(t *testing.T) 
 	}
 	connection := startHandleServer(t, implementation)
 	client := openHandleClient(t, connection)
+
 	plan, err := client.compileConfigured(testClientContext(t), api.Source{Content: "RETURN 1"}, true, runtimePlanOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	execution, err := startTestPlanExecution(testClientContext(t), plan, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	debug, err := plan.NewDebugSession(testClientContext(t), runtimeSessionOptions{})
 	if err != nil {
 		t.Fatal(err)
@@ -175,15 +191,18 @@ func TestDescendantCloseDuringAncestorCloseObservesRetainedResult(t *testing.T) 
 
 	unblock(allow)
 	want := receiveCloseResult(t, planResult, "plan close")
+
 	var wireErr *Error
 	if !errors.As(want, &wireErr) || status.Code(want) != codes.Internal || wireErr.Message != "retained ancestor failure" {
 		t.Fatalf("unexpected ancestor release result: %#v", want)
 	}
+
 	for name, result := range map[string]<-chan error{
 		"execution close":     executionResult,
 		"debug session close": debugResult,
 	} {
 		err := receiveCloseResult(t, result, name)
+
 		var descendantErr *Error
 		if !errors.As(err, &descendantErr) || status.Code(err) != status.Code(want) || descendantErr.Message != wireErr.Message {
 			t.Fatalf("%s did not observe the retained ancestor result: %#v", name, err)
@@ -194,6 +213,7 @@ func TestDescendantCloseDuringAncestorCloseObservesRetainedResult(t *testing.T) 
 	implementation.mu.Lock()
 	planReleaseCalls := implementation.releasePlanCalls
 	implementation.mu.Unlock()
+
 	if planReleaseCalls != 1 ||
 		countCall(calls, call("release-execution", "connection-1", "execution-1")) != 0 ||
 		countCall(calls, call("release-debug", "connection-1", "debug-connection-1")) != 0 {
@@ -205,14 +225,17 @@ func TestDescendantCloseAfterAncestorCloseObservesRetainedResult(t *testing.T) {
 	implementation := &handleServer{}
 	connection := startHandleServer(t, implementation)
 	client := openHandleClient(t, connection)
+
 	plan, err := client.compileConfigured(testClientContext(t), api.Source{Content: "RETURN 1"}, true, runtimePlanOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	execution, err := startTestPlanExecution(testClientContext(t), plan, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	debug, err := plan.NewDebugSession(testClientContext(t), runtimeSessionOptions{})
 	if err != nil {
 		t.Fatal(err)
@@ -221,15 +244,19 @@ func TestDescendantCloseAfterAncestorCloseObservesRetainedResult(t *testing.T) {
 	if err := plan.Close(testClientContext(t)); err != nil {
 		t.Fatal(err)
 	}
+
 	if _, err := execution.Watch(testClientContext(t)); !errors.Is(err, ErrClosed) {
 		t.Fatalf("execution survived plan close: %v", err)
 	}
+
 	if err := debug.Start(testClientContext(t)); !errors.Is(err, ErrClosed) {
 		t.Fatalf("debug session survived plan close: %v", err)
 	}
+
 	if err := execution.Close(testClientContext(t)); err != nil {
 		t.Fatalf("execution did not observe ancestor close: %v", err)
 	}
+
 	if err := debug.Close(testClientContext(t)); err != nil {
 		t.Fatalf("debug session did not observe ancestor close: %v", err)
 	}
@@ -238,6 +265,7 @@ func TestDescendantCloseAfterAncestorCloseObservesRetainedResult(t *testing.T) {
 	implementation.mu.Lock()
 	planReleaseCalls := implementation.releasePlanCalls
 	implementation.mu.Unlock()
+
 	if planReleaseCalls != 1 ||
 		countCall(calls, call("release-execution", "connection-1", "execution-1")) != 0 ||
 		countCall(calls, call("release-debug", "connection-1", "debug-connection-1")) != 0 {
@@ -250,6 +278,7 @@ func TestZeroValueHandlesAreClosed(t *testing.T) {
 	if _, err := plan.newSession(testClientContext(t), runtimeSessionOptions{}); !errors.Is(err, ErrClosed) {
 		t.Fatalf("zero plan accepted session creation: %v", err)
 	}
+
 	if err := plan.Close(testClientContext(t)); !errors.Is(err, ErrClosed) {
 		t.Fatalf("zero plan close was not closed: %v", err)
 	}
@@ -258,6 +287,7 @@ func TestZeroValueHandlesAreClosed(t *testing.T) {
 	if _, err := execution.Watch(testClientContext(t)); !errors.Is(err, ErrClosed) {
 		t.Fatalf("zero execution accepted a watch: %v", err)
 	}
+
 	if err := execution.Close(testClientContext(t)); !errors.Is(err, ErrClosed) {
 		t.Fatalf("zero execution close was not closed: %v", err)
 	}
@@ -266,6 +296,7 @@ func TestZeroValueHandlesAreClosed(t *testing.T) {
 	if err := debug.Start(testClientContext(t)); !errors.Is(err, ErrClosed) {
 		t.Fatalf("zero debug session accepted start: %v", err)
 	}
+
 	if err := debug.Close(testClientContext(t)); !errors.Is(err, ErrClosed) {
 		t.Fatalf("zero debug close was not closed: %v", err)
 	}

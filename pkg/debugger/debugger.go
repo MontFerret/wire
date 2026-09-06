@@ -34,6 +34,7 @@ type (
 	}
 )
 
+// Debug states distinguish an unstarted session, active commands, stops, and terminal outcomes.
 const (
 	StateCreated State = iota + 1
 	StateRunning
@@ -43,6 +44,7 @@ const (
 	StateTerminated
 )
 
+// Debug event kinds preserve creation, initial start, resume, stop, and terminal transitions.
 const (
 	EventStarted EventKind = iota + 1
 	EventContinued

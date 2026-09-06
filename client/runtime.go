@@ -4,8 +4,9 @@ import (
 	"context"
 	"errors"
 
-	"github.com/MontFerret/api"
 	"google.golang.org/grpc"
+
+	"github.com/MontFerret/api"
 )
 
 // remoteRuntime is a remote implementation of the Universal Ferret API. It owns
@@ -53,6 +54,7 @@ func (r *remoteRuntime) Run(ctx context.Context, src api.Source, options ...api.
 
 	execution, err := r.client.run(creationCtx, src, configured)
 	cancel()
+
 	if err != nil {
 		return api.Output{}, r.client.reclaimAllocation(ctx, err)
 	}
@@ -96,6 +98,7 @@ func (r *remoteRuntime) compile(
 
 	plan, err := r.client.compileConfigured(creationCtx, src, debuggable, configured)
 	cancel()
+
 	if err != nil {
 		return nil, r.client.reclaimAllocation(ctx, err)
 	}

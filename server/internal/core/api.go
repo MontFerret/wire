@@ -1,3 +1,4 @@
+// Package core owns Wire's logical resource lifetimes and protocol-neutral operations.
 package core
 
 import (

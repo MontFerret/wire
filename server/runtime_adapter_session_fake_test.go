@@ -20,6 +20,7 @@ func (s *contractSession) Run(ctx context.Context) (api.Output, error) {
 	call := s.runCalls
 	run := s.run
 	s.mu.Unlock()
+
 	if run == nil {
 		return api.Output{}, nil
 	}

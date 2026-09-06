@@ -250,6 +250,7 @@ Canonical repository validation is:
 ```sh
 make fmt
 make check-fmt
+make lint
 make generate
 make check-generate
 make proto-lint
@@ -260,6 +261,16 @@ make test
 make test-race
 make build
 ```
+
+`make fmt`, `make check-fmt`, and `make lint` automatically install the pinned
+golangci-lint binary when absent; `make install-lint` is optional. First use needs
+download access, curl, and a POSIX shell. Lint covers handwritten code and tests,
+including exported declaration comments, error handling, and the type and
+spacing rules above. Formatting uses gofmt and goimports; generated and vendor
+code are excluded. Keep suppressions specific, explained, and effective, and
+preserve intentional error and panic identities. See the
+[development instructions](README.md#development) for the rule list and
+suppression guidance.
 
 Use the relevant subset for narrow iteration, then broaden according to risk.
 `make generate` is required when generator inputs change.
@@ -325,8 +336,8 @@ Do not use self-review to justify speculative redesign or unrelated cleanup.
 ## CI and documentation synchronization
 
 CI uses the Makefile's canonical targets on Linux, macOS, and Windows. Linux
-also runs race detection, protobuf linting, generation consistency checks, and
-pull-request Buf breaking checks against the fetched base branch. Keep CI
+also runs Go lint, race detection, protobuf linting, generation consistency checks,
+and pull-request Buf breaking checks against the fetched base branch. Keep CI
 orchestration in the workflow and command composition in the Makefile.
 
 Documentation is part of implementation. Keep detailed architecture, protocol

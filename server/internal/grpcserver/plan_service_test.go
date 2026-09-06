@@ -34,13 +34,13 @@ func TestOptimizationLevelMapsPortableValuesAndPreservesRuntimeDefault(t *testin
 			if got != test.want || present != test.present {
 				t.Fatalf("optimization = (%v, %v), want (%v, %v)", got, present, test.want, test.present)
 			}
-
 		})
 	}
 }
 
 func TestOptimizationLevelRejectsUnknownValue(t *testing.T) {
 	_, _, err := optimizationLevel(compileOptions(wirev1.OptimizationLevel(99)))
+
 	var domain *core.DomainError
 	if !errors.As(err, &domain) || domain.Kind != core.ErrorKindInvalidRequest {
 		t.Fatalf("unexpected invalid optimization result: %v", err)

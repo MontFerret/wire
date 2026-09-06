@@ -48,6 +48,7 @@ func TestFailureCategoriesAreDistinctAndNonZero(t *testing.T) {
 		if category == 0 {
 			t.Fatal("a transmitted failure category used the zero value")
 		}
+
 		if _, exists := seen[category]; exists {
 			t.Fatalf("duplicate failure category value %d", category)
 		}

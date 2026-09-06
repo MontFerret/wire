@@ -27,7 +27,7 @@ func TestCallReturnsNormalErrorUnchanged(t *testing.T) {
 		t.Fatalf("value = %d, want zero", value)
 	}
 
-	if err != sentinel {
+	if err != sentinel { //nolint:errorlint // Verify exact preservation of returned errors and recovered panic values.
 		t.Fatalf("error identity was not retained: %v", err)
 	}
 }
@@ -60,6 +60,7 @@ func TestCallConvertsPanicToTypedError(t *testing.T) {
 	}
 
 	wrapped := fmt.Errorf("call runtime: %w", err)
+
 	var wrappedPanicErr *Error
 	if !errors.As(wrapped, &wrappedPanicErr) || wrappedPanicErr != panicErr {
 		t.Fatalf("wrapped panic error was not discoverable: %v", wrapped)
@@ -73,7 +74,7 @@ func TestDoReturnsNormalErrorUnchanged(t *testing.T) {
 		t.Fatalf("normal success returned error: %v", err)
 	}
 
-	if err := Do(func() error { return sentinel }); err != sentinel {
+	if err := Do(func() error { return sentinel }); err != sentinel { //nolint:errorlint // Verify exact preservation of returned errors and recovered panic values.
 		t.Fatalf("error identity was not retained: %v", err)
 	}
 }
@@ -88,7 +89,7 @@ func TestDoDoesNotUnwrapErrorValuedPanic(t *testing.T) {
 		t.Fatalf("panic did not produce *Error: %T", err)
 	}
 
-	if panicErr.Value != context.Canceled {
+	if panicErr.Value != context.Canceled { //nolint:errorlint // Verify exact preservation of returned errors and recovered panic values.
 		t.Fatalf("panic value = %#v, want context.Canceled", panicErr.Value)
 	}
 

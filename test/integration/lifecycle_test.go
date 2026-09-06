@@ -42,6 +42,7 @@ func TestRecursiveCloseReclaimsActiveDescendants(t *testing.T) {
 					}},
 				},
 			}))
+
 			other, err := h.OpenRuntime()
 			if err != nil {
 				t.Fatal(err)
@@ -107,9 +108,10 @@ func TestRecursiveCloseReclaimsActiveDescendants(t *testing.T) {
 
 			closeOwner := session.Close
 
-			if owner == "plan" {
+			switch owner {
+			case "plan":
 				closeOwner = plan.Close
-			} else if owner == "runtime" {
+			case "runtime":
 				closeOwner = h.Runtime().Close
 			}
 
@@ -190,6 +192,7 @@ func TestConcurrentSiblingSessionsRemainIndependent(t *testing.T) {
 			return api.Output{ContentType: "text/plain", Content: []byte(fmt.Sprint(index))}, blocks[index].Wait(ctx)
 		}}
 	}}}))
+
 	plan, err := h.Runtime().Compile(h.Context(), api.Source{Content: "RETURN @index"})
 	if err != nil {
 		t.Fatal(err)
@@ -233,6 +236,7 @@ func TestConcurrentSiblingSessionsRemainIndependent(t *testing.T) {
 
 	harness.Await(t, blocks[0].Cancelled)
 	blocks[1].Release()
+
 	second := harness.Await(t, results[1])
 	if second.err != nil || string(second.output.Content) != "1" {
 		t.Fatalf("unrelated active sibling affected: %+v", second)
@@ -260,6 +264,7 @@ func TestConcurrentPlanSessionCreation(t *testing.T) {
 			return nil
 		}
 	}}}))
+
 	plan, err := h.Runtime().Compile(h.Context(), api.Source{Content: "RETURN 1"})
 	if err != nil {
 		t.Fatal(err)

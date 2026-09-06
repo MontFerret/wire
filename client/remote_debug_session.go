@@ -180,6 +180,7 @@ func (d *remoteDebugSession) Breakpoints() []debugger.Breakpoint {
 	for _, breakpoint := range d.breakpoints {
 		result = append(result, breakpoint)
 	}
+
 	d.breakpointMu.Unlock()
 
 	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })

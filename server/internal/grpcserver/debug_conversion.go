@@ -19,6 +19,7 @@ func debugSession(id core.DebugSessionID, value wiredebugger.Snapshot) (*wirev1.
 	}
 
 	var location *wirev1.Range
+
 	if value.Location != nil {
 		location, err = sourceRange(*value.Location)
 		if err != nil {
@@ -204,6 +205,7 @@ func breakpointBindingMode(value debugger.BreakpointBindingMode) (wirev1.Breakpo
 
 func breakpointOptions(value *wirev1.BreakpointOptions) (debugger.BreakpointOptions, error) {
 	mode := wirev1.BreakpointBindingMode_BREAKPOINT_BINDING_MODE_UNSPECIFIED
+
 	if value != nil {
 		mode = value.GetBindingMode()
 	}

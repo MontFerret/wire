@@ -5,14 +5,16 @@ import (
 	"errors"
 	"sync"
 
+	"github.com/google/uuid"
+
 	"github.com/MontFerret/api"
 	wireexecution "github.com/MontFerret/wire/pkg/execution"
 	"github.com/MontFerret/wire/pkg/failure"
 	"github.com/MontFerret/wire/server/internal/lifecycle"
 	"github.com/MontFerret/wire/server/internal/panicboundary"
-	"github.com/google/uuid"
 )
 
+// Execution owns one asynchronous run and retains its terminal result until release.
 type Execution struct {
 	mu        sync.Mutex
 	id        ExecutionID
@@ -33,6 +35,7 @@ type Execution struct {
 
 func newExecution(store *ResourceStore, plan *Plan, session *Session, operation func(context.Context) (api.Output, error), options []api.SessionOption) *Execution {
 	lifetime := store.ctx
+
 	if session != nil {
 		lifetime = session.ctx
 	}
@@ -56,10 +59,13 @@ func newExecution(store *ResourceStore, plan *Plan, session *Session, operation 
 	return execution
 }
 
+// Release cancels and joins the run, closes its event stream, and removes its handle.
+// Caller cancellation stops waiting without abandoning teardown.
 func (e *Execution) Release(ctx context.Context) error {
 	e.store.mu.Lock()
 	started := e.release.Begin()
 	e.store.mu.Unlock()
+
 	if started {
 		go e.settleRelease()
 	}
@@ -119,12 +125,14 @@ func (e *Execution) run() {
 		ContentType: output.ContentType,
 		Content:     append([]byte(nil), output.Content...),
 	}
+
 	var panicErr *panicboundary.Error
 	if errors.As(runErr, &panicErr) {
 		result = nil
 	}
 
 	category := failure.CategoryInternalRuntime
+
 	if runErr != nil && panicErr == nil {
 		category = failure.CategoryExecution
 	}
@@ -172,16 +180,19 @@ func (e *Execution) finish(output *api.Output, err error, category failure.Categ
 	}
 }
 
+// Cancel requests cancellation and returns the current snapshot without waiting for termination.
 func (e *Execution) Cancel() wireexecution.Snapshot {
 	e.cancel(context.Canceled)
 
 	return e.Snapshot()
 }
 
+// ID identifies this run within its logical connection.
 func (e *Execution) ID() ExecutionID {
 	return e.id
 }
 
+// Snapshot returns execution state with mutable output and diagnostics detached.
 func (e *Execution) Snapshot() wireexecution.Snapshot {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -189,6 +200,8 @@ func (e *Execution) Snapshot() wireexecution.Snapshot {
 	return e.snapshotLocked()
 }
 
+// Watch reserves a bounded subscription with the current snapshot.
+// The caller must cancel the subscription to release its watcher slot.
 func (e *Execution) Watch() (ExecutionSubscription, error) {
 	subscription, err := e.events.subscribe()
 	if err != nil {

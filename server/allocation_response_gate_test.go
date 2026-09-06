@@ -25,16 +25,6 @@ type allocationResponseGate struct {
 	methods          []string
 }
 
-func (g *allocationResponseGate) arm(method, outcome string) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-
-	g.method = method
-	g.outcome = outcome
-	g.committed = make(chan struct{})
-	g.deliver = make(chan struct{})
-}
-
 func (g *allocationResponseGate) Invoke(ctx context.Context, method string, request, response any, options ...grpc.CallOption) error {
 	g.mu.Lock()
 	g.calls[method]++
@@ -43,11 +33,13 @@ func (g *allocationResponseGate) Invoke(ctx context.Context, method string, requ
 	responseFailure := g.responseFailures[method]
 	matched := method == g.method
 	outcome, committed, deliver := g.outcome, g.committed, g.deliver
+
 	if matched {
 		g.method = ""
 	}
 
 	g.mu.Unlock()
+
 	if failure != nil {
 		return failure
 	}
@@ -93,29 +85,4 @@ func (g *allocationResponseGate) count(method string) int {
 	defer g.mu.Unlock()
 
 	return g.calls[method]
-}
-
-func (g *allocationResponseGate) fail(method string, err error) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-
-	g.failures[method] = err
-}
-
-func (g *allocationResponseGate) failResponse(method string, err error) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-
-	if g.responseFailures == nil {
-		g.responseFailures = make(map[string]error)
-	}
-
-	g.responseFailures[method] = err
-}
-
-func (g *allocationResponseGate) methodSequence() []string {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-
-	return append([]string(nil), g.methods...)
 }

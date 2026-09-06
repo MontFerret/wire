@@ -5,12 +5,13 @@ import (
 	"errors"
 	"testing"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	"github.com/MontFerret/api"
 	"github.com/MontFerret/api/debugger"
 	"github.com/MontFerret/wire/server"
 	"github.com/MontFerret/wire/test/integration/harness"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 func TestCancellationReachesHostedOperations(t *testing.T) {
@@ -110,6 +111,7 @@ func TestCancellationReachesHostedOperations(t *testing.T) {
 			go func() { result <- run() }()
 			harness.Await(t, block.Started)
 			cancel()
+
 			err := harness.Await(t, result)
 			if !errors.Is(err, context.Canceled) && status.Code(err) != codes.Canceled {
 				t.Fatalf("caller cancellation=%v", err)
@@ -181,6 +183,7 @@ func TestCompileCancellationPreservesDetachedAllocation(t *testing.T) {
 			}
 
 			snapshot := h.RuntimeSpy().Recorder().Snapshot()
+
 			plans := snapshot.OfKind("plan")
 			if len(plans) != 1 || snapshot.Count(plans[0].ID, "Close") != 1 || h.Faults().Count(harness.CloseRuntime) != 0 {
 				t.Fatalf("cancelled allocation was not reclaimed narrowly: %+v", snapshot)

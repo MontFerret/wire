@@ -1,3 +1,4 @@
+// Package lifecycle coordinates retained teardown results and independently cancellable waiters.
 package lifecycle
 
 import (
@@ -58,12 +59,14 @@ func (c *Close) Wait(ctx context.Context) error {
 	c.mu.Lock()
 	if !c.started {
 		c.mu.Unlock()
+
 		return nil
 	}
 
 	if c.done == nil {
 		err := c.err
 		c.mu.Unlock()
+
 		return err
 	}
 

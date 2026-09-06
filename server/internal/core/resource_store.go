@@ -63,6 +63,7 @@ func (r *ResourceStore) operationError(ctx context.Context) error {
 	r.mu.Lock()
 	err := r.checkOpen(nil)
 	r.mu.Unlock()
+
 	if err != nil {
 		return err
 	}
@@ -99,6 +100,7 @@ func (r *ResourceStore) beginCreation(kind resourceKind, plan *Plan) error {
 
 	r.pending[kind]++
 	r.creating.Add(1)
+
 	if plan != nil {
 		plan.creating.Add(1)
 	}
@@ -133,6 +135,7 @@ func (r *ResourceStore) checkOpen(plan *Plan) error {
 	return nil
 }
 
+// Plan resolves a live plan in this connection and rejects handles being released.
 func (r *ResourceStore) Plan(ctx context.Context, id PlanID) (*Plan, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -153,6 +156,7 @@ func (r *ResourceStore) Plan(ctx context.Context, id PlanID) (*Plan, error) {
 	return resource, nil
 }
 
+// ReleasePlan tears down a known plan and its descendants, joining any release in progress.
 func (r *ResourceStore) ReleasePlan(ctx context.Context, id PlanID) error {
 	if err := validateID(id, "plan ID"); err != nil {
 		return err
@@ -161,6 +165,7 @@ func (r *ResourceStore) ReleasePlan(ctx context.Context, id PlanID) error {
 	r.mu.Lock()
 	resource := r.plans[id]
 	r.mu.Unlock()
+
 	if resource == nil {
 		return notFound(ErrorKindPlanNotFound, string(id))
 	}
@@ -168,6 +173,7 @@ func (r *ResourceStore) ReleasePlan(ctx context.Context, id PlanID) error {
 	return resource.Release(ctx)
 }
 
+// Session resolves a live session in this connection and rejects handles being released.
 func (r *ResourceStore) Session(ctx context.Context, id SessionID) (*Session, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -188,6 +194,7 @@ func (r *ResourceStore) Session(ctx context.Context, id SessionID) (*Session, er
 	return resource, nil
 }
 
+// ReleaseSession tears down a known session and its execution, joining any release in progress.
 func (r *ResourceStore) ReleaseSession(ctx context.Context, id SessionID) error {
 	if err := validateID(id, "session ID"); err != nil {
 		return err
@@ -196,6 +203,7 @@ func (r *ResourceStore) ReleaseSession(ctx context.Context, id SessionID) error 
 	r.mu.Lock()
 	resource := r.sessions[id]
 	r.mu.Unlock()
+
 	if resource == nil {
 		return notFound(ErrorKindSessionNotFound, string(id))
 	}
@@ -203,6 +211,7 @@ func (r *ResourceStore) ReleaseSession(ctx context.Context, id SessionID) error 
 	return resource.Release(ctx)
 }
 
+// Execution resolves a live execution in this connection and rejects handles being released.
 func (r *ResourceStore) Execution(ctx context.Context, id ExecutionID) (*Execution, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -223,6 +232,7 @@ func (r *ResourceStore) Execution(ctx context.Context, id ExecutionID) (*Executi
 	return resource, nil
 }
 
+// ReleaseExecution cancels and reclaims a known execution, joining any release in progress.
 func (r *ResourceStore) ReleaseExecution(ctx context.Context, id ExecutionID) error {
 	if err := validateID(id, "execution ID"); err != nil {
 		return err
@@ -231,6 +241,7 @@ func (r *ResourceStore) ReleaseExecution(ctx context.Context, id ExecutionID) er
 	r.mu.Lock()
 	resource := r.executions[id]
 	r.mu.Unlock()
+
 	if resource == nil {
 		return notFound(ErrorKindExecutionNotFound, string(id))
 	}
@@ -238,6 +249,7 @@ func (r *ResourceStore) ReleaseExecution(ctx context.Context, id ExecutionID) er
 	return resource.Release(ctx)
 }
 
+// DebugSession resolves a live debugger in this connection and rejects handles being released.
 func (r *ResourceStore) DebugSession(ctx context.Context, id DebugSessionID) (*DebugSession, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -258,6 +270,7 @@ func (r *ResourceStore) DebugSession(ctx context.Context, id DebugSessionID) (*D
 	return resource, nil
 }
 
+// ReleaseDebugSession reclaims a known debugger, joining any release in progress.
 func (r *ResourceStore) ReleaseDebugSession(ctx context.Context, id DebugSessionID) error {
 	if err := validateID(id, "debug session ID"); err != nil {
 		return err
@@ -266,6 +279,7 @@ func (r *ResourceStore) ReleaseDebugSession(ctx context.Context, id DebugSession
 	r.mu.Lock()
 	resource := r.debugSessions[id]
 	r.mu.Unlock()
+
 	if resource == nil {
 		return notFound(ErrorKindDebugSessionNotFound, string(id))
 	}
@@ -273,11 +287,14 @@ func (r *ResourceStore) ReleaseDebugSession(ctx context.Context, id DebugSession
 	return resource.Release(ctx)
 }
 
+// Close rejects new resource creation and starts teardown once.
+// The caller's context bounds waiting while the store retains cleanup ownership.
 func (r *ResourceStore) Close(ctx context.Context) error {
 	r.mu.Lock()
 	started := r.close.Begin()
 	r.closing = true
 	r.mu.Unlock()
+
 	if started {
 		go r.settleClose()
 	}
@@ -416,6 +433,7 @@ func (r *ResourceStore) registerExecution(ctx context.Context, e *Execution) err
 	}
 
 	r.pending[executionResource]--
+
 	r.executions[e.id] = e
 	if e.plan != nil {
 		e.plan.executions[e.id] = e
@@ -429,6 +447,7 @@ func (r *ResourceStore) removeExecution(e *Execution) {
 	defer r.mu.Unlock()
 
 	delete(r.executions, e.id)
+
 	if e.plan != nil {
 		delete(e.plan.executions, e.id)
 	}

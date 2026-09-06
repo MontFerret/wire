@@ -7,6 +7,7 @@ import (
 	"github.com/MontFerret/wire/pkg/failure"
 )
 
+// ErrWatcherLagged reports that a bounded subscription could not retain an event.
 var ErrWatcherLagged = errors.New("wire watcher lagged")
 
 func invalidRequest(message string) error {

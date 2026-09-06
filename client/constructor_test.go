@@ -5,10 +5,11 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/MontFerret/api"
-	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+
+	"github.com/MontFerret/api"
+	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
 )
 
 func TestNewFailureReturnsNilRuntimeAndClosesHandshake(t *testing.T) {
@@ -29,6 +30,7 @@ func TestNewFailureReturnsNilRuntimeAndClosesHandshake(t *testing.T) {
 			server := &clientTestServer{handshake: test.handshake, connectErr: test.err, connectDone: ended}
 			connection := startClientTestServer(t, server)
 			ctx := testClientContext(t)
+
 			remote, err := New(ctx, connection)
 			if err == nil || remote != nil {
 				t.Fatalf("New returned %v, %v; want nil runtime and an error", remote, err)

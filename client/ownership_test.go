@@ -10,15 +10,16 @@ import (
 	"testing"
 	"time"
 
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/test/bufconn"
+
 	"github.com/MontFerret/api"
 	"github.com/MontFerret/api/debugger"
 	"github.com/MontFerret/api/source"
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
 	wiredebugger "github.com/MontFerret/wire/pkg/debugger"
 	"github.com/MontFerret/wire/pkg/execution"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/test/bufconn"
 )
 
 type handleServer struct {
@@ -325,8 +326,10 @@ func TestHandleOperationsUseBoundOwnerResources(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	parameters := plan.Parameters()
 	parameters[0] = "changed"
+
 	if got := plan.Parameters(); !slices.Equal(got, []string{"input"}) {
 		t.Fatalf("plan metadata was not immutable: %v", got)
 	}
@@ -339,14 +342,17 @@ func TestHandleOperationsUseBoundOwnerResources(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	secondExecution, err := startTestPlanExecution(testClientContext(t), plan, map[string]any{"input": 2})
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	executionEvents, err := firstExecution.Watch(testClientContext(t))
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if event, err := executionEvents.Recv(); err != nil || event.Snapshot.State != execution.StateRunning {
 		t.Fatalf("unexpected execution event: %#v, %v", event, err)
 	}
@@ -355,6 +361,7 @@ func TestHandleOperationsUseBoundOwnerResources(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	for name, command := range map[string]func(context.Context) error{
 		"start": debug.Start, "continue": debug.Continue, "pause": debug.Pause,
 		"step-over": debug.StepOver, "step-in": debug.StepIn, "step-out": debug.StepOut,
@@ -371,34 +378,42 @@ func TestHandleOperationsUseBoundOwnerResources(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if breakpoint.ID != 1 || !breakpoint.Bound || breakpoint.RequestedLocation.SourceName != "query.fql" ||
 		breakpoint.Location.SourceName != "query.fql" || breakpoint.Location.Span != (source.Span{}) ||
 		breakpoint.PointID != 0 || breakpoint.FunctionID != 0 {
 		t.Fatalf("unexpected Unified API breakpoint: %#v", breakpoint)
 	}
+
 	if err := debug.DeleteBreakpoint(testClientContext(t), breakpoint.ID); err != nil {
 		t.Fatal(err)
 	}
+
 	frames, err := debug.Frames(testClientContext(t))
 	if err != nil || len(frames) != 1 || frames[0].Name != "main" || frames[0].FunctionID != 0 || frames[0].Location.SourceName != "query.fql" {
 		t.Fatalf("unexpected Unified API frames: %#v, %v", frames, err)
 	}
+
 	locals, err := debug.FrameLocals(testClientContext(t), 0)
 	if err != nil || len(locals) != 1 || !locals[0].Param || locals[0].Value.Reference != 2 {
 		t.Fatalf("unexpected Unified API locals: %#v, %v", locals, err)
 	}
+
 	variables, err := debug.Variables(testClientContext(t), debugger.ValueReference(1))
 	if err != nil || len(variables) != 1 || variables[0].Value.Display != "2" {
 		t.Fatalf("unexpected Unified API variables: %#v, %v", variables, err)
 	}
+
 	evaluated, err := debug.EvaluateFrame(testClientContext(t), 0, "1 + 2")
 	if err != nil || evaluated.Reference != 3 || evaluated.Display != "3" {
 		t.Fatalf("unexpected Unified API value: %#v, %v", evaluated, err)
 	}
+
 	debugEvents, err := debug.Watch(testClientContext(t))
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if event, err := debugEvents.Recv(); err != nil || event.Snapshot.State != wiredebugger.StateStopped ||
 		event.Snapshot.StopReason != debugger.ReasonBreakpoint || event.Snapshot.Location == nil ||
 		event.Snapshot.Location.SourceName != "query.fql" || len(event.Snapshot.HitBreakpointIDs) != 1 || event.Snapshot.HitBreakpointIDs[0] != 1 {
@@ -408,21 +423,27 @@ func TestHandleOperationsUseBoundOwnerResources(t *testing.T) {
 	if err := debug.Close(testClientContext(t)); err != nil {
 		t.Fatal(err)
 	}
+
 	if err := debug.Close(testClientContext(t)); err != nil {
 		t.Fatalf("repeated debug close changed its result: %v", err)
 	}
+
 	if err := firstExecution.Close(testClientContext(t)); err != nil {
 		t.Fatal(err)
 	}
+
 	if err := firstExecution.Close(testClientContext(t)); err != nil {
 		t.Fatalf("repeated execution close changed its result: %v", err)
 	}
+
 	if err := secondExecution.Close(testClientContext(t)); err != nil {
 		t.Fatal(err)
 	}
+
 	if err := plan.Close(testClientContext(t)); err != nil {
 		t.Fatal(err)
 	}
+
 	if err := plan.Close(testClientContext(t)); err != nil {
 		t.Fatalf("repeated plan close changed its result: %v", err)
 	}
@@ -438,6 +459,7 @@ func TestHandleOperationsUseBoundOwnerResources(t *testing.T) {
 	for _, name := range []string{"start", "continue", "pause", "step-over", "step-in", "step-out", "set-breakpoint", "delete-breakpoint", "frames", "frame-locals", "variables", "evaluate", "watch-debug", "release-debug"} {
 		want = append(want, call(name, "connection-1", debugID))
 	}
+
 	want = append(want,
 		call("release-execution", "connection-1", "execution-1"),
 		call("release-execution", "connection-1", "execution-2"),
@@ -449,6 +471,7 @@ func TestHandleOperationsUseBoundOwnerResources(t *testing.T) {
 			t.Errorf("missing call %q in %v", expected, calls)
 		}
 	}
+
 	for _, released := range []string{
 		call("release-debug", "connection-1", debugID),
 		call("release-execution", "connection-1", "execution-1"),
@@ -463,10 +486,12 @@ func TestHandleOperationsUseBoundOwnerResources(t *testing.T) {
 
 func openHandleClient(t *testing.T, connection grpc.ClientConnInterface) *connectionHandle {
 	t.Helper()
+
 	client, err := newConnection(testClientContext(t), connection)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	t.Cleanup(func() {
 		if err := client.Close(testClientContext(t)); err != nil {
 			t.Errorf("client cleanup failed: %v", err)
@@ -498,8 +523,10 @@ func startHandleServer(t *testing.T, implementation *handleServer) *grpc.ClientC
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	t.Cleanup(func() {
 		server.Stop()
+
 		if err := connection.Close(); err != nil {
 			t.Errorf("transport cleanup failed: %v", err)
 		}

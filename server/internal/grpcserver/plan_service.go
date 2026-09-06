@@ -17,6 +17,7 @@ type PlanService struct {
 
 var _ wirev1.PlanServiceServer = (*PlanService)(nil)
 
+// Compile decodes source and options into a connection-owned normal plan.
 func (s *PlanService) Compile(ctx context.Context, request *wirev1.CompileRequest) (*wirev1.CompileResponse, error) {
 	compiled, err := s.compile(ctx, request.GetConnectionId(), request.GetSource(), request.GetOptions(), false)
 	if err != nil {
@@ -26,6 +27,7 @@ func (s *PlanService) Compile(ctx context.Context, request *wirev1.CompileReques
 	return &wirev1.CompileResponse{Plan: compiled}, nil
 }
 
+// CompileDebug decodes source and options into a connection-owned debuggable plan.
 func (s *PlanService) CompileDebug(ctx context.Context, request *wirev1.CompileDebugRequest) (*wirev1.CompileDebugResponse, error) {
 	compiled, err := s.compile(ctx, request.GetConnectionId(), request.GetSource(), request.GetOptions(), true)
 	if err != nil {
@@ -62,6 +64,7 @@ func (s *PlanService) compile(
 	return plan(compiled), nil
 }
 
+// ReleasePlan resolves ownership through the request's connection before reclaiming the plan.
 func (s *PlanService) ReleasePlan(ctx context.Context, request *wirev1.ReleasePlanRequest) (*wirev1.ReleasePlanResponse, error) {
 	operation, resources, cancel, err := prepareOperation(ctx, s.connections, request.GetConnectionId())
 	if err != nil {

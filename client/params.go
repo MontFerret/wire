@@ -4,8 +4,9 @@ import (
 	"fmt"
 	"math"
 
-	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
 	"google.golang.org/protobuf/types/known/structpb"
+
+	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
 )
 
 const maxParameterDepth = 64
@@ -16,10 +17,12 @@ func encodeParameters(values map[string]any) (*wirev1.Parameters, error) {
 		if name == "" {
 			return nil, fmt.Errorf("parameter name must not be empty")
 		}
+
 		converted, err := encodeValue(value, 0)
 		if err != nil {
 			return nil, fmt.Errorf("parameter %q: %w", name, err)
 		}
+
 		result.Values[name] = converted
 	}
 
@@ -88,6 +91,7 @@ func encodeValue(value any, depth int) (*wirev1.Value, error) {
 			if err != nil {
 				return nil, fmt.Errorf("array item %d: %w", i, err)
 			}
+
 			items[i] = converted
 		}
 
@@ -98,10 +102,12 @@ func encodeValue(value any, depth int) (*wirev1.Value, error) {
 			if name == "" {
 				return nil, fmt.Errorf("object key must not be empty")
 			}
+
 			converted, err := encodeValue(item, depth+1)
 			if err != nil {
 				return nil, fmt.Errorf("object field %q: %w", name, err)
 			}
+
 			fields[name] = converted
 		}
 

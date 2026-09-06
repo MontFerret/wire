@@ -43,6 +43,7 @@ func (e *executionHandle) Watch(ctx context.Context) (*executionEvents, error) {
 	}
 
 	watchCtx, cancel := e.client.watchContext(ctx)
+
 	stream, err := e.client.executionClient.WatchExecution(watchCtx, &wirev1.WatchExecutionRequest{
 		ConnectionId: e.client.connectionProto(),
 		ExecutionId:  &wirev1.ExecutionId{Value: e.id},

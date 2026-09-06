@@ -25,6 +25,7 @@ func TestDurableSessionRunsSequentiallyOnOneHostedSession(t *testing.T) {
 	connection := newTestConnection(t, &spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 		return plan, nil
 	}})
+
 	compiled, err := connection.Compile(context.Background(), compileRequest{Source: api.Source{Content: "RETURN @input"}})
 	if err != nil {
 		t.Fatal(err)
@@ -45,7 +46,7 @@ func TestDurableSessionRunsSequentiallyOnOneHostedSession(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		if run.Snapshot.State != wireexecution.StateRunning {
+		if run.State != wireexecution.StateRunning {
 			t.Fatalf("Session.Run did not return the initial running snapshot: %+v", run)
 		}
 
@@ -54,6 +55,7 @@ func TestDurableSessionRunsSequentiallyOnOneHostedSession(t *testing.T) {
 			string(terminal.Output.Content) != `{"ok":true}` {
 			t.Fatalf("unexpected terminal execution: %#v", terminal)
 		}
+
 		if err := connection.ReleaseExecution(testContext(t), run.ID); err != nil {
 			t.Fatal(err)
 		}
@@ -91,10 +93,12 @@ func TestDurableSessionRejectsOverlappingRunsUntilExecutionRelease(t *testing.T)
 		return api.Output{}, ctx.Err()
 	}}
 	connection, _, created := openTestSession(t, runtimeSession)
+
 	first, err := connection.RunSession(context.Background(), created)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	<-started
 
 	if _, err := connection.RunSession(context.Background(), created); !hasCategory(err, ErrorKindInvalidState) {
@@ -104,6 +108,7 @@ func TestDurableSessionRejectsOverlappingRunsUntilExecutionRelease(t *testing.T)
 	if err := connection.ReleaseExecution(testContext(t), first.ID); err != nil {
 		t.Fatal(err)
 	}
+
 	second, err := connection.RunSession(context.Background(), created)
 	if err != nil {
 		t.Fatalf("session was not reusable after execution release: %v", err)
@@ -136,10 +141,12 @@ func TestDurableSessionReleaseCancelsRunBeforeExactlyOnceClose(t *testing.T) {
 			return nil
 		},
 	}
+
 	connection, compiled, created := openTestSession(t, runtimeSession)
 	if _, err := connection.RunSession(context.Background(), created); err != nil {
 		t.Fatal(err)
 	}
+
 	<-started
 
 	if err := connection.ReleasePlan(testContext(t), compiled.ID); err != nil {
@@ -153,6 +160,7 @@ func TestDurableSessionReleaseCancelsRunBeforeExactlyOnceClose(t *testing.T) {
 	orderMu.Lock()
 	settledOrder := append([]string(nil), order...)
 	orderMu.Unlock()
+
 	if !reflect.DeepEqual(settledOrder, []string{"run", "close"}) {
 		t.Fatalf("session cleanup was not descendants-first: %#v", settledOrder)
 	}
@@ -177,6 +185,7 @@ func TestSessionLimitCountsPendingAndClosingSessions(t *testing.T) {
 			return nil
 		}}, nil
 	}}
+
 	host, err := newTestHost(&spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 		return plan, nil
 	}}, fixtureLimits{
@@ -191,10 +200,12 @@ func TestSessionLimitCountsPendingAndClosingSessions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	connection, err := host.OpenConnection()
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	compiled, err := connection.Compile(context.Background(), compileRequest{Source: api.Source{Content: "RETURN 1"}})
 	if err != nil {
 		t.Fatal(err)
@@ -216,7 +227,9 @@ func TestSessionLimitCountsPendingAndClosingSessions(t *testing.T) {
 	if _, err := connection.CreateSession(context.Background(), sessionRequest{PlanID: compiled.ID}); !hasCategory(err, ErrorKindResourceExhausted) {
 		t.Fatalf("pending session did not count against limit: %v", err)
 	}
+
 	close(finishConstructor)
+
 	created := <-creation
 	if created.err != nil {
 		t.Fatal(created.err)
@@ -229,13 +242,16 @@ func TestSessionLimitCountsPendingAndClosingSessions(t *testing.T) {
 		if _, err := connection.CreateSession(context.Background(), sessionRequest{PlanID: compiled.ID}); hasCategory(err, ErrorKindResourceExhausted) {
 			break
 		}
+
 		time.Sleep(time.Millisecond)
 	}
 
 	if _, err := connection.CreateSession(context.Background(), sessionRequest{PlanID: compiled.ID}); !hasCategory(err, ErrorKindResourceExhausted) {
 		t.Fatalf("closing session did not count against limit: %v", err)
 	}
+
 	close(finishClose)
+
 	if err := <-release; err != nil {
 		t.Fatal(err)
 	}
@@ -258,10 +274,12 @@ func openTestSession(t *testing.T, runtimeSession api.Session) (*testEnvironment
 	connection := newTestConnection(t, &spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 		return plan, nil
 	}})
+
 	compiled, err := connection.Compile(context.Background(), compileRequest{Source: api.Source{Content: "RETURN 1"}})
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	created, err := connection.CreateSession(context.Background(), sessionRequest{PlanID: compiled.ID})
 	if err != nil {
 		t.Fatal(err)
@@ -277,6 +295,7 @@ func TestSessionCreationFailureDoesNotLeakLimit(t *testing.T) {
 	connection := newTestConnection(t, &spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 		return plan, nil
 	}})
+
 	compiled, err := connection.Compile(context.Background(), compileRequest{Source: api.Source{Content: "RETURN 1"}})
 	if err != nil {
 		t.Fatal(err)
@@ -294,10 +313,12 @@ func TestDurableSessionIsNotReusedAfterRuntimePanic(t *testing.T) {
 		panic("runtime defect")
 	}}
 	connection, _, created := openTestSession(t, runtimeSession)
+
 	run, err := connection.RunSession(context.Background(), created)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	terminal := waitExecution(t, connection, run.ID)
 	if terminal.State != wireexecution.StateFailed || terminal.Failure == nil {
 		t.Fatalf("runtime panic did not fail the execution: %#v", terminal)
@@ -324,6 +345,7 @@ func TestDurableSessionClosePanicSettlesReleaseAndParentCleanup(t *testing.T) {
 	runtimeSession := &spySession{close: func() error {
 		panic("session close secret")
 	}}
+
 	connection, compiled, created := openTestSession(t, runtimeSession)
 	if err := connection.ReleaseSession(testContext(t), created); !hasCategory(err, ErrorKindInternal) {
 		t.Fatalf("hosted close panic was not retained: %v", err)

@@ -30,6 +30,7 @@ func (r *contractRuntime) Run(ctx context.Context, src api.Source, options ...ap
 	r.runOptions = append(r.runOptions, configured.clone())
 	run := r.run
 	r.mu.Unlock()
+
 	if run == nil {
 		return api.Output{}, nil
 	}
@@ -68,6 +69,7 @@ func (r *contractRuntime) compilePlan(
 	r.compileLevels = append(r.compileLevels, *configured)
 	compile := r.compile
 	r.mu.Unlock()
+
 	if compile == nil {
 		return &contractPlan{}, nil
 	}

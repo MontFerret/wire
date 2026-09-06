@@ -4,11 +4,12 @@ import (
 	"errors"
 	"testing"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	"github.com/MontFerret/api"
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
 	"github.com/MontFerret/wire/pkg/failure"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 func TestCompileMapsCanonicalSource(t *testing.T) {
@@ -20,6 +21,7 @@ func TestCompileMapsCanonicalSource(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	defer func() {
 		if err := plan.Close(); err != nil {
 			t.Errorf("close plan: %v", err)
@@ -30,6 +32,7 @@ func TestCompileMapsCanonicalSource(t *testing.T) {
 	name := server.lastCompileSourceName
 	content := server.lastCompileContent
 	server.mu.Unlock()
+
 	if name != src.Name || content != src.Content {
 		t.Fatalf("unexpected transported source: name=%q content=%q", name, content)
 	}
@@ -42,6 +45,7 @@ func TestSessionRunPreservesCallerOwnedPlan(t *testing.T) {
 			executionCompletedEvent("execution-1", "text/plain", []byte("done")),
 		}}}}
 		client := openTestRuntime(t, startClientTestServer(t, server))
+
 		plan, err := client.Compile(testClientContext(t), api.Source{Content: "RETURN 1"})
 		if err != nil {
 			t.Fatal(err)
@@ -56,6 +60,7 @@ func TestSessionRunPreservesCallerOwnedPlan(t *testing.T) {
 		if err != nil || string(output.Content) != "done" {
 			t.Fatalf("unexpected Session.Run result: %#v, %v", output, err)
 		}
+
 		_, _, releaseExecutionCalls, releasePlanCalls := server.callSnapshot()
 		if releaseExecutionCalls != 1 || releasePlanCalls != 0 {
 			t.Fatalf("Session.Run cleanup: execution=%d plan=%d", releaseExecutionCalls, releasePlanCalls)
@@ -63,6 +68,7 @@ func TestSessionRunPreservesCallerOwnedPlan(t *testing.T) {
 
 		executionDeadline, planDeadline := server.releaseDeadlineSnapshot()
 		assertCleanupDeadline(t, "execution", executionDeadline)
+
 		if !planDeadline.IsZero() {
 			t.Fatalf("Session.Run released the caller-owned plan with deadline %v", planDeadline)
 		}
@@ -71,9 +77,11 @@ func TestSessionRunPreservesCallerOwnedPlan(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Session.Run closed the caller-owned plan: %v", err)
 		}
+
 		if err := plan.Close(); err != nil {
 			t.Fatal(err)
 		}
+
 		if err := extra.Close(); err != nil {
 			t.Fatal(err)
 		}
@@ -90,6 +98,7 @@ func TestSessionRunPreservesCallerOwnedPlan(t *testing.T) {
 			releaseExecutionErr: status.Error(codes.Internal, "execution cleanup failed"),
 		}
 		client := openTestRuntime(t, startClientTestServer(t, server))
+
 		plan, err := client.Compile(testClientContext(t), api.Source{Content: "RETURN 1"})
 		if err != nil {
 			t.Fatal(err)
@@ -102,15 +111,18 @@ func TestSessionRunPreservesCallerOwnedPlan(t *testing.T) {
 
 		output, err := session.Run(testClientContext(t))
 		var terminalFailure *failure.Failure
+
 		var wireErr *Error
 		if string(output.Content) != "partial" || !errors.As(err, &terminalFailure) || !errors.As(err, &wireErr) ||
 			terminalFailure.Message != "execution failed" || wireErr.Message != "execution cleanup failed" {
 			t.Fatalf("Session.Run did not preserve joined errors: %#v, %v", output, err)
 		}
+
 		_, _, releaseExecutionCalls, releasePlanCalls := server.callSnapshot()
 		if releaseExecutionCalls != 1 || releasePlanCalls != 0 {
 			t.Fatalf("Session.Run failure cleanup: execution=%d plan=%d", releaseExecutionCalls, releasePlanCalls)
 		}
+
 		if err := plan.Close(); err != nil {
 			t.Fatal(err)
 		}

@@ -5,6 +5,8 @@ import (
 	"errors"
 	"sync"
 
+	"github.com/google/uuid"
+
 	"github.com/MontFerret/api"
 	"github.com/MontFerret/api/debugger"
 	"github.com/MontFerret/api/source"
@@ -12,9 +14,9 @@ import (
 	"github.com/MontFerret/wire/pkg/failure"
 	"github.com/MontFerret/wire/server/internal/lifecycle"
 	"github.com/MontFerret/wire/server/internal/panicboundary"
-	"github.com/google/uuid"
 )
 
+// DebugSession owns a hosted debugger, its command state, breakpoints, and event subscriptions.
 type DebugSession struct {
 	// operationMu serializes state-dependent operations and command commits.
 	// The active runtime resume and close paths intentionally do not hold it
@@ -51,10 +53,13 @@ func newDebugSession(plan *Plan, hosted debugger.Session) *DebugSession {
 	return session
 }
 
+// Release closes the hosted debugger and removes it from its plan's resource store.
+// Caller cancellation stops waiting without abandoning teardown.
 func (d *DebugSession) Release(ctx context.Context) error {
 	d.plan.store.mu.Lock()
 	started := d.release.Begin()
 	d.plan.store.mu.Unlock()
+
 	if started {
 		go d.settleRelease()
 	}
@@ -77,16 +82,19 @@ func (d *DebugSession) settleRelease() {
 	err = d.Close(context.Background())
 }
 
+// Close stops the hosted debugger once, retaining the logical handle until Release.
 func (d *DebugSession) Close(ctx context.Context) error {
 	d.beginClose()
 
 	return d.close.Wait(ctx)
 }
 
+// ID identifies this debug session within its logical connection.
 func (d *DebugSession) ID() DebugSessionID {
 	return d.id
 }
 
+// Stop closes a nonterminal debugger and returns its terminal snapshot.
 func (d *DebugSession) Stop(ctx context.Context) (wiredebugger.Snapshot, error) {
 	snapshot := d.Snapshot()
 	if !snapshot.State.Terminal() {
@@ -100,6 +108,7 @@ func (d *DebugSession) Stop(ctx context.Context) (wiredebugger.Snapshot, error) 
 	return snapshot, nil
 }
 
+// Pause requests interruption of a running debugger; a later event reports the stop.
 func (d *DebugSession) Pause(ctx context.Context) (wiredebugger.Snapshot, error) {
 	if err := ctx.Err(); err != nil {
 		return wiredebugger.Snapshot{}, err
@@ -128,6 +137,7 @@ func (d *DebugSession) Pause(ctx context.Context) (wiredebugger.Snapshot, error)
 	return d.Snapshot(), nil
 }
 
+// SetBreakpoint binds to the next executable location in the requested source.
 func (d *DebugSession) SetBreakpoint(
 	ctx context.Context,
 	location source.Location,
@@ -137,6 +147,7 @@ func (d *DebugSession) SetBreakpoint(
 	})
 }
 
+// SetBreakpointAt validates and installs a breakpoint in a created or stopped debugger.
 func (d *DebugSession) SetBreakpointAt(
 	ctx context.Context,
 	location source.Location,
@@ -164,6 +175,7 @@ func (d *DebugSession) SetBreakpointAt(
 	d.stateMu.Lock()
 	status := d.state.status
 	d.stateMu.Unlock()
+
 	if status != wiredebugger.StateCreated && status != wiredebugger.StateStopped {
 		return debugger.Breakpoint{}, invalidState("breakpoints require a created or stopped debug session", nil)
 	}
@@ -192,6 +204,7 @@ func (d *DebugSession) SetBreakpointAt(
 	return value, nil
 }
 
+// DeleteBreakpoint removes a known breakpoint from a created or stopped debugger.
 func (d *DebugSession) DeleteBreakpoint(ctx context.Context, breakpointID debugger.BreakpointID) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -207,6 +220,7 @@ func (d *DebugSession) DeleteBreakpoint(ctx context.Context, breakpointID debugg
 	d.stateMu.Lock()
 	status := d.state.status
 	d.stateMu.Unlock()
+
 	if status != wiredebugger.StateCreated && status != wiredebugger.StateStopped {
 		return invalidState("breakpoints require a created or stopped debug session", nil)
 	}
@@ -233,26 +247,32 @@ func (d *DebugSession) DeleteBreakpoint(ctx context.Context, breakpointID debugg
 	return nil
 }
 
+// Start begins a created debugger asynchronously and returns its running snapshot.
 func (d *DebugSession) Start(ctx context.Context) (wiredebugger.Snapshot, error) {
 	return d.start(ctx, true, d.session.Start)
 }
 
+// Continue resumes a stopped debugger asynchronously and returns its running snapshot.
 func (d *DebugSession) Continue(ctx context.Context) (wiredebugger.Snapshot, error) {
 	return d.start(ctx, false, d.session.Continue)
 }
 
+// StepOver resumes a stopped debugger with the hosted step-over command.
 func (d *DebugSession) StepOver(ctx context.Context) (wiredebugger.Snapshot, error) {
 	return d.start(ctx, false, d.session.StepOver)
 }
 
+// StepIn resumes a stopped debugger with the hosted step-in command.
 func (d *DebugSession) StepIn(ctx context.Context) (wiredebugger.Snapshot, error) {
 	return d.start(ctx, false, d.session.StepIn)
 }
 
+// StepOut resumes a stopped debugger with the hosted step-out command.
 func (d *DebugSession) StepOut(ctx context.Context) (wiredebugger.Snapshot, error) {
 	return d.start(ctx, false, d.session.StepOut)
 }
 
+// Frames returns a detached frame slice while the debugger is stopped.
 func (d *DebugSession) Frames(ctx context.Context) ([]debugger.Frame, error) {
 	d.operationMu.Lock()
 	defer d.operationMu.Unlock()
@@ -273,6 +293,7 @@ func (d *DebugSession) Frames(ctx context.Context) ([]debugger.Frame, error) {
 	return append([]debugger.Frame(nil), values...), nil
 }
 
+// FrameLocals reads variables in a nonnegative frame index while the debugger is stopped.
 func (d *DebugSession) FrameLocals(ctx context.Context, frame int) ([]debugger.Variable, error) {
 	if frame < 0 {
 		return nil, invalidRequest("frame index must not be negative")
@@ -299,6 +320,7 @@ func (d *DebugSession) FrameLocals(ctx context.Context, frame int) ([]debugger.V
 	return append([]debugger.Variable(nil), values...), nil
 }
 
+// Variables expands a positive value reference while the debugger is stopped.
 func (d *DebugSession) Variables(
 	ctx context.Context,
 	reference debugger.ValueReference,
@@ -328,6 +350,7 @@ func (d *DebugSession) Variables(
 	return append([]debugger.Variable(nil), values...), nil
 }
 
+// EvaluateFrame evaluates an expression in a stopped frame with caller and session cancellation.
 func (d *DebugSession) EvaluateFrame(
 	ctx context.Context,
 	frame int,
@@ -365,6 +388,8 @@ func (d *DebugSession) EvaluateFrame(
 	return value, nil
 }
 
+// Watch reserves a bounded subscription with the current snapshot.
+// The caller must cancel the subscription to release its watcher slot.
 func (d *DebugSession) Watch() (DebugSubscription, error) {
 	subscription, err := d.events.subscribe()
 	if err != nil {
@@ -397,6 +422,7 @@ func (d *DebugSession) start(
 
 	d.stateMu.Lock()
 	expected := wiredebugger.StateStopped
+
 	if initial {
 		expected = wiredebugger.StateCreated
 	}
@@ -409,6 +435,7 @@ func (d *DebugSession) start(
 
 	d.state.beginRunning()
 	kind := wiredebugger.EventContinued
+
 	if initial {
 		kind = wiredebugger.EventStarted
 	}
@@ -452,6 +479,7 @@ func (d *DebugSession) finishCommand(event *debugger.Event, commandErr error) {
 	}
 
 	terminal := false
+
 	if commandErr != nil {
 		if errors.Is(commandErr, context.Canceled) || errors.Is(context.Cause(d.ctx), context.Canceled) {
 			d.state.status = wiredebugger.StateTerminated
@@ -465,6 +493,7 @@ func (d *DebugSession) finishCommand(event *debugger.Event, commandErr error) {
 		terminal = true
 	} else {
 		d.state.location = nil
+
 		if event.Location != (source.Range{}) {
 			location := event.Location
 			d.state.location = &location
@@ -572,6 +601,7 @@ func (d *DebugSession) poisonAfterRuntimePanic(operation string, err error) erro
 	return runtimePanicError(operation, err)
 }
 
+// Snapshot returns Wire-visible debugger state detached from mutable session storage.
 func (d *DebugSession) Snapshot() wiredebugger.Snapshot {
 	d.stateMu.Lock()
 	defer d.stateMu.Unlock()

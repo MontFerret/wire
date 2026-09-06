@@ -23,6 +23,7 @@ func (e *testEnvironment) Compile(ctx context.Context, input compileRequest) (pl
 	defer cancel()
 
 	var options []api.PlanOption
+
 	if input.HasOptimizationLevel {
 		options = append(options, api.WithOptimizationLevel(input.OptimizationLevel))
 	}
@@ -171,6 +172,7 @@ func (e *testEnvironment) OpenDebugSession(ctx context.Context, input debugReque
 
 func (e *testEnvironment) debugSession(ctx context.Context, id DebugSessionID) (context.Context, context.CancelFunc, *DebugSession, error) {
 	operation, cancel := e.operation(ctx)
+
 	session, err := e.resources.DebugSession(operation, id)
 	if err != nil {
 		cancel()

@@ -31,6 +31,7 @@ func TestExecutionStateMapsEverySharedValue(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		if got != test.want {
 			t.Errorf("executionState(%v) = %v, want %v", test.shared, got, test.want)
 		}
@@ -56,6 +57,7 @@ func TestDebugStateAndEventKindMapEverySharedValue(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		if got != test.want {
 			t.Errorf("debugState(%v) = %v, want %v", test.shared, got, test.want)
 		}
@@ -78,6 +80,7 @@ func TestDebugStateAndEventKindMapEverySharedValue(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		if got != test.want {
 			t.Errorf("debugEventKind(%v) = %v, want %v", test.shared, got, test.want)
 		}
@@ -112,6 +115,7 @@ func TestFailureCategoryMapsEverySharedValue(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		if got != test.want {
 			t.Errorf("failureCategory(%v) = %v, want %v", test.shared, got, test.want)
 		}
@@ -159,8 +163,9 @@ func TestSharedEventsPreserveFieldsAndDetachMutableData(t *testing.T) {
 
 	content[0] = 'X'
 	hitIDs[0] = 99
-	location.Location.SourceName = "changed.fql"
+	location.SourceName = "changed.fql"
 	diagnosticSet[0].Annotations[0].Message = "changed"
+
 	if converted.GetSequence() != 11 || converted.GetKind() != wirev1.DebugEventKind_DEBUG_EVENT_KIND_STOPPED ||
 		converted.GetSession().GetStopReason() != wirev1.DebugStopReason_DEBUG_STOP_REASON_BREAKPOINT ||
 		converted.GetSession().GetLocation().GetLocation().GetSourceName() != "query.fql" ||

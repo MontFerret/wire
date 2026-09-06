@@ -58,6 +58,7 @@ func TestEncodeParametersRejectsUnsupportedAndOutOfRangeValues(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if boundaries.GetValues()["minimum"].GetIntegerValue() != math.MinInt64 ||
 		boundaries.GetValues()["maximum"].GetIntegerValue() != math.MaxInt64 {
 		t.Fatalf("signed int64 boundaries changed: %#v", boundaries.GetValues())
@@ -67,6 +68,7 @@ func TestEncodeParametersRejectsUnsupportedAndOutOfRangeValues(t *testing.T) {
 	for range maxParameterDepth {
 		nested = []any{nested}
 	}
+
 	_, err = encodeParameters(map[string]any{"nested": nested})
 	if err == nil || !strings.Contains(err.Error(), "nesting") {
 		t.Fatalf("unexpected nesting error: %v", err)

@@ -10,17 +10,19 @@ import (
 	"testing"
 	"time"
 
-	"github.com/MontFerret/api"
-	"github.com/MontFerret/wire/client"
-	"github.com/MontFerret/wire/server"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
+
+	"github.com/MontFerret/api"
+	"github.com/MontFerret/wire/client"
+	"github.com/MontFerret/wire/server"
 )
 
 type (
+	// Option configures a fixture before its server and transport are created.
 	Option func(*configuration)
 
 	configuration struct {
@@ -49,14 +51,17 @@ type (
 	}
 )
 
+// WithBehavior configures the default hosted runtime spy before the server starts.
 func WithBehavior(behavior RuntimeBehavior) Option {
 	return func(c *configuration) { c.behavior = behavior }
 }
 
+// WithRuntime supplies a borrowed hosted implementation in place of the default spy.
 func WithRuntime(runtime api.Runtime) Option {
 	return func(c *configuration) { c.runtime = runtime }
 }
 
+// WithServerOptions appends options applied when constructing the public server.
 func WithServerOptions(options ...server.Option) Option {
 	return func(c *configuration) { c.serverOptions = append(c.serverOptions, options...) }
 }
@@ -66,6 +71,7 @@ func WithUnavailableServer() Option {
 	return func(c *configuration) { c.unavailable = true }
 }
 
+// New starts a public client/server fixture and registers ordered resource and transport cleanup.
 func New(t testing.TB, options ...Option) *Harness {
 	t.Helper()
 	var configured configuration
@@ -76,6 +82,7 @@ func New(t testing.TB, options ...Option) *Harness {
 
 	h := &Harness{t: t, ctx: Context(t)}
 	t.Cleanup(h.cleanup)
+
 	hosted := configured.runtime
 	if hosted == nil {
 		h.spy = NewRuntimeSpy(configured.behavior)
@@ -85,6 +92,7 @@ func New(t testing.TB, options ...Option) *Harness {
 	}
 
 	var err error
+
 	h.server, err = server.NewServer(hosted, configured.serverOptions...)
 	if err != nil {
 		t.Fatal(err)
@@ -124,22 +132,27 @@ func New(t testing.TB, options ...Option) *Harness {
 	return h
 }
 
+// Runtime returns the initial remote runtime, or nil for an unavailable-server fixture.
 func (h *Harness) Runtime() api.Runtime {
 	return h.runtime
 }
 
+// RuntimeSpy returns the hosted spy, or nil when a different implementation was supplied.
 func (h *Harness) RuntimeSpy() *RuntimeSpy {
 	return h.spy
 }
 
+// Context returns the fixture's bounded context for test operations.
 func (h *Harness) Context() context.Context {
 	return h.ctx
 }
 
+// Faults returns the injector shared by this fixture's client connections.
 func (h *Harness) Faults() *Faults {
 	return h.faults
 }
 
+// OpenRuntime opens another logical runtime on the shared transport and registers its cleanup.
 func (h *Harness) OpenRuntime() (api.Runtime, error) {
 	runtime, err := client.New(h.ctx, h.faults)
 	if err != nil {
@@ -153,12 +166,14 @@ func (h *Harness) OpenRuntime() (api.Runtime, error) {
 	return runtime, nil
 }
 
+// ExpectCleanupError permits a matching cleanup cause without hiding other joined failures.
 func (h *Harness) ExpectCleanupError(err error) {
 	h.mu.Lock()
 	h.expected = append(h.expected, err)
 	h.mu.Unlock()
 }
 
+// Shutdown stops the public server with a bounded wait and permits resulting disconnect errors.
 func (h *Harness) Shutdown() error {
 	h.mu.Lock()
 	h.stopped = true
@@ -169,6 +184,7 @@ func (h *Harness) Shutdown() error {
 	return h.server.Shutdown(ctx)
 }
 
+// CloseTransport closes the caller-owned gRPC connection once to exercise disconnection.
 func (h *Harness) CloseTransport() error {
 	h.mu.Lock()
 

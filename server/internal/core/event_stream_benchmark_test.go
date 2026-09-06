@@ -21,10 +21,12 @@ func BenchmarkExecutionEventPublication(b *testing.B) {
 
 	b.Run("one watcher", func(b *testing.B) {
 		execution := newPublicationBenchmarkExecution()
+
 		subscription, err := execution.Watch()
 		if err != nil {
 			b.Fatal(err)
 		}
+
 		b.Cleanup(subscription.Cancel)
 
 		b.ReportAllocs()

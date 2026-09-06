@@ -6,12 +6,13 @@ import (
 	"testing"
 	"time"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	"github.com/MontFerret/api"
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
 	wireexecution "github.com/MontFerret/wire/pkg/execution"
 	"github.com/MontFerret/wire/pkg/failure"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 func TestExecutionStateTerminal(t *testing.T) {
@@ -49,6 +50,7 @@ func TestExecutionStateConversionMapsEveryProtocolValue(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		if got != test.want {
 			t.Errorf("convertExecutionState(%v) = %v, want %v", test.protocol, got, test.want)
 		}
@@ -77,12 +79,14 @@ func TestExecutionConversionDefensivelyCopiesOutputAndFailure(t *testing.T) {
 			},
 		},
 	)
+
 	snapshot, err := convertExecutionSnapshot(protocol)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	protocol.Output.Content[0] = 'X'
+
 	protocol.Failure.DiagnosticSet.Diagnostics[0].Annotations[0].Message = "changed"
 	if string(snapshot.Output.Content) != "partial" || snapshot.Failure == nil ||
 		snapshot.Failure.Category != failure.CategoryExecution ||
@@ -174,11 +178,14 @@ func TestExecutionWaitUsesFreshWatchWithoutCachingOutput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	first.Content[0] = 'X'
+
 	second, err := execution.Wait(testClientContext(t))
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if string(second.Content) != "original" {
 		t.Fatalf("Wait reused mutable output: %q", second.Content)
 	}
@@ -213,7 +220,7 @@ func TestExecutionWaitPropagatesContextAndStreamErrors(t *testing.T) {
 		cancel()
 		select {
 		case err := <-result:
-			if err != context.Canceled {
+			if err != context.Canceled { //nolint:errorlint // Require the original caller cancellation error, without wrapping.
 				t.Fatalf("Wait did not return the caller context error: %#v", err)
 			}
 		case <-time.After(10 * time.Second):
@@ -229,6 +236,7 @@ func TestExecutionWaitPropagatesContextAndStreamErrors(t *testing.T) {
 		_, _, execution := openTestExecution(t, server)
 
 		_, err := execution.Wait(testClientContext(t))
+
 		var wireErr *Error
 		if !errors.As(err, &wireErr) || status.Code(err) != codes.Unavailable || wireErr.Message != "watch transport failed" {
 			t.Fatalf("unexpected stream failure: %#v", err)
@@ -276,10 +284,12 @@ func TestExecutionWaitRejectsIncompleteTerminalSnapshots(t *testing.T) {
 func openTestExecution(t *testing.T, server *clientTestServer) (*connectionHandle, *planHandle, *executionHandle) {
 	t.Helper()
 	client := openTestClient(t, startClientTestServer(t, server))
+
 	plan, err := client.compileConfigured(testClientContext(t), api.Source{Content: "RETURN 1"}, false, runtimePlanOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	t.Cleanup(func() {
 		if err := plan.Close(testClientContext(t)); err != nil {
 			t.Errorf("plan cleanup failed: %v", err)
@@ -290,6 +300,7 @@ func openTestExecution(t *testing.T, server *clientTestServer) (*connectionHandl
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	t.Cleanup(func() {
 		if err := execution.Close(testClientContext(t)); err != nil {
 			t.Errorf("execution cleanup failed: %v", err)
@@ -327,6 +338,7 @@ func executionCompletedEvent(id string, contentType string, content []byte) *wir
 
 func executionFailedEvent(id string, content []byte, failure *wirev1.Failure) *wirev1.WatchExecutionResponse {
 	var output *wirev1.Output
+
 	if content != nil {
 		output = &wirev1.Output{ContentType: "text/plain", Content: append([]byte(nil), content...)}
 	}

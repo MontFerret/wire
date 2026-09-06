@@ -16,6 +16,7 @@ import (
 
 func TestPackageDependencyDirection(t *testing.T) {
 	root := repositoryRoot(t)
+
 	legacyRuntimePackage := filepath.Join(root, "pkg", "runtime")
 	if _, err := os.Stat(legacyRuntimePackage); err == nil {
 		t.Errorf("obsolete shared package remains at %s", legacyRuntimePackage)
@@ -27,6 +28,7 @@ func TestPackageDependencyDirection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	for _, entry := range entries {
 		if !entry.IsDir() && filepath.Ext(entry.Name()) == ".go" {
 			t.Errorf("module root contains Go source %s; the root compatibility package must remain absent", entry.Name())
@@ -47,6 +49,7 @@ func TestPackageDependencyDirection(t *testing.T) {
 			if walkErr != nil {
 				return walkErr
 			}
+
 			if entry.IsDir() || filepath.Ext(path) != ".go" || strings.HasSuffix(path, "_test.go") {
 				return nil
 			}
@@ -55,6 +58,7 @@ func TestPackageDependencyDirection(t *testing.T) {
 			if err != nil {
 				return err
 			}
+
 			for _, spec := range parsed.Imports {
 				importPath := strings.Trim(spec.Path.Value, "\"")
 				for _, forbidden := range check.forbidden {
