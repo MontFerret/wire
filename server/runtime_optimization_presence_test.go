@@ -34,15 +34,17 @@ func TestClientOptimizationPresenceRoundTrip(t *testing.T) {
 					options = append(options, api.WithOptimizationLevel(test.level))
 				}
 
-				lowLevel, err := env.client.Compile(testContext(t), api.Source{Content: "RETURN 1"}, client.CompileOptions{
-					Debuggable:  debug,
-					PlanOptions: options,
-				})
+				compile := env.client.Compile
+				if debug {
+					compile = env.client.CompileDebug
+				}
+
+				plan, err := compile(testContext(t), api.Source{Content: "RETURN 1"}, options...)
 				if err != nil {
 					t.Fatal(err)
 				}
 
-				if err := lowLevel.Close(testContext(t)); err != nil {
+				if err := plan.Close(); err != nil {
 					t.Fatal(err)
 				}
 
@@ -64,28 +66,33 @@ func TestClientOptimizationPresenceRoundTrip(t *testing.T) {
 func TestCompileOptionsApplyOnceBeforeDispatch(t *testing.T) {
 	for _, debug := range []bool{false, true} {
 		for _, outcome := range []string{"success", "invalid level", "callback errors", "callback cancellation", "already cancelled"} {
-			name := "Client/" + map[bool]string{false: "normal/", true: "debug/"}[debug] + outcome
+			name := "Runtime/" + map[bool]string{false: "normal/", true: "debug/"}[debug] + outcome
 			t.Run(name, func(t *testing.T) {
 				hosted := &contractRuntime{}
 				env := newIntegrationEnv(t, hosted)
 				gate := &allocationResponseGate{ClientConnInterface: env.conn, calls: make(map[string]int)}
-				lowLevel, err := client.New(testContext(t), gate)
+				remote, err := client.New(testContext(t), gate)
 				if err != nil {
 					t.Fatal(err)
 				}
 
 				t.Cleanup(func() {
-					if err := lowLevel.Close(testContext(t)); err != nil {
+					if err := remote.Close(); err != nil {
 						t.Error(err)
 					}
 				})
 				compile := func(ctx context.Context, options []api.PlanOption) error {
-					plan, err := lowLevel.Compile(ctx, api.Source{Content: "RETURN 1"}, client.CompileOptions{Debuggable: debug, PlanOptions: options})
+					compile := remote.Compile
+					if debug {
+						compile = remote.CompileDebug
+					}
+
+					plan, err := compile(ctx, api.Source{Content: "RETURN 1"}, options...)
 					if err != nil {
 						return err
 					}
 
-					return plan.Close(testContext(t))
+					return plan.Close()
 				}
 
 				ctx, cancel := context.WithCancel(testContext(t))

@@ -9,16 +9,16 @@ import (
 	"github.com/MontFerret/wire/pkg/debugger"
 )
 
-// DebugEvents receives published debug snapshots until the terminal event or
+// debugEvents receives published debug snapshots until the terminal event or
 // stream cancellation.
-type DebugEvents struct {
+type debugEvents struct {
 	stream wirev1.DebugService_WatchDebugClient
 	cancel context.CancelFunc
 }
 
 // Recv blocks for the next ordered debug event. It releases the local stream
 // when a terminal event or error is observed.
-func (events *DebugEvents) Recv() (debugger.Event, error) {
+func (events *debugEvents) Recv() (debugger.Event, error) {
 	if events == nil || events.stream == nil {
 		return debugger.Event{}, errors.New("debug event receiver is nil")
 	}

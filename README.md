@@ -12,7 +12,7 @@ host application                         client application
   owns and secures net.Listener             owns transport lifetime
              |                                         |
              v                                         v
-     server.Server  <-------- ferret.wire.v1 ------ client.Runtime / Client
+     server.Server  <-------- ferret.wire.v1 ------ api.Runtime via client.New
         borrows runtime                           owns Connect stream
              |
        logical Connection
@@ -44,7 +44,7 @@ Unary execution and debug resume calls publish work before returning. Once publi
 
 The one-shot Connect handshake publishes the connection ID, Wire protocol name and version, and optional host identity supplied through `WithRuntimeIdentity`. It does not publish fabricated capabilities, a Ferret version, or module-build metadata.
 
-The Go client converts parameters without reflection. `client.Parameters` accepts `nil`, booleans, signed integer types, unsigned integers that fit in `int64`, finite `float32`/`float64`, strings, `[]byte`, `[]any`, and `map[string]any`. Duration, datetime, regexp, and other Go types are rejected locally.
+The Go client converts values supplied through `api.WithParam` and `api.WithParams` without reflection. It accepts `nil`, booleans, signed integer types, unsigned integers that fit in `int64`, finite `float32`/`float64`, strings, `[]byte`, `[]any`, and `map[string]any`. Duration, datetime, regexp, and other Go types are rejected locally.
 
 See [Wire Protocol](docs/protocol.md) for every RPC/message/enum, lifecycle and watch semantics, compatibility classifications, Unified API gaps, and deferred work.
 
@@ -71,157 +71,91 @@ ownership or requiring an adapter.
 
 For an application-private Unix socket, the caller creates `net.Listen("unix", socket)`, applies appropriate directory and socket permissions, and closes both the listener and runtime after the Wire server has shut down.
 
-The caller owns the gRPC transport. Closing either Wire client facade closes
-only its logical connection and the remote resources created through it.
+## Remote runtime example
 
-The Universal API facade is the primary path for callers that do not need
-Wire-specific asynchronous handles:
-
-```go
-remoteRuntime, err := client.NewRuntime(ctx, conn)
-if err != nil {
-    log.Fatal(err)
-}
-defer func() {
-    if err := remoteRuntime.Close(); err != nil {
-        log.Printf("close remote runtime: %v", err)
-    }
-}()
-
-output, err := remoteRuntime.Run(
-    ctx,
-    api.NewSource("example.fql", "RETURN @input"),
-    api.WithParam("input", "hello"),
-    api.WithOutputContentType("application/json"),
-)
-if err != nil {
-    log.Fatal(err)
-}
-fmt.Printf("%s: %s\n", output.ContentType, output.Content)
-```
-
-`NewRuntime` returns `client.Runtime`, an alias of the canonical `api.Runtime`
-interface backed by a private Wire adapter. `client.Session` aliases
-`api.Session`, and `client.Output` aliases `api.Output`, whose definition belongs
-to `github.com/MontFerret/api/result`. These aliases preserve canonical type
-identity. Plans and debugger Sessions use `api.Plan` and `api/debugger.Session`;
-their Wire adapters remain private. Source constructors, options, and debugger
-inspection types remain in their canonical packages.
-
-Plans and durable Sessions may be reused; normal Session runs are sequential.
-All adapter `Close` methods use bounded detached cleanup and never close `conn`.
-
-Code that explicitly declared `*client.Runtime` must now use `client.Runtime`.
-The inferred `remoteRuntime, err := client.NewRuntime(ctx, conn)` usage above is
-unchanged. The lower-level `client.Plan` and `client.DebugSession` handles keep
-their existing names and methods.
-
-Allocation replies that race cancellation are reclaimed automatically. If a
-reply is lost, the adapter closes the nearest owning Session or Plan and
-escalates to its logical Runtime only when needed. The caller's gRPC transport
-remains open. See [allocation and cancellation](docs/client.md#allocation-and-cancellation)
-for the bounded cleanup contract.
-
-The lower-level `client.Client` remains available. Its common one-shot path creates and releases
-its plan and execution automatically:
+Configure the transport before constructing the remote runtime. For a private
+Unix socket, the caller can use:
 
 ```go
-output, err := wireClient.Run(
-    ctx,
-    api.NewSource("example.fql", "RETURN @input"),
-    client.Parameters{"input": "hello"},
-    client.RunOptions{},
-)
-if err != nil {
-    log.Fatal(err)
-}
-fmt.Printf("%s: %s\n", output.ContentType, output.Content)
-```
-
-Use explicit handles when plans must be reused or execution needs watching,
-cancellation, or separately reported cleanup:
-
-```go
-const socket = "/var/run/my-app/ferret-wire.sock"
 conn, err := grpc.NewClient(
     "passthrough:///ferret-wire",
     grpc.WithTransportCredentials(insecure.NewCredentials()),
     grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
-        return new(net.Dialer).DialContext(ctx, "unix", socket)
+        return new(net.Dialer).DialContext(ctx, "unix", "/var/run/my-app/ferret-wire.sock")
     }),
 )
-if err != nil {
-    log.Fatal(err)
-}
-defer conn.Close()
+```
 
-wireClient, err := client.New(ctx, conn)
-if err != nil {
-    log.Fatal(err)
-}
-defer func() {
-    if err := wireClient.Close(context.Background()); err != nil {
-        log.Printf("close Wire client: %v", err)
-    }
-}()
+The caller checks the connection error and closes `conn` after its remote
+runtimes. Credentials, TLS, dial options, and message limits belong to this
+transport setup. `client.New` borrows the supplied connection and returns
+`api.Runtime`; subsequent operations use the same interfaces as a local runtime:
 
-plan, err := wireClient.Compile(
-    ctx,
-    api.NewSource("example.fql", "RETURN {input: @input}"),
-    client.CompileOptions{
-        PlanOptions: []api.PlanOption{api.WithOptimizationLevel(api.OptimizationBasic)},
-    },
-)
-if err != nil {
-    log.Fatal(err)
-}
-defer func() {
-    if err := plan.Close(context.Background()); err != nil {
-        log.Printf("close plan: %v", err)
-    }
-}()
-
-execution, err := plan.Execute(ctx, map[string]any{"input": "hello"}, client.ExecuteOptions{})
-if err != nil {
-    log.Fatal(err)
-}
-defer func() {
-    if err := execution.Close(context.Background()); err != nil {
-        log.Printf("close execution: %v", err)
-    }
-}()
-
-events, err := execution.Watch(ctx)
-if err != nil {
-    log.Fatal(err)
-}
-for {
-    event, err := events.Recv()
+```go
+func runRemote(ctx context.Context, conn grpc.ClientConnInterface) (out api.Output, err error) {
+    remote, err := client.New(ctx, conn)
     if err != nil {
-        log.Fatal(err)
+        return api.Output{}, err
     }
-    if event.Snapshot.State == execution.StateCompleted {
-        fmt.Printf("%s: %s\n", event.Snapshot.Output.ContentType, event.Snapshot.Output.Content)
-        break
+    defer func() { err = errors.Join(err, remote.Close()) }()
+
+    plan, err := remote.Compile(
+        ctx,
+        api.NewSource("example.fql", "RETURN @input"),
+        api.WithOptimizationLevel(api.OptimizationBasic),
+    )
+    if err != nil {
+        return api.Output{}, err
     }
-    if event.Snapshot.State.Terminal() {
-        log.Fatalf("execution ended in state %v: %v", event.Snapshot.State, event.Snapshot.Failure)
+    defer func() { err = errors.Join(err, plan.Close()) }()
+
+    session, err := plan.NewSession(
+        ctx,
+        api.WithParam("input", "hello"),
+        api.WithOutputContentType("application/json"),
+    )
+    if err != nil {
+        return api.Output{}, err
     }
+    defer func() { err = errors.Join(err, session.Close()) }()
+
+    return session.Run(ctx)
 }
 ```
 
-The public Go API is split by ownership: `server` hosts a borrowed `api.Runtime`,
-`client` owns remote handles, and `pkg/execution`, `pkg/debugger`, and
-`pkg/failure` contain the semantic values shared by both sides. The module root
-intentionally has no Go compatibility package.
+For a one-shot invocation, `remote.Run(ctx, source, options...)` calls the hosted
+`api.Runtime.Run` directly. Plans and durable sessions may be reused; normal
+session runs are sequential. Output remains `api.Output`: content type and
+encoded bytes.
 
-Wire failures expose `failure.Category` through `*client.Error`. When the
-runtime returns typed `diagnostics.Diagnostics`, `*client.Error` and
-asynchronous `*failure.Failure` preserve that canonical collection, including
-source content and ordered annotations. Bare cancellation, deadline,
-invalid-request, unavailable, and resource-exhaustion statuses remain
-category-free and are classified with `status.Code(err)`. Remote connection and
-resource IDs are not part of the high-level client error model.
+For debugging, use `remote.CompileDebug`, `plan.NewDebugSession`, and the
+canonical `api/debugger.Session` commands and events. Connection IDs, execution
+handles, and Wire watch streams remain private.
+
+The constructor context bounds the handshake. Cancelling it after construction
+does not close the runtime. All resource `Close` methods use bounded detached
+cleanup and leave `conn` open. Allocation replies that race cancellation are
+reclaimed automatically. If a reply is lost, the adapter closes the nearest
+owning session or plan and escalates to its logical runtime only when needed.
+See [allocation and cancellation](docs/client.md#allocation-and-cancellation).
+
+The public client exports only `New`, `Error`, `ErrClosed`, and
+`ErrExecutionCancelled`. Existing users of `NewRuntime` should call `New`;
+`client.Runtime`, `client.Session`, and `client.Output` declarations should use
+the canonical `api` types. The previous lower-level handles, options, metadata,
+and convenience operations have been removed without compatibility aliases.
+
+Immediate failures expose a Wire `failure.Category` through `*client.Error`.
+Terminal failures use `*failure.Failure`; both preserve canonical typed
+diagnostics and sanitized messages. `errors.Is` distinguishes `ErrClosed`,
+`ErrExecutionCancelled`, and caller context errors. Operation and cleanup
+errors remain joined. Transport causes remain accessible through `Unwrap` and
+`status.Code(err)` when transport-specific handling is needed. The API has no
+general remote-error taxonomy to substitute for these Wire errors.
+
+`server` hosts a borrowed `api.Runtime`, and `client` implements that interface
+remotely. `pkg/execution`, `pkg/debugger`, and `pkg/failure` retain the domain
+values shared by both sides. The module root has no Go compatibility package.
 
 ## Security and trust model
 
@@ -233,7 +167,7 @@ Windows named pipes and remote TCP/TLS can be added later by supplying ordinary 
 
 ## Non-goals and current limitations
 
-Wire does not provide runtime introspection, Ferret module discovery, language intelligence, LSP, DAP translation, listener policy, downstream ferretd/CLI/Lab integration, TTLs, heartbeats, negotiated advanced capabilities, or node/distributed bytecode transport. Further lower-level client redesign is separate from the Universal API facade. Wire makes no changes to Ferret core or other MontFerret repositories.
+Wire does not provide runtime introspection, Ferret module discovery, language intelligence, LSP, DAP translation, listener policy, downstream ferretd/CLI/Lab integration, TTLs, heartbeats, negotiated advanced capabilities, or node/distributed bytecode transport. Wire makes no changes to Ferret core or other MontFerret repositories.
 
 Wire forwards cancellation to Unified API compile and session operations. Whether
 an implementation can promptly interrupt its internal work remains a runtime

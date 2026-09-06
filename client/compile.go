@@ -8,26 +8,8 @@ import (
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
 )
 
-// Compile creates a connection-owned plan through the hosted runtime.
-func (c *Client) Compile(ctx context.Context, src api.Source, options CompileOptions) (*Plan, error) {
-	if err := c.checkOpen(); err != nil {
-		return nil, err
-	}
-
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-
-	configured, err := applyRuntimePlanOptions(options.PlanOptions)
-	if err != nil {
-		return nil, err
-	}
-
-	return c.compileConfigured(ctx, src, options.Debuggable, configured)
-}
-
 // compileConfigured shares allocation transport without reapplying option callbacks.
-func (c *Client) compileConfigured(ctx context.Context, src api.Source, debuggable bool, configured runtimePlanOptions) (*Plan, error) {
+func (c *connectionHandle) compileConfigured(ctx context.Context, src api.Source, debuggable bool, configured runtimePlanOptions) (*planHandle, error) {
 	if err := c.checkOpen(); err != nil {
 		return nil, err
 	}
@@ -70,11 +52,10 @@ func (c *Client) compileConfigured(ctx context.Context, src api.Source, debuggab
 		return nil, &allocationError{cause: errors.New("Wire server returned an invalid compiled plan")}
 	}
 
-	return &Plan{
+	return &planHandle{
 		client:     c,
 		id:         value.GetId().GetValue(),
 		parameters: append([]string(nil), value.GetParameters()...),
-		debuggable: debuggable,
 		close:      &closeState{},
 	}, nil
 }

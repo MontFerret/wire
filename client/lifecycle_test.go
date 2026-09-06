@@ -121,7 +121,7 @@ func (s *lifecycleServer) WatchExecution(_ *wirev1.WatchExecutionRequest, stream
 func TestCloseAfterServerDisconnectTreatsMissingConnectionAsSettled(t *testing.T) {
 	server := &lifecycleServer{disconnect: true}
 	connection := startLifecycleServer(t, server)
-	client, err := New(testClientContext(t), connection)
+	client, err := newConnection(testClientContext(t), connection)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,12 +144,13 @@ func TestCloseAfterServerDisconnectTreatsMissingConnectionAsSettled(t *testing.T
 func TestCloseRejectsNewOperationsAndCancelsFacadeWatchers(t *testing.T) {
 	server := &lifecycleServer{closeEntered: make(chan struct{}), allowClose: make(chan struct{})}
 	connection := startLifecycleServer(t, server)
-	client, err := New(testClientContext(t), connection)
+	client, err := newConnection(testClientContext(t), connection)
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan := &Plan{client: client, id: "plan", close: &closeState{}}
-	execution := &Execution{client: client, plan: plan, id: "execution", close: &closeState{}}
+	plan := &planHandle{client: client, id: "plan", close: &closeState{}}
+	session := &sessionHandle{client: client, plan: plan, id: "session", close: &closeState{}}
+	execution := &executionHandle{client: client, session: session, id: "execution", close: &closeState{}}
 	events, err := execution.Watch(testClientContext(t))
 	if err != nil {
 		t.Fatal(err)
@@ -168,7 +169,7 @@ func TestCloseRejectsNewOperationsAndCancelsFacadeWatchers(t *testing.T) {
 		t.Fatal("client close did not reach the server")
 	}
 
-	if _, err := client.Compile(context.Background(), api.Source{Content: "RETURN 1"}, CompileOptions{}); !errors.Is(err, ErrClosed) {
+	if _, err := client.compileConfigured(context.Background(), api.Source{Content: "RETURN 1"}, false, runtimePlanOptions{}); !errors.Is(err, ErrClosed) {
 		t.Fatalf("client accepted a new operation after close started: %v", err)
 	}
 	close(server.allowClose)

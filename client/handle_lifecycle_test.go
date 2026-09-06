@@ -23,11 +23,11 @@ func TestHandleCloseContinuesAfterFirstCallerCancellation(t *testing.T) {
 	}
 	connection := startHandleServer(t, implementation)
 	client := openHandleClient(t, connection)
-	plan, err := client.Compile(testClientContext(t), api.Source{Content: "RETURN 1"}, CompileOptions{})
+	plan, err := client.compileConfigured(testClientContext(t), api.Source{Content: "RETURN 1"}, false, runtimePlanOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	execution, err := plan.Execute(testClientContext(t), nil, ExecuteOptions{})
+	execution, err := startTestPlanExecution(testClientContext(t), plan, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,8 +46,8 @@ func TestHandleCloseContinuesAfterFirstCallerCancellation(t *testing.T) {
 	if err := receiveCloseResult(t, first, "first execution close"); !errors.Is(err, context.Canceled) {
 		t.Fatalf("first close did not stop waiting after cancellation: %v", err)
 	}
-	if err := execution.Cancel(testClientContext(t)); !errors.Is(err, ErrClosed) {
-		t.Fatalf("closed execution accepted cancellation: %v", err)
+	if _, err := execution.Watch(testClientContext(t)); !errors.Is(err, ErrClosed) {
+		t.Fatalf("closed execution accepted a watch: %v", err)
 	}
 
 	second := make(chan error, 1)
@@ -81,11 +81,11 @@ func TestConcurrentHandleCloseReleasesOnce(t *testing.T) {
 	}
 	connection := startHandleServer(t, implementation)
 	client := openHandleClient(t, connection)
-	plan, err := client.Compile(testClientContext(t), api.Source{Content: "RETURN 1"}, CompileOptions{})
+	plan, err := client.compileConfigured(testClientContext(t), api.Source{Content: "RETURN 1"}, false, runtimePlanOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	execution, err := plan.Execute(testClientContext(t), nil, ExecuteOptions{})
+	execution, err := startTestPlanExecution(testClientContext(t), plan, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,15 +136,15 @@ func TestDescendantCloseDuringAncestorCloseObservesRetainedResult(t *testing.T) 
 	}
 	connection := startHandleServer(t, implementation)
 	client := openHandleClient(t, connection)
-	plan, err := client.Compile(testClientContext(t), api.Source{Content: "RETURN 1"}, CompileOptions{Debuggable: true})
+	plan, err := client.compileConfigured(testClientContext(t), api.Source{Content: "RETURN 1"}, true, runtimePlanOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	execution, err := plan.Execute(testClientContext(t), nil, ExecuteOptions{})
+	execution, err := startTestPlanExecution(testClientContext(t), plan, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	debug, err := plan.NewDebugSession(testClientContext(t), nil, DebugSessionOptions{})
+	debug, err := plan.NewDebugSession(testClientContext(t), runtimeSessionOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -205,15 +205,15 @@ func TestDescendantCloseAfterAncestorCloseObservesRetainedResult(t *testing.T) {
 	implementation := &handleServer{}
 	connection := startHandleServer(t, implementation)
 	client := openHandleClient(t, connection)
-	plan, err := client.Compile(testClientContext(t), api.Source{Content: "RETURN 1"}, CompileOptions{Debuggable: true})
+	plan, err := client.compileConfigured(testClientContext(t), api.Source{Content: "RETURN 1"}, true, runtimePlanOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	execution, err := plan.Execute(testClientContext(t), nil, ExecuteOptions{})
+	execution, err := startTestPlanExecution(testClientContext(t), plan, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	debug, err := plan.NewDebugSession(testClientContext(t), nil, DebugSessionOptions{})
+	debug, err := plan.NewDebugSession(testClientContext(t), runtimeSessionOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -221,7 +221,7 @@ func TestDescendantCloseAfterAncestorCloseObservesRetainedResult(t *testing.T) {
 	if err := plan.Close(testClientContext(t)); err != nil {
 		t.Fatal(err)
 	}
-	if err := execution.Cancel(testClientContext(t)); !errors.Is(err, ErrClosed) {
+	if _, err := execution.Watch(testClientContext(t)); !errors.Is(err, ErrClosed) {
 		t.Fatalf("execution survived plan close: %v", err)
 	}
 	if err := debug.Start(testClientContext(t)); !errors.Is(err, ErrClosed) {
@@ -246,23 +246,23 @@ func TestDescendantCloseAfterAncestorCloseObservesRetainedResult(t *testing.T) {
 }
 
 func TestZeroValueHandlesAreClosed(t *testing.T) {
-	var plan Plan
-	if _, err := plan.Execute(testClientContext(t), nil, ExecuteOptions{}); !errors.Is(err, ErrClosed) {
-		t.Fatalf("zero plan accepted execution: %v", err)
+	var plan planHandle
+	if _, err := plan.newSession(testClientContext(t), runtimeSessionOptions{}); !errors.Is(err, ErrClosed) {
+		t.Fatalf("zero plan accepted session creation: %v", err)
 	}
 	if err := plan.Close(testClientContext(t)); !errors.Is(err, ErrClosed) {
 		t.Fatalf("zero plan close was not closed: %v", err)
 	}
 
-	var execution Execution
-	if err := execution.Cancel(testClientContext(t)); !errors.Is(err, ErrClosed) {
-		t.Fatalf("zero execution accepted cancellation: %v", err)
+	var execution executionHandle
+	if _, err := execution.Watch(testClientContext(t)); !errors.Is(err, ErrClosed) {
+		t.Fatalf("zero execution accepted a watch: %v", err)
 	}
 	if err := execution.Close(testClientContext(t)); !errors.Is(err, ErrClosed) {
 		t.Fatalf("zero execution close was not closed: %v", err)
 	}
 
-	var debug DebugSession
+	var debug debugSessionHandle
 	if err := debug.Start(testClientContext(t)); !errors.Is(err, ErrClosed) {
 		t.Fatalf("zero debug session accepted start: %v", err)
 	}

@@ -13,15 +13,15 @@ import (
 
 func TestCompileMapsCanonicalSource(t *testing.T) {
 	server := &clientTestServer{}
-	client := openTestClient(t, startClientTestServer(t, server))
+	client := openTestRuntime(t, startClientTestServer(t, server))
 	src := api.Source{Name: "query.fql", Content: "RETURN 1"}
 
-	plan, err := client.Compile(testClientContext(t), src, CompileOptions{})
+	plan, err := client.Compile(testClientContext(t), src)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() {
-		if err := plan.Close(testClientContext(t)); err != nil {
+		if err := plan.Close(); err != nil {
 			t.Errorf("close plan: %v", err)
 		}
 	}()
@@ -35,41 +35,46 @@ func TestCompileMapsCanonicalSource(t *testing.T) {
 	}
 }
 
-func TestPlanRunOwnsOnlyItsExecution(t *testing.T) {
+func TestSessionRunPreservesCallerOwnedPlan(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		server := &clientTestServer{watchScripts: []executionWatchScript{{events: []*wirev1.WatchExecutionResponse{
 			executionStartedEvent("execution-1"),
 			executionCompletedEvent("execution-1", "text/plain", []byte("done")),
 		}}}}
-		client := openTestClient(t, startClientTestServer(t, server))
-		plan, err := client.Compile(testClientContext(t), api.Source{Content: "RETURN 1"}, CompileOptions{})
+		client := openTestRuntime(t, startClientTestServer(t, server))
+		plan, err := client.Compile(testClientContext(t), api.Source{Content: "RETURN 1"})
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		output, err := plan.Run(testClientContext(t), nil, ExecuteOptions{})
+		session, err := plan.NewSession(testClientContext(t))
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		output, err := session.Run(testClientContext(t))
 		if err != nil || string(output.Content) != "done" {
-			t.Fatalf("unexpected Plan.Run result: %#v, %v", output, err)
+			t.Fatalf("unexpected Session.Run result: %#v, %v", output, err)
 		}
 		_, _, releaseExecutionCalls, releasePlanCalls := server.callSnapshot()
 		if releaseExecutionCalls != 1 || releasePlanCalls != 0 {
-			t.Fatalf("Plan.Run cleanup: execution=%d plan=%d", releaseExecutionCalls, releasePlanCalls)
+			t.Fatalf("Session.Run cleanup: execution=%d plan=%d", releaseExecutionCalls, releasePlanCalls)
 		}
 
 		executionDeadline, planDeadline := server.releaseDeadlineSnapshot()
 		assertCleanupDeadline(t, "execution", executionDeadline)
 		if !planDeadline.IsZero() {
-			t.Fatalf("Plan.Run released the caller-owned plan with deadline %v", planDeadline)
+			t.Fatalf("Session.Run released the caller-owned plan with deadline %v", planDeadline)
 		}
 
-		extra, err := plan.Execute(testClientContext(t), nil, ExecuteOptions{})
+		extra, err := plan.NewSession(testClientContext(t))
 		if err != nil {
-			t.Fatalf("Plan.Run closed the caller-owned plan: %v", err)
+			t.Fatalf("Session.Run closed the caller-owned plan: %v", err)
 		}
-		if err := plan.Close(testClientContext(t)); err != nil {
+		if err := plan.Close(); err != nil {
 			t.Fatal(err)
 		}
-		if err := extra.Close(testClientContext(t)); err != nil {
+		if err := extra.Close(); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -84,24 +89,29 @@ func TestPlanRunOwnsOnlyItsExecution(t *testing.T) {
 			}}},
 			releaseExecutionErr: status.Error(codes.Internal, "execution cleanup failed"),
 		}
-		client := openTestClient(t, startClientTestServer(t, server))
-		plan, err := client.Compile(testClientContext(t), api.Source{Content: "RETURN 1"}, CompileOptions{})
+		client := openTestRuntime(t, startClientTestServer(t, server))
+		plan, err := client.Compile(testClientContext(t), api.Source{Content: "RETURN 1"})
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		output, err := plan.Run(testClientContext(t), nil, ExecuteOptions{})
+		session, err := plan.NewSession(testClientContext(t))
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		output, err := session.Run(testClientContext(t))
 		var terminalFailure *failure.Failure
 		var wireErr *Error
 		if string(output.Content) != "partial" || !errors.As(err, &terminalFailure) || !errors.As(err, &wireErr) ||
 			terminalFailure.Message != "execution failed" || wireErr.Message != "execution cleanup failed" {
-			t.Fatalf("Plan.Run did not preserve joined errors: %#v, %v", output, err)
+			t.Fatalf("Session.Run did not preserve joined errors: %#v, %v", output, err)
 		}
 		_, _, releaseExecutionCalls, releasePlanCalls := server.callSnapshot()
 		if releaseExecutionCalls != 1 || releasePlanCalls != 0 {
-			t.Fatalf("Plan.Run failure cleanup: execution=%d plan=%d", releaseExecutionCalls, releasePlanCalls)
+			t.Fatalf("Session.Run failure cleanup: execution=%d plan=%d", releaseExecutionCalls, releasePlanCalls)
 		}
-		if err := plan.Close(testClientContext(t)); err != nil {
+		if err := plan.Close(); err != nil {
 			t.Fatal(err)
 		}
 	})

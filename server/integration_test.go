@@ -28,7 +28,7 @@ type integrationEnv struct {
 	server          *server.Server
 	listener        *bufconn.Listener
 	conn            *grpc.ClientConn
-	client          *client.Client
+	client          api.Runtime
 	serveErr        chan error
 	shutdown        bool
 	transportClosed bool
@@ -51,28 +51,41 @@ func TestUnifiedRuntimeCompileExecuteAndBorrowedOwnership(t *testing.T) {
 		Name: "test-host", Version: "1.2.3", InstanceID: "instance-1",
 	}))
 
-	info := env.client.RuntimeInfo()
-	if info.APIIdentity != "ferret.wire" || info.WireVersion != "v1" || info.FerretVersion != "" {
-		t.Fatalf("unexpected generic runtime info: %#v", info)
+	streamCtx, cancel := context.WithCancel(testContext(t))
+	defer cancel()
+	rpc := wirev1.NewRuntimeServiceClient(env.conn)
+	stream, err := rpc.Connect(streamCtx, &wirev1.ConnectRequest{})
+	if err != nil {
+		t.Fatal(err)
 	}
 
-	if info.RuntimeIdentity == nil || info.RuntimeIdentity.Name != "test-host" || info.Capabilities != (client.Capabilities{}) {
-		t.Fatalf("unexpected identity or legacy capabilities: %#v", info)
+	info, err := stream.Recv()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if info.GetProtocol().GetName() != "ferret.wire" || info.GetProtocol().GetVersion() != "v1" ||
+		info.GetRuntimeIdentity().GetName() != "test-host" {
+		t.Fatalf("unexpected handshake metadata: %v", info)
+	}
+
+	if _, err := rpc.CloseConnection(testContext(t), &wirev1.CloseConnectionRequest{ConnectionId: info.GetConnectionId()}); err != nil {
+		t.Fatal(err)
 	}
 
 	compiled, err := env.client.Compile(context.Background(), api.Source{
 		Name:    "unified.fql",
 		Content: "RETURN @input",
-	}, client.CompileOptions{})
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if !reflect.DeepEqual(compiled.Parameters(), []string{"input"}) {
-		t.Fatalf("unexpected plan parameters: %#v", compiled.Parameters())
+	if !reflect.DeepEqual(compiled.Params(), []string{"input"}) {
+		t.Fatalf("unexpected plan parameters: %#v", compiled.Params())
 	}
 
-	parameters := client.Parameters{
+	parameters := map[string]any{
 		"input": map[string]any{
 			"none":    nil,
 			"boolean": true,
@@ -84,12 +97,12 @@ func TestUnifiedRuntimeCompileExecuteAndBorrowedOwnership(t *testing.T) {
 		},
 	}
 	for range 2 {
-		execution, err := compiled.Execute(context.Background(), parameters, client.ExecuteOptions{OutputContentType: "application/json"})
+		session, err := compiled.NewSession(testContext(t), api.WithParams(parameters), api.WithOutputContentType("application/json"))
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		output, err := execution.Wait(testContext(t))
+		output, err := session.Run(testContext(t))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -98,7 +111,7 @@ func TestUnifiedRuntimeCompileExecuteAndBorrowedOwnership(t *testing.T) {
 			t.Fatalf("unexpected output: %#v", output)
 		}
 
-		if err := execution.Close(testContext(t)); err != nil {
+		if err := session.Close(); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -120,11 +133,11 @@ func TestUnifiedRuntimeCompileExecuteAndBorrowedOwnership(t *testing.T) {
 
 	assertTransportNeutralParams(t, options[0].params)
 
-	if err := compiled.Close(testContext(t)); err != nil {
+	if err := compiled.Close(); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := env.client.Close(testContext(t)); err != nil {
+	if err := env.client.Close(); err != nil {
 		t.Fatal(err)
 	}
 
@@ -167,22 +180,43 @@ func TestServerShutdownClosesOwnedResourcesWithoutClosingRuntime(t *testing.T) {
 		return plan, nil
 	}}
 	env := newIntegrationEnv(t, runtime)
-	compiled, err := env.client.Compile(context.Background(), api.Source{Name: "shutdown.fql", Content: "RETURN 1"}, client.CompileOptions{})
+	compiled, err := env.client.Compile(context.Background(), api.Source{Name: "shutdown.fql", Content: "RETURN 1"})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := compiled.Execute(context.Background(), nil, client.ExecuteOptions{}); err != nil {
+	remoteSession, err := compiled.NewSession(testContext(t))
+	if err != nil {
 		t.Fatal(err)
 	}
 
-	<-started
+	result := make(chan error, 1)
+	runCtx := testContext(t)
+	go func() {
+		_, err := remoteSession.Run(runCtx)
+		result <- err
+	}()
+
+	select {
+	case <-started:
+	case <-runCtx.Done():
+		t.Fatal("hosted session did not start")
+	}
 
 	if err := env.server.Shutdown(testContext(t)); err != nil {
 		t.Fatal(err)
 	}
 
 	env.shutdown = true
+
+	select {
+	case err := <-result:
+		if err == nil {
+			t.Fatal("shutdown execution unexpectedly succeeded")
+		}
+	case <-runCtx.Done():
+		t.Fatal("remote execution did not settle after shutdown")
+	}
 
 	session.mu.Lock()
 	sessionCloseCalls := session.closeCalls
@@ -230,7 +264,7 @@ func TestGenericRuntimeFailuresAreStructuredAndSanitized(t *testing.T) {
 		return nil, secret
 	}}
 	env := newIntegrationEnv(t, runtime)
-	_, err := env.client.Compile(context.Background(), api.Source{Content: "broken"}, client.CompileOptions{})
+	_, err := env.client.Compile(context.Background(), api.Source{Content: "broken"})
 	var wireErr *client.Error
 	if !errors.As(err, &wireErr) || wireErr.Category != failure.CategoryCompilation {
 		t.Fatalf("unexpected compile error: %v", err)
@@ -250,7 +284,7 @@ func TestPortableDiagnosticsCrossImmediateAndAsynchronousFailures(t *testing.T) 
 		}}
 		env := newIntegrationEnv(t, runtime)
 
-		_, err := env.client.Compile(context.Background(), api.Source{Name: "query.fql", Content: "RETURN"}, client.CompileOptions{})
+		_, err := env.client.Compile(context.Background(), api.Source{Name: "query.fql", Content: "RETURN"})
 		var wireErr *client.Error
 		if !errors.As(err, &wireErr) || wireErr.Category != failure.CategoryCompilation {
 			t.Fatalf("unexpected compile error: %v", err)
@@ -274,17 +308,17 @@ func TestPortableDiagnosticsCrossImmediateAndAsynchronousFailures(t *testing.T) 
 		}}
 		env := newIntegrationEnv(t, runtime)
 
-		compiled, err := env.client.Compile(context.Background(), api.Source{Name: "query.fql", Content: "RETURN"}, client.CompileOptions{})
+		compiled, err := env.client.Compile(context.Background(), api.Source{Name: "query.fql", Content: "RETURN"})
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		execution, err := compiled.Execute(context.Background(), nil, client.ExecuteOptions{})
+		session, err := compiled.NewSession(testContext(t))
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		output, err := execution.Wait(testContext(t))
+		output, err := session.Run(testContext(t))
 		var terminalFailure *failure.Failure
 		if !errors.As(err, &terminalFailure) || terminalFailure.Category != failure.CategoryExecution {
 			t.Fatalf("unexpected execution failure: %v", err)
@@ -352,17 +386,17 @@ func TestMessageLimitsRemainAtTheGRPCBoundary(t *testing.T) {
 		t.Fatalf("unexpected inbound message result: %v", err)
 	}
 
-	compiled, err := env.client.Compile(context.Background(), api.Source{Content: "large"}, client.CompileOptions{})
+	compiled, err := env.client.Compile(context.Background(), api.Source{Content: "large"})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	execution, err := compiled.Execute(context.Background(), nil, client.ExecuteOptions{})
+	session, err := compiled.NewSession(testContext(t))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := execution.Wait(testContext(t)); status.Code(err) != codes.ResourceExhausted {
+	if _, err := session.Run(testContext(t)); status.Code(err) != codes.ResourceExhausted {
 		var wireErr *client.Error
 		if !errors.As(err, &wireErr) || status.Code(err) != codes.ResourceExhausted {
 			t.Fatalf("unexpected outbound message result: %v", err)
@@ -400,7 +434,7 @@ func newIntegrationEnv(t testing.TB, runtime api.Runtime, options ...server.Opti
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		if err := wireClient.Close(ctx); err != nil && !errors.Is(err, client.ErrClosed) && !env.shutdown {
+		if err := wireClient.Close(); err != nil && !errors.Is(err, client.ErrClosed) && !env.shutdown {
 			t.Errorf("client cleanup failed: %v", err)
 		}
 

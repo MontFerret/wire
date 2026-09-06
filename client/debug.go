@@ -6,17 +6,17 @@ import (
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
 )
 
-// DebugSession is one remote Unified API debugger session owned by its Plan.
-type DebugSession struct {
-	client *Client
-	plan   *Plan
+// debugSessionHandle is a remote debugger session owned by its plan.
+type debugSessionHandle struct {
+	client *connectionHandle
+	plan   *planHandle
 	id     string
 	close  *closeState
 }
 
 // Start begins a newly created debug session. Watch publishes the running and
 // subsequent stop or terminal snapshots.
-func (d *DebugSession) Start(ctx context.Context) error {
+func (d *debugSessionHandle) Start(ctx context.Context) error {
 	if err := d.checkOpen(); err != nil {
 		return err
 	}
@@ -29,7 +29,7 @@ func (d *DebugSession) Start(ctx context.Context) error {
 }
 
 // Continue resumes a stopped debug session.
-func (d *DebugSession) Continue(ctx context.Context) error {
+func (d *debugSessionHandle) Continue(ctx context.Context) error {
 	if err := d.checkOpen(); err != nil {
 		return err
 	}
@@ -42,7 +42,7 @@ func (d *DebugSession) Continue(ctx context.Context) error {
 }
 
 // Pause requests a pause from a running debug session.
-func (d *DebugSession) Pause(ctx context.Context) error {
+func (d *debugSessionHandle) Pause(ctx context.Context) error {
 	if err := d.checkOpen(); err != nil {
 		return err
 	}
@@ -55,7 +55,7 @@ func (d *DebugSession) Pause(ctx context.Context) error {
 }
 
 // StepOver resumes until the next statement without entering a called function.
-func (d *DebugSession) StepOver(ctx context.Context) error {
+func (d *debugSessionHandle) StepOver(ctx context.Context) error {
 	if err := d.checkOpen(); err != nil {
 		return err
 	}
@@ -69,7 +69,7 @@ func (d *DebugSession) StepOver(ctx context.Context) error {
 
 // StepIn resumes until the next statement, entering a called function when
 // applicable.
-func (d *DebugSession) StepIn(ctx context.Context) error {
+func (d *debugSessionHandle) StepIn(ctx context.Context) error {
 	if err := d.checkOpen(); err != nil {
 		return err
 	}
@@ -82,7 +82,7 @@ func (d *DebugSession) StepIn(ctx context.Context) error {
 }
 
 // StepOut resumes until execution leaves the current frame.
-func (d *DebugSession) StepOut(ctx context.Context) error {
+func (d *debugSessionHandle) StepOut(ctx context.Context) error {
 	if err := d.checkOpen(); err != nil {
 		return err
 	}
@@ -94,23 +94,9 @@ func (d *DebugSession) StepOut(ctx context.Context) error {
 	return decodeError(err)
 }
 
-// Stop terminates a non-terminal debug session without releasing its remote
-// resource. Close performs the distinct release operation.
-func (d *DebugSession) Stop(ctx context.Context) error {
-	if err := d.checkOpen(); err != nil {
-		return err
-	}
-
-	_, err := d.client.debugClient.Terminate(ctx, &wirev1.TerminateRequest{
-		ConnectionId: d.client.connectionProto(), DebugSessionId: &wirev1.DebugSessionId{Value: d.id},
-	})
-
-	return decodeError(err)
-}
-
-// Watch opens an ordered event stream tied to both ctx and the Client's
-// logical lifecycle. It begins with the latest state published by the server.
-func (d *DebugSession) Watch(ctx context.Context) (*DebugEvents, error) {
+// Watch opens an ordered event stream tied to ctx and the logical connection.
+// It begins with the latest state published by the server.
+func (d *debugSessionHandle) Watch(ctx context.Context) (*debugEvents, error) {
 	if err := d.checkOpen(); err != nil {
 		return nil, err
 	}
@@ -125,12 +111,12 @@ func (d *DebugSession) Watch(ctx context.Context) (*DebugEvents, error) {
 		return nil, decodeError(err)
 	}
 
-	return &DebugEvents{stream: stream, cancel: cancel}, nil
+	return &debugEvents{stream: stream, cancel: cancel}, nil
 }
 
 // Close terminates and releases the remote debug session. Concurrent and
 // repeated calls observe one retained release result.
-func (d *DebugSession) Close(ctx context.Context) error {
+func (d *debugSessionHandle) Close(ctx context.Context) error {
 	if d == nil || d.client == nil || d.plan == nil || d.id == "" || d.close == nil {
 		return ErrClosed
 	}
@@ -142,7 +128,7 @@ func (d *DebugSession) Close(ctx context.Context) error {
 	return d.close.Wait(ctx)
 }
 
-func (d *DebugSession) checkOpen() error {
+func (d *debugSessionHandle) checkOpen() error {
 	if d == nil || d.client == nil || d.plan == nil || d.id == "" || d.close == nil || d.close.Started() {
 		return ErrClosed
 	}
@@ -150,7 +136,7 @@ func (d *DebugSession) checkOpen() error {
 	return d.plan.checkOpen()
 }
 
-func (d *DebugSession) release(ctx context.Context) error {
+func (d *debugSessionHandle) release(ctx context.Context) error {
 	if closing, err := d.plan.ancestorCloseResult(ctx); closing {
 		return err
 	}

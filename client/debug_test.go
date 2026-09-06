@@ -358,7 +358,7 @@ func TestDebugConversionsRejectMalformedTransportValues(t *testing.T) {
 
 func TestDebugEventsCancelWatchOnMalformedServerValue(t *testing.T) {
 	cancelled := false
-	events := &DebugEvents{
+	events := &debugEvents{
 		stream: &debugResponseStream{response: &wirev1.WatchDebugResponse{
 			Kind: wirev1.DebugEventKind_DEBUG_EVENT_KIND_STOPPED,
 			Session: &wirev1.DebugSession{

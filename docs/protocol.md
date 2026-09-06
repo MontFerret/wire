@@ -111,12 +111,13 @@ rejects those values on both client encoding and server decoding.
 Execution and debugger completion preserve Unified API encoded output exactly:
 `content_type` plus bytes. Wire never interprets the bytes as runtime values.
 
-The handwritten Go adapters project these messages onto the public semantic
-packages `pkg/execution`, `pkg/debugger`, and `pkg/failure`. These values are
-shared by client and server and deliberately omit protocol resource IDs. The
-adapters copy mutable output, diagnostic, range, and breakpoint data at
-ownership and delivery boundaries and validate every state, event-kind, and
-failure-category enum explicitly in both directions.
+The handwritten Go adapters use `pkg/execution`, `pkg/debugger`, and
+`pkg/failure` for shared Wire semantics, without protocol resource IDs.
+The public client projects execution and debugging onto canonical Universal
+API interfaces and events; Wire snapshots and watch streams remain private to
+its implementation. The adapters copy mutable output, diagnostic, range, and
+breakpoint data at ownership and delivery boundaries and validate every state,
+event-kind, and failure-category enum explicitly in both directions.
 
 Only typed `diagnostics.Diagnostics` values cross the boundary. Wire never
 parses runtime error strings. Each diagnostic preserves kind, message, source
@@ -331,7 +332,8 @@ taxonomy, a Unified API declaration of accepted parameter values, runtime
 introspection/versioning, or capability negotiation. Host-supplied
 `RuntimeIdentity` is not presented as API introspection.
 
-A broad lower-level client redesign, native Ferret consumer migration, bytecode/node
-protocols, distributed execution, and advanced negotiated capabilities remain
-separate work. The Universal API adapter deliberately composes the same Wire
-resources and does not add reconnection, leases, or transport construction.
+Native Ferret consumer migration, bytecode/node protocols, distributed execution,
+and advanced negotiated capabilities remain separate work. The public client
+uses the Universal API programming model over private Wire resources. Removing
+the lower-level Go facade does not remove protocol operations or add
+reconnection, leases, or transport construction.

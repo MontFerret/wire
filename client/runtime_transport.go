@@ -7,17 +7,16 @@ import (
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
 )
 
-func (c *Client) run(
+func (c *connectionHandle) run(
 	ctx context.Context,
 	src api.Source,
-	parameters Parameters,
-	options ExecuteOptions,
-) (*Execution, error) {
+	configured runtimeSessionOptions,
+) (*executionHandle, error) {
 	if err := c.checkOpen(); err != nil {
 		return nil, err
 	}
 
-	converted, err := encodeParameters(parameters)
+	converted, err := encodeParameters(configured.parameters)
 	if err != nil {
 		return nil, err
 	}
@@ -26,11 +25,11 @@ func (c *Client) run(
 		ConnectionId:      c.connectionProto(),
 		Source:            &wirev1.Source{Name: src.Name, Content: src.Content},
 		Parameters:        converted,
-		OutputContentType: options.OutputContentType,
+		OutputContentType: configured.outputContentType,
 	})
 	if err != nil {
 		return nil, allocationRPCError(err)
 	}
 
-	return newExecutionHandle(c, nil, nil, response.GetExecution())
+	return newExecutionHandle(c, nil, response.GetExecution())
 }

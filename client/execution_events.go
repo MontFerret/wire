@@ -9,16 +9,16 @@ import (
 	"github.com/MontFerret/wire/pkg/execution"
 )
 
-// ExecutionEvents receives the current execution snapshot followed by ordered
+// executionEvents receives the current execution snapshot followed by ordered
 // state changes until the terminal event or stream cancellation.
-type ExecutionEvents struct {
+type executionEvents struct {
 	stream wirev1.ExecutionService_WatchExecutionClient
 	cancel context.CancelFunc
 }
 
 // Recv blocks for the next ordered execution event. It releases the local
 // stream when a terminal event or error is observed.
-func (events *ExecutionEvents) Recv() (execution.Event, error) {
+func (events *executionEvents) Recv() (execution.Event, error) {
 	if events == nil || events.stream == nil {
 		return execution.Event{}, errors.New("execution event receiver is nil")
 	}

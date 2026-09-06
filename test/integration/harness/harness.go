@@ -141,7 +141,7 @@ func (h *Harness) Faults() *Faults {
 }
 
 func (h *Harness) OpenRuntime() (api.Runtime, error) {
-	runtime, err := client.NewRuntime(h.ctx, h.faults)
+	runtime, err := client.New(h.ctx, h.faults)
 	if err != nil {
 		return nil, err
 	}

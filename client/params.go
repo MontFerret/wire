@@ -10,10 +10,6 @@ import (
 
 const maxParameterDepth = 64
 
-// Parameters is the explicit Wire parameter model accepted by Plan.Execute
-// and Plan.NewDebugSession. Unsupported Go values are rejected locally.
-type Parameters map[string]any
-
 func encodeParameters(values map[string]any) (*wirev1.Parameters, error) {
 	result := &wirev1.Parameters{Values: make(map[string]*wirev1.Value, len(values))}
 	for name, value := range values {

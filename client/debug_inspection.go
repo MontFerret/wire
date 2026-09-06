@@ -10,17 +10,9 @@ import (
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
 )
 
-// SetBreakpoint adds one runtime breakpoint. Line must be positive; column zero
-// means unspecified.
-func (d *DebugSession) SetBreakpoint(ctx context.Context, location source.Location) (debugger.Breakpoint, error) {
-	return d.SetBreakpointAt(ctx, location, debugger.BreakpointOptions{
-		BindingMode: debugger.BreakpointBindNextExecutableInSource,
-	})
-}
-
 // SetBreakpointAt adds one runtime breakpoint using the requested canonical
 // Unified API binding mode.
-func (d *DebugSession) SetBreakpointAt(
+func (d *debugSessionHandle) SetBreakpointAt(
 	ctx context.Context,
 	location source.Location,
 	options debugger.BreakpointOptions,
@@ -79,7 +71,7 @@ func breakpointBindingModeToProto(value debugger.BreakpointBindingMode) (wirev1.
 
 // DeleteBreakpoint removes one server-issued breakpoint from a created or
 // stopped session.
-func (d *DebugSession) DeleteBreakpoint(ctx context.Context, breakpointID debugger.BreakpointID) error {
+func (d *debugSessionHandle) DeleteBreakpoint(ctx context.Context, breakpointID debugger.BreakpointID) error {
 	if err := d.checkOpen(); err != nil {
 		return err
 	}
@@ -99,7 +91,7 @@ func (d *DebugSession) DeleteBreakpoint(ctx context.Context, breakpointID debugg
 
 // Frames returns the current paused frame followed by its callers. The slice
 // index is the frame index accepted by FrameLocals and EvaluateFrame.
-func (d *DebugSession) Frames(ctx context.Context) ([]debugger.Frame, error) {
+func (d *debugSessionHandle) Frames(ctx context.Context) ([]debugger.Frame, error) {
 	if err := d.checkOpen(); err != nil {
 		return nil, err
 	}
@@ -125,7 +117,7 @@ func (d *DebugSession) Frames(ctx context.Context) ([]debugger.Frame, error) {
 
 // FrameLocals returns runtime variables for a paused frame. Parameters are
 // identified by debugger.Variable.Param.
-func (d *DebugSession) FrameLocals(ctx context.Context, frameIndex int) ([]debugger.Variable, error) {
+func (d *debugSessionHandle) FrameLocals(ctx context.Context, frameIndex int) ([]debugger.Variable, error) {
 	if err := d.checkOpen(); err != nil {
 		return nil, err
 	}
@@ -155,7 +147,7 @@ func (d *DebugSession) FrameLocals(ctx context.Context, frameIndex int) ([]debug
 
 // Variables expands a non-zero debug value reference. References become stale
 // after every resume.
-func (d *DebugSession) Variables(ctx context.Context, reference debugger.ValueReference) ([]debugger.Variable, error) {
+func (d *debugSessionHandle) Variables(ctx context.Context, reference debugger.ValueReference) ([]debugger.Variable, error) {
 	if err := d.checkOpen(); err != nil {
 		return nil, err
 	}
@@ -184,7 +176,7 @@ func (d *DebugSession) Variables(ctx context.Context, reference debugger.ValueRe
 }
 
 // EvaluateFrame evaluates an FQL expression in one paused frame.
-func (d *DebugSession) EvaluateFrame(ctx context.Context, frameIndex int, expression string) (debugger.Value, error) {
+func (d *debugSessionHandle) EvaluateFrame(ctx context.Context, frameIndex int, expression string) (debugger.Value, error) {
 	if err := d.checkOpen(); err != nil {
 		return debugger.Value{}, err
 	}
