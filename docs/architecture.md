@@ -34,7 +34,7 @@ convenience.
 
 `client.New(ctx, conn)` returns the canonical `api.Runtime` interface.
 Private adapters implement `api.Plan`, `api.Session`, and `api/debugger.Session`;
-output is `api.Output`, whose definition belongs to `api/result`. The client
+output is `*api.Output`, whose definition belongs to `api/result`. The client
 does not re-export aliases or expose a second resource or event model.
 Its logical connection, allocation handles, RPC clients, and watches remain
 private within the owning client package.
@@ -269,6 +269,24 @@ session. The execution slot remains occupied until release finishes, even after
 a terminal result. Execution/debugger release detaches storage only after local
 cleanup settles. All removals also update direct parent links.
 
+Ordinary API closure is separate from transport release. `Plan.Close` commits
+constructor admission under the store mutex, waits outside it for admitted
+constructors (including asynchronous temporary-session creation), and closes
+only the hosted plan. Publication admitted before that close remains legal.
+Existing sessions continue to reserve executions without reopening plan
+constructor admission. Closing plans remain charged to quotas until transport
+release. The client retains the plan transport handle until its last child
+closes, then releases it.
+
+The public runtime uses admission and reference accounting: each admitted root
+call retains the connection; a successful compile transfers that reference to
+its plan. Runtime Close gates new root calls and releases immediately only if
+there are no references. The last operation or resource performs deferred
+connection teardown and receives any resulting error. Earlier close results
+remain stable. Recovery explicitly uses cascading transport release, never
+ordinary API Close. All server admission and parent links remain under the
+store mutex; hosted calls and cleanup waits remain outside it.
+
 Connection teardown cancels in-flight work, closes store admission, waits for
 pending creation, and settles executions, sessions, debuggers, and plans. Server
 shutdown rejects new connections and closes the existing connections. Neither
@@ -296,6 +314,27 @@ reacquires the operation mutex before committing state, which keeps pause
 responses and event ordering deterministic. Close cancels the session and calls
 the hosted debugger without waiting behind a potentially blocking stopped-state
 operation, then serializes the final state and event commit.
+
+The additional `RunCommand` RPC returns a canonical event independently from a
+sanitized command error. Its Start stream remains open after the initial stop,
+retaining the Start context; resume streams finish with their individual result.
+The public client uses this path without fallback. Command contexts combine
+request and debugger lifetime cancellation. Canceling a request does not release
+the handle; explicit Close cancels execution and settles admitted commands.
+Live command streams are bounded per debugger to the configured watcher limit
+plus one slot for the retained Start lifetime. Slots remain charged until their
+RPC handler exits. Legacy asynchronous commands and non-owning watches remain available. Snapshots
+also carry the command envelope so event errors and command errors stay distinct.
+
+Breakpoint publication and terminal commitment serialize through the operation
+mutex. Replacement calls the hosted atomic method once and counts the resulting
+set, subtracting removed entries in the selected source. No rollback follows
+publication or a lost reply. Enumeration reads the hosted implementation while
+open. Explicit client Close settles hosted closure, captures a final snapshot or
+enumeration error, then releases; subsequent enumeration uses detached retained
+data. Default-frame inspection/evaluation and default/explicit binding operations
+remain distinct hosted calls. Every context-taking operation validates context
+before and after admission.
 
 Event buffers are bounded and producers are non-blocking. Each watch first
 replays the latest published snapshot, then receives ordered
@@ -361,3 +400,14 @@ Wire remains a narrow bridge. It is not another Ferret runtime, a DAP or LSP
 implementation, a module registry, a plugin manager, an application framework,
 or a distributed execution system. New responsibilities require a concrete
 architectural reason and an explicit contract.
+
+## Universal API contract
+
+Wire targets `v1.0.0-alpha.19`; the complete retained method/setter audit is in
+[Universal API projection](uapi-audit.md). Output is optional and independent of
+execution or cleanup failure. `(nil, nil)` is an invalid hosted execution result.
+Compile retrieves fallible parameter metadata and copies it before publication;
+metadata error or panic closes the unpublished plan once and joins cleanup errors.
+Anonymous sources and explicitly empty filesystem roots/content types pass through
+unchanged. Wire owns structural protocol checks; hosted implementations own source
+validity, filesystem interpretation, and codec validation.

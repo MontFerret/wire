@@ -13,14 +13,6 @@ func Run(ctx context.Context, runtime api.Runtime, store *ResourceStore, source 
 		return nil, err
 	}
 
-	if source.Content == "" {
-		return nil, invalidRequest("source content is required")
-	}
-
-	if source.Name == "" {
-		source.Name = "anonymous"
-	}
-
 	if err := store.beginCreation(executionResource, nil); err != nil {
 		return nil, err
 	}
@@ -28,8 +20,8 @@ func Run(ctx context.Context, runtime api.Runtime, store *ResourceStore, source 
 	committed := false
 	defer func() { store.finishCreation(executionResource, nil, committed) }()
 
-	created := newExecution(store, nil, nil, func(runCtx context.Context) (api.Output, error) {
-		output, err := panicboundary.Call(func() (api.Output, error) {
+	created := newExecution(store, nil, nil, func(runCtx context.Context) (*api.Output, error) {
+		output, err := panicboundary.Call(func() (*api.Output, error) {
 			return runtime.Run(runCtx, source, options...)
 		})
 

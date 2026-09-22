@@ -9,7 +9,7 @@ import (
 type (
 	// RuntimeBehavior is configured before the server starts. Hooks run outside locks.
 	RuntimeBehavior struct {
-		Run     func(context.Context, api.Source, SessionOptions) (api.Output, error)
+		Run     func(context.Context, api.Source, SessionOptions) (*api.Output, error)
 		Compile func(context.Context, api.Source, bool, CompileOptions) error
 		Plan    PlanBehavior
 	}
@@ -42,10 +42,10 @@ func (r *RuntimeSpy) ID() int {
 }
 
 // Run records source and applied options before invoking the configured direct-run hook.
-func (r *RuntimeSpy) Run(ctx context.Context, src api.Source, options ...api.SessionOption) (api.Output, error) {
+func (r *RuntimeSpy) Run(ctx context.Context, src api.Source, options ...api.SessionOption) (*api.Output, error) {
 	configured, err := applyOptions(options)
 	if err != nil {
-		return api.Output{}, err
+		return nil, err
 	}
 
 	r.recorder.record(Call{Resource: r.id, Method: "Run", Source: src, Options: configured})
@@ -55,7 +55,7 @@ func (r *RuntimeSpy) Run(ctx context.Context, src api.Source, options ...api.Ses
 		return r.behavior.Run(ctx, src, configured)
 	}
 
-	return api.Output{}, nil
+	return &api.Output{}, nil
 }
 
 // Compile records normal compilation and returns a child plan after the hook succeeds.
@@ -94,7 +94,7 @@ func (r *RuntimeSpy) compile(ctx context.Context, src api.Source, debug bool, op
 		}
 	}
 
-	return &PlanSpy{id: r.recorder.create("plan", r.id), recorder: r.recorder, behavior: r.behavior.Plan}, nil
+	return &PlanSpy{sourceName: src.Name, id: r.recorder.create("plan", r.id), recorder: r.recorder, behavior: r.behavior.Plan}, nil
 }
 
 // Close records calls so tests can detect accidental closure of the borrowed runtime.

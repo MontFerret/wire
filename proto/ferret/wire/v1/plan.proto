@@ -9,6 +9,8 @@ option go_package = "github.com/MontFerret/wire/gen/ferret/wire/v1;wirev1";
 
 // PlanService creates reusable plans owned by one logical connection.
 service PlanService {
+  // ClosePlan closes only the hosted plan; returned descendants remain caller-owned.
+  rpc ClosePlan(ClosePlanRequest) returns (ClosePlanResponse);
   // Compile creates a reusable connection-owned runtime plan from source.
   rpc Compile(CompileRequest) returns (CompileResponse);
   // CompileDebug creates the same Plan resource with debugger metadata.
@@ -79,3 +81,10 @@ message ReleasePlanRequest {
 }
 
 message ReleasePlanResponse {}
+
+message ClosePlanRequest {
+  ConnectionId connection_id = 1;
+  PlanId plan_id = 2;
+}
+
+message ClosePlanResponse {}

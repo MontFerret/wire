@@ -141,7 +141,7 @@ and field. Rows that list several fields classify each listed field.
 | --- | --- | --- |
 | service `RuntimeService` | A/B/C | Logical connection lifecycle and direct hosted Runtime invocation. |
 | RPC `Run` | A/B/C | Creates one connection-owned Execution that invokes hosted `api.Runtime.Run`. |
-| `RunRequest` | A/B/C | `connection_id=1`, `source=2`, optional `parameters=3`, optional requested `output_content_type=4`. |
+| `RunRequest` | A/B/C | `connection_id=1`, `source=2`, optional `parameters=3`, requested `output_content_type=4`, optional `fs_root=5`, `output_content_type_set=6`. |
 | `RunResponse` | B/C | Required running `execution=1`. |
 | RPC `Connect` | B/C | `ConnectRequest` to streaming `ConnectResponse`; creates and signals one logical connection. |
 | RPC `CloseConnection` | B/C | Explicit connection teardown and empty acknowledgement. |
@@ -213,7 +213,7 @@ and field. Rows that list several fields classify each listed field.
 | enum `ExecutionState` | A/C | `UNSPECIFIED=0`, `RUNNING=1`, `COMPLETED=2`, `FAILED=3`, `CANCELLED=4`. |
 | `Execution` | A/B/C | `id=1`, discriminator `state=3`, optional encoded `output=4`, optional `failure=5`. |
 | `WatchExecutionResponse` | B/C | Positive monotonic `sequence=2`, complete `execution=8`. |
-| `ExecuteRequest` | A/B/C | `connection_id=1`, `plan_id=2`, optional `parameters=3`, optional requested `output_content_type=4`. |
+| `ExecuteRequest` | A/B/C | `connection_id=1`, `plan_id=2`, optional `parameters=3`, requested `output_content_type=4`, optional `fs_root=5`, `output_content_type_set=6`. |
 | `ExecuteResponse` | B/C | Required running `execution=1`. |
 | `RunSessionRequest` | A/B/C | `connection_id=1`, `session_id=2`. |
 | `RunSessionResponse` | B/C | Required running `execution=1`. |
@@ -232,7 +232,7 @@ and field. Rows that list several fields classify each listed field.
 | RPC `ReleaseSession` | B/C | Rejects new runs, settles child Executions, then closes the hosted Session. |
 | `SessionId` | B | `value=1`, opaque and scoped to the owning connection. |
 | `Session` | A/B/C | `id=1`. |
-| `CreateSessionRequest` | A/B/C | `connection_id=1`, `plan_id=2`, optional `parameters=3`, optional requested `output_content_type=4`. |
+| `CreateSessionRequest` | A/B/C | `connection_id=1`, `plan_id=2`, optional `parameters=3`, requested `output_content_type=4`, optional `fs_root=5`, `output_content_type_set=6`. |
 | `CreateSessionResponse` | B/C | Required `session=1`. |
 | `ReleaseSessionRequest` | B/C | `connection_id=1`, `session_id=2`. |
 | `ReleaseSessionResponse` | C | Empty acknowledgement. |
@@ -255,12 +255,12 @@ and field. Rows that list several fields classify each listed field.
 | enum `DebugStopReason` | A/C | `UNSPECIFIED=0`, `ENTRY=1`, `BREAKPOINT=2`, `STEP=3`, `PAUSE=4`, `RUNTIME_ERROR=5`. |
 | enum `DebugEventKind` | B/C | `UNSPECIFIED=0`, `STARTED=1`, `CONTINUED=2`, `STOPPED=3`, `COMPLETED=4`, `FAILED=5`, `TERMINATED=6`, `CREATED=7`. |
 | enum `BreakpointBindingMode` | A/C | `UNSPECIFIED=0`, `NEXT_EXECUTABLE_IN_SOURCE=1`, `EXACT=2`, `NEXT_EXECUTABLE_IN_FUNCTION=3`. |
-| `DebugSession` | A/B/C | `id=1`, state `3`, stop reason `4`, ordered hit IDs `6`, completed output `7`, failed/runtime-error failure `8`, stopped range `9`, depth `10`. |
-| `Breakpoint` | A/C | ID `1`, requested location `8`, optional resolved range `9`, point ID `10`, function ID `11`, binding mode `12`, bound flag `13`. |
+| `DebugSession` | A/B/C | `id=1`, state `3`, stop reason `4`, ordered hit IDs `6`, completed output `7`, failed/runtime-error failure `8`, stopped range `9`, depth `10`, optional command result `11`. |
+| `Breakpoint` | A/C | ID `1`, requested location `8`, optional resolved range `9`, point ID `10`, function ID `11`, binding mode `12`, bound flag `13`, optional signed function ID `14`. |
 | `DebugValue` | A/C | Runtime type `1`, display text `2`, stopped-state-scoped reference `3`. |
 | `Variable` | A/C | Name `1`, value `2`, mutable flag `3`, parameter flag `4`. |
-| `Frame` | A/C | Name `2`, function ID `4`, location `5`; list order is the index. |
-| `CreateDebugSessionRequest` | A/B/C | `connection_id=1`, `plan_id=2`, optional `parameters=3`, optional requested `output_content_type=4`. |
+| `Frame` | A/C | Name `2`, function ID `4`, location `5`, optional signed function ID `6`; list order is the index. |
+| `CreateDebugSessionRequest` | A/B/C | `connection_id=1`, `plan_id=2`, optional `parameters=3`, requested `output_content_type=4`, optional `fs_root=5`, `output_content_type_set=6`. |
 | `CreateDebugSessionResponse` | B/C | Required created `session=1`. |
 | `StartRequest`, `TerminateRequest` | B/C | `connection_id=1`, `debug_session_id=2`. |
 | `StartResponse`, `TerminateResponse` | C | Empty acknowledgements. |
@@ -326,7 +326,7 @@ and field. Rows that list several fields classify each listed field.
   breakpoint fields 2-7 and names; Frame fields 1/3 and name `index`;
   SetBreakpoint field 3; old command/session fields; old watch fields 1 and
   3-9 plus transition names; removed transition wrappers, `SourceLocation`,
-  `DebugCommand`, `OpenDebugSession`, `StartDebug`, and `StopDebug`.
+  `OpenDebugSession`, `StartDebug`, and `StopDebug`.
 
 ## Unified API gaps and deferred work
 
@@ -340,3 +340,54 @@ and advanced negotiated capabilities remain separate work. The public client
 uses the Universal API programming model over private Wire resources. Removing
 the lower-level Go facade does not remove protocol operations or add
 reconnection, leases, or transport construction.
+
+## Alpha.19 additive contract
+
+`PlanService.ClosePlan` takes `connection_id=1`, `plan_id=2` and returns an empty
+acknowledgement. It gates new constructors, waits for admitted creation without
+canceling it, closes the hosted plan once, and retains that result. Descendants
+survive. `ReleasePlan` remains cascading; connection teardown and disconnect
+still reclaim the entire logical scope. Public client runtime Close is deferred
+admission closure, not an immediate `CloseConnection` RPC.
+
+The four session-option requests (`RunRequest`, `ExecuteRequest`,
+`CreateSessionRequest`, `CreateDebugSessionRequest`) add optional string
+`fs_root=5` and boolean `output_content_type_set=6`. An empty root with presence
+is forwarded. Nonempty content type implies presence for legacy senders; the
+new flag also represents explicit empty content type. Paths and source validity
+belong to the hosted runtime. A missing Source message is structurally invalid;
+an empty name/content within a present Source is forwarded unchanged.
+
+`Breakpoint.signed_function_id=14` and `Frame.signed_function_id=6` are optional
+signed int64 fields. Readers prefer them when present, including -1 (`NoFunction`).
+Writers also populate legacy unsigned IDs for nonnegative values. Existing field
+numbers, names, and reservations are preserved. Output message absence is nil
+output, distinct from a present empty Output. Output can accompany failure.
+
+| New debugger surface | Fields and semantics |
+| --- | --- |
+| `ReplaceBreakpoints` | Request: connection 1, debugger 2, source name 3, ordered requests 4. Response: ordered breakpoints 1. Each request has position 1 and options 2. One atomic hosted call; empty source selects launched source; empty requests clear it. |
+| `Breakpoints` | Request: connection 1, debugger 2. Response: detached ID-ordered breakpoints 1, including after hosted termination until release. |
+| `Locals` | Request: connection 1, debugger 2. Response: variables 1; directly invokes default-frame operation. |
+| `Evaluate` | Request: connection 1, debugger 2, expression 3. Response: value 1; directly invokes default-frame operation. |
+| `RunCommand` | Server stream. Request: connection 1, debugger 2, command 3. Response: result 1. Commands are Start, Continue, StepIn, StepOver, StepOut; unspecified is invalid. |
+| `DebugCommandResult` | Optional canonical event 1, independent sanitized command failure 2, context failure 3. |
+| `DebugResultEvent` | Reason 1, range 2, depth 3, hit IDs 4, optional output 5, event failure 6, context failure 7. |
+| `ContextFailure` | Unspecified, cancelled, or deadline exceeded; preserves context identity independently of generic failures. |
+
+Start sends one result and keeps its stream open for the execution lifetime after
+a stop. Resume streams finish after their result. Canceling either reaches the
+hosted context but never releases the debugger. Explicit Close terminates and
+settles commands. Existing asynchronous commands and non-owning watches remain;
+`DebugSession.command_result=11` also exposes the independent event/error envelope
+to asynchronous consumers. The Go client requires the new path and does not
+silently fall back. Mutation replies can be lost after publication; Wire never
+undoes the published set. Limits apply to the resulting set across all sources.
+`SetBreakpointRequest.options` absence selects `SetBreakpoint`; presence selects
+`SetBreakpointAt`, including explicitly default options.
+
+RunCommand allows at most `MaxWatchersPerResource + 1` live streams per debugger
+(the extra slot permits retained Start plus a resume at the minimum limit).
+Reservations remain charged until the stream handler exits. A debugger poisoned
+by an implementation panic is closed and never reused for final enumeration;
+the sanitized poisoning error is retained instead.

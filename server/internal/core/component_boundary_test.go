@@ -23,8 +23,8 @@ func TestCompileExecuteRetainsReusableAPIPlanAndSessionOptions(t *testing.T) {
 	plan := &spyPlan{
 		params: []string{"input"},
 		newSession: func(context.Context, sessionOptions) (api.Session, error) {
-			session := &spySession{run: func(context.Context) (api.Output, error) {
-				return api.Output{ContentType: "application/json", Content: outputBytes}, nil
+			session := &spySession{run: func(context.Context) (*api.Output, error) {
+				return &api.Output{ContentType: "application/json", Content: outputBytes}, nil
 			}}
 			sessionsMu.Lock()
 			sessions = append(sessions, session)
@@ -183,7 +183,7 @@ func TestCompileDelegatesDebugSelectionAndClosesAbandonedPlan(t *testing.T) {
 	}
 
 	sources, debug, _ = runtime.snapshot()
-	if len(sources) != 2 || sources[1] != (api.Source{Name: "anonymous", Content: "RETURN 2"}) || debug[1] {
+	if len(sources) != 2 || sources[1] != (api.Source{Name: "", Content: "RETURN 2"}) || debug[1] {
 		t.Fatalf("unexpected anonymous source delegation: %#v %#v", sources, debug)
 	}
 
@@ -642,12 +642,12 @@ func TestExecutionUsesPortableFailureFallbacks(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			session := &spySession{
-				run: func(context.Context) (api.Output, error) {
+				run: func(context.Context) (*api.Output, error) {
 					if test.panicRun {
 						panic("run secret must not escape")
 					}
 
-					return api.Output{ContentType: "application/json", Content: []byte("1")}, test.runErr
+					return &api.Output{ContentType: "application/json", Content: []byte("1")}, test.runErr
 				},
 				close: func() error { return test.closeErr },
 			}
@@ -766,7 +766,7 @@ func hasCategory(err error, category ErrorKind) bool {
 
 func TestWireOwnedExecutionOperationPanicPropagates(t *testing.T) {
 	sentinel := errors.New("Wire defect")
-	execution := &Execution{operation: func(context.Context) (api.Output, error) {
+	execution := &Execution{operation: func(context.Context) (*api.Output, error) {
 		panic(sentinel)
 	}}
 

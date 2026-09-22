@@ -37,12 +37,12 @@ func TestDiagnosticsAndFailureClassification(t *testing.T) {
 
 				hostErr := errors.Join(errors.New("private-host-secret"), values.Err())
 				behavior := harness.RuntimeBehavior{
-					Run: func(context.Context, api.Source, harness.SessionOptions) (api.Output, error) {
-						return api.Output{}, hostErr
+					Run: func(context.Context, api.Source, harness.SessionOptions) (*api.Output, error) {
+						return nil, hostErr
 					},
 					Plan: harness.PlanBehavior{
 						Session: func(harness.SessionOptions) harness.SessionBehavior {
-							return harness.SessionBehavior{Run: func(context.Context, int) (api.Output, error) { return api.Output{}, hostErr }}
+							return harness.SessionBehavior{Run: func(context.Context, int) (*api.Output, error) { return nil, hostErr }}
 						},
 						Debugger: harness.DebuggerBehavior{Command: func(context.Context, string, int) (*debugger.Event, error) {
 							return &debugger.Event{Reason: debugger.ReasonRuntimeError, Error: hostErr}, nil
@@ -71,11 +71,15 @@ func TestDiagnosticsAndFailureClassification(t *testing.T) {
 						t.Fatal(createErr)
 					}
 
+					h.Own(plan)
+
 					if mode == "session" {
 						session, createErr := plan.NewSession(h.Context())
 						if createErr != nil {
 							t.Fatal(createErr)
 						}
+
+						h.Own(session)
 
 						_, err = session.Run(h.Context())
 					} else {
@@ -83,6 +87,8 @@ func TestDiagnosticsAndFailureClassification(t *testing.T) {
 						if createErr != nil {
 							t.Fatal(createErr)
 						}
+
+						h.Own(session)
 
 						event, commandErr := session.Start(h.Context())
 						if commandErr != nil {
@@ -125,7 +131,13 @@ func TestDiagnosticsAndFailureClassification(t *testing.T) {
 
 func TestErrorFamilies(t *testing.T) {
 	t.Run("invalid source and portable value", func(t *testing.T) {
-		h := harness.New(t)
+		h := harness.New(t, harness.WithBehavior(harness.RuntimeBehavior{Compile: func(_ context.Context, src api.Source, _ bool, _ harness.CompileOptions) error {
+			if src.Content == "" {
+				return errors.New("empty source")
+			}
+
+			return nil
+		}}))
 
 		if _, err := h.Runtime().Compile(h.Context(), api.Source{}); status.Code(err) != codes.InvalidArgument {
 			t.Fatalf("invalid source=%v", err)
@@ -151,19 +163,23 @@ func TestErrorFamilies(t *testing.T) {
 			t.Fatal(err)
 		}
 
+		h.Own(plan)
+
 		session, err := plan.NewDebugSession(h.Context())
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		err = session.DeleteBreakpoint(987)
+		h.Own(session)
+
+		err = session.DeleteBreakpoint(h.Context(), 987)
 
 		var remote *client.Error
 		if !errors.As(err, &remote) || remote.Category != failure.CategoryBreakpointNotFound || status.Code(err) != codes.NotFound {
 			t.Fatalf("not-found classification=%v", err)
 		}
 
-		if _, err := session.Frames(); !errors.As(err, &remote) || remote.Category != failure.CategoryInvalidState || status.Code(err) != codes.FailedPrecondition {
+		if _, err := session.Frames(h.Context()); !errors.As(err, &remote) || remote.Category != failure.CategoryInvalidState || status.Code(err) != codes.FailedPrecondition {
 			t.Fatalf("invalid-state classification=%v", err)
 		}
 	})
@@ -181,8 +197,8 @@ func TestErrorFamilies(t *testing.T) {
 		}
 	})
 	t.Run("remote cancellation differs from caller cancellation", func(t *testing.T) {
-		h := harness.New(t, harness.WithBehavior(harness.RuntimeBehavior{Run: func(context.Context, api.Source, harness.SessionOptions) (api.Output, error) {
-			return api.Output{}, context.Canceled
+		h := harness.New(t, harness.WithBehavior(harness.RuntimeBehavior{Run: func(context.Context, api.Source, harness.SessionOptions) (*api.Output, error) {
+			return nil, context.Canceled
 		}}))
 
 		if _, err := h.Runtime().Run(h.Context(), api.Source{Content: "RETURN 1"}); !errors.Is(err, client.ErrExecutionCancelled) || errors.Is(err, context.Canceled) {
@@ -194,9 +210,12 @@ func TestErrorFamilies(t *testing.T) {
 		limits.MaxPlansPerConnection = 1
 		h := harness.New(t, harness.WithServerOptions(server.WithLimits(limits)))
 
-		if _, err := h.Runtime().Compile(h.Context(), api.Source{Content: "RETURN 1"}); err != nil {
+		plan, err := h.Runtime().Compile(h.Context(), api.Source{Content: "RETURN 1"})
+		if err != nil {
 			t.Fatal(err)
 		}
+
+		h.Own(plan)
 
 		if _, err := h.Runtime().Compile(h.Context(), api.Source{Content: "RETURN 2"}); status.Code(err) != codes.ResourceExhausted {
 			t.Fatalf("limit rejection=%v", err)
@@ -223,11 +242,15 @@ func TestConstructorPanicPreservesParent(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	h.Own(plan)
+
 	if _, err := plan.NewSession(h.Context()); status.Code(err) != codes.Internal || strings.Contains(err.Error(), "constructor-secret") {
 		t.Fatalf("constructor panic=%v", err)
 	}
 
 	session, err := plan.NewSession(h.Context())
+	h.Own(session)
+
 	if err != nil {
 		t.Fatalf("constructor panic invalidated parent: %v", err)
 	}
@@ -244,12 +267,12 @@ func TestPanicContainmentAndResourcePoisoning(t *testing.T) {
 
 			switch mode {
 			case "runtime":
-				behavior.Run = func(context.Context, api.Source, harness.SessionOptions) (api.Output, error) { panic("panic-secret") }
+				behavior.Run = func(context.Context, api.Source, harness.SessionOptions) (*api.Output, error) { panic("panic-secret") }
 			case "compile":
 				behavior.Compile = func(context.Context, api.Source, bool, harness.CompileOptions) error { panic("panic-secret") }
 			case "session":
 				behavior.Plan.Session = func(harness.SessionOptions) harness.SessionBehavior {
-					return harness.SessionBehavior{Run: func(context.Context, int) (api.Output, error) { panic("panic-secret") }}
+					return harness.SessionBehavior{Run: func(context.Context, int) (*api.Output, error) { panic("panic-secret") }}
 				}
 			case "debugger":
 				behavior.Plan.Debugger.Inspect = func(string) error { panic("panic-secret") }
@@ -273,19 +296,23 @@ func TestPanicContainmentAndResourcePoisoning(t *testing.T) {
 					t.Fatal(createErr)
 				}
 
+				h.Own(plan)
+
 				if mode == "debugger" {
 					session, createErr := plan.NewDebugSession(h.Context())
 					if createErr != nil {
 						t.Fatal(createErr)
 					}
 
+					h.Own(session)
+
 					if _, startErr := session.Start(h.Context()); startErr != nil {
 						t.Fatal(startErr)
 					}
 
-					_, err = session.Frames()
+					_, err = session.Frames(h.Context())
 
-					if _, nextErr := session.Frames(); nextErr == nil {
+					if _, nextErr := session.Frames(h.Context()); nextErr == nil {
 						t.Fatal("poisoned debugger was reused")
 					}
 
@@ -301,8 +328,11 @@ func TestPanicContainmentAndResourcePoisoning(t *testing.T) {
 						t.Fatal(createErr)
 					}
 
+					h.Own(session)
+
 					if mode == "session close" {
 						err = session.Close()
+						h.ExpectCleanupError(err)
 
 						if second := session.Close(); second == nil {
 							t.Fatal("cleanup panic was not retained")

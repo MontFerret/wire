@@ -7,8 +7,10 @@ import (
 )
 
 type runtimeSessionOptions struct {
-	parameters        map[string]any
-	outputContentType string
+	parameters           map[string]any
+	outputContentType    string
+	outputContentTypeSet bool
+	fsRoot               *string
 }
 
 func applyRuntimeSessionOptions(options []api.SessionOption) (runtimeSessionOptions, error) {
@@ -52,6 +54,15 @@ func (o *runtimeSessionOptions) SetParams(values map[string]any) error {
 
 func (o *runtimeSessionOptions) SetOutputContentType(contentType string) error {
 	o.outputContentType = contentType
+	o.outputContentTypeSet = true
 
 	return nil
 }
+
+func (o *runtimeSessionOptions) SetFSRoot(root string) error {
+	o.fsRoot = &root
+
+	return nil
+}
+
+var _ api.SessionOptions = (*runtimeSessionOptions)(nil)

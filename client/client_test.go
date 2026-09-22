@@ -508,3 +508,7 @@ func openTestRuntime(t *testing.T, connection grpc.ClientConnInterface) api.Runt
 
 	return runtime
 }
+
+func (s *clientTestServer) ClosePlan(context.Context, *wirev1.ClosePlanRequest) (*wirev1.ClosePlanResponse, error) {
+	return &wirev1.ClosePlanResponse{}, nil
+}

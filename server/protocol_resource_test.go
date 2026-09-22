@@ -31,16 +31,16 @@ func TestProtocolResourceOperationsRemainAvailable(t *testing.T) {
 	debug := &unstartedProtocolDebugger{}
 	plan := &contractPlan{
 		newSession: func(_ context.Context, options apiSessionOptions) (api.Session, error) {
-			if options.contentType != "text/plain" || options.params["input"] != int64(7) {
+			if options.fsRoot == nil || *options.fsRoot != "" || options.contentType != "" || options.params["input"] != int64(7) {
 				t.Errorf("Execute lost session options: %+v", options)
 			}
 
 			return &apiSessionSpy{
-				run: func(ctx context.Context) (api.Output, error) {
+				run: func(ctx context.Context) (*api.Output, error) {
 					close(started)
 					<-ctx.Done()
 
-					return api.Output{}, ctx.Err()
+					return nil, ctx.Err()
 				},
 				close: func() error {
 					sessionCloses.Add(1)
@@ -88,7 +88,7 @@ func TestProtocolResourceOperationsRemainAvailable(t *testing.T) {
 	executionRPC := wirev1.NewExecutionServiceClient(env.conn)
 
 	created, err := executionRPC.Execute(ctx, &wirev1.ExecuteRequest{
-		ConnectionId: connectionID, PlanId: planID, OutputContentType: "text/plain",
+		ConnectionId: connectionID, PlanId: planID, OutputContentTypeSet: true, FsRoot: new(string),
 		Parameters: &wirev1.Parameters{Values: map[string]*wirev1.Value{"input": {Value: &wirev1.Value_IntegerValue{IntegerValue: 7}}}},
 	})
 	if err != nil {

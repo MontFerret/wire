@@ -230,16 +230,16 @@ func TestDebuggerBoundaryRejectsMalformedRepresentations(t *testing.T) {
 		{
 			name: "negative runtime frame function ID",
 			err: func() error {
-				_, err := frame(debugger.Frame{FunctionID: -1})
+				_, err := frame(debugger.Frame{FunctionID: -2})
 
 				return err
 			}(),
 			category: core.ErrorKindInternal,
 		},
 		{
-			name: "runtime location without file",
+			name: "runtime location with invalid position",
 			err: func() error {
-				_, err := sourceLocation(source.Location{Position: source.Position{Line: 1}})
+				_, err := sourceLocation(source.Location{Position: source.Position{Line: -1}})
 
 				return err
 			}(),

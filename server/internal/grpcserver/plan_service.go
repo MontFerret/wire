@@ -51,6 +51,10 @@ func (s *PlanService) compile(
 
 	defer cancel()
 
+	if source == nil {
+		return nil, rpcError(&core.DomainError{Kind: core.ErrorKindInvalidRequest, Message: "source is required"})
+	}
+
 	planOptions, err := decodeCompileOptions(options)
 	if err != nil {
 		return nil, rpcError(err)
@@ -78,4 +82,24 @@ func (s *PlanService) ReleasePlan(ctx context.Context, request *wirev1.ReleasePl
 	}
 
 	return &wirev1.ReleasePlanResponse{}, nil
+}
+
+// ClosePlan releases hosted plan resources without closing its returned children.
+func (s *PlanService) ClosePlan(ctx context.Context, request *wirev1.ClosePlanRequest) (*wirev1.ClosePlanResponse, error) {
+	operation, resources, cancel, err := prepareOperation(ctx, s.connections, request.GetConnectionId())
+	if err != nil {
+		return nil, err
+	}
+	defer cancel()
+
+	plan, err := resources.Plan(operation, core.PlanID(request.GetPlanId().GetValue()))
+	if err != nil {
+		return nil, rpcError(err)
+	}
+
+	if err := plan.Close(operation); err != nil {
+		return nil, rpcError(err)
+	}
+
+	return &wirev1.ClosePlanResponse{}, nil
 }

@@ -19,16 +19,16 @@ func TestCancellationReachesHostedOperations(t *testing.T) {
 		t.Run(operation, func(t *testing.T) {
 			block := harness.NewBlock(t)
 			behavior := harness.RuntimeBehavior{
-				Run: func(ctx context.Context, src api.Source, _ harness.SessionOptions) (api.Output, error) {
+				Run: func(ctx context.Context, src api.Source, _ harness.SessionOptions) (*api.Output, error) {
 					if src.Content == "RETURN 2" {
-						return api.Output{}, nil
+						return &api.Output{}, nil
 					}
 
-					return api.Output{}, block.Wait(ctx)
+					return nil, block.Wait(ctx)
 				},
 				Plan: harness.PlanBehavior{
 					Session: func(harness.SessionOptions) harness.SessionBehavior {
-						return harness.SessionBehavior{Run: func(ctx context.Context, _ int) (api.Output, error) { return api.Output{}, block.Wait(ctx) }}
+						return harness.SessionBehavior{Run: func(ctx context.Context, _ int) (*api.Output, error) { return nil, block.Wait(ctx) }}
 					},
 					Debugger: harness.DebuggerBehavior{
 						Command: func(ctx context.Context, method string, _ int) (*debugger.Event, error) {
@@ -61,11 +61,15 @@ func TestCancellationReachesHostedOperations(t *testing.T) {
 					t.Fatal(err)
 				}
 
+				h.Own(plan)
+
 				if operation == "session" {
 					session, err := plan.NewSession(h.Context())
 					if err != nil {
 						t.Fatal(err)
 					}
+
+					h.Own(session)
 
 					run = func() error {
 						_, err := session.Run(ctx)
@@ -77,6 +81,8 @@ func TestCancellationReachesHostedOperations(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
+
+					h.Own(session)
 
 					if operation != "Start" {
 						if _, err := session.Start(h.Context()); err != nil {
@@ -122,8 +128,8 @@ func TestCancellationReachesHostedOperations(t *testing.T) {
 
 			if operation == "Start" || operation == "Continue" {
 				snapshot := h.RuntimeSpy().Recorder().Snapshot()
-				if snapshot.Count(snapshot.OfKind("debugger")[0].ID, "Close") != 1 {
-					t.Fatal("cancelled debugger not closed before return")
+				if snapshot.Count(snapshot.OfKind("debugger")[0].ID, "Close") != 0 {
+					t.Fatal("request cancellation closed the debugger")
 				}
 			}
 
@@ -204,7 +210,7 @@ func TestLogicalShutdownCancelsHostedCompile(t *testing.T) {
 	}()
 	harness.Await(t, block.Started)
 
-	if err := h.Runtime().Close(); err != nil {
+	if err := h.Shutdown(); err != nil {
 		t.Fatal(err)
 	}
 

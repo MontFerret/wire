@@ -140,7 +140,7 @@ func TestExecutionWaitTerminalStates(t *testing.T) {
 			_, _, execution := openTestExecution(t, server)
 
 			output, err := execution.Wait(testClientContext(t))
-			if output.ContentType != test.contentType || string(output.Content) != test.output {
+			if test.cancelled && output != nil || !test.cancelled && (output == nil || output.ContentType != test.contentType || string(output.Content) != test.output) {
 				t.Fatalf("unexpected output: %#v", output)
 			}
 

@@ -9,7 +9,7 @@ import (
 
 type contractRuntime struct {
 	mu             sync.Mutex
-	run            func(context.Context, api.Source, apiSessionOptions) (api.Output, error)
+	run            func(context.Context, api.Source, apiSessionOptions) (*api.Output, error)
 	compile        func(context.Context, api.Source, bool, contractPlanOptions) (api.Plan, error)
 	runSources     []api.Source
 	runOptions     []apiSessionOptions
@@ -19,10 +19,10 @@ type contractRuntime struct {
 	closeCalls     int
 }
 
-func (r *contractRuntime) Run(ctx context.Context, src api.Source, options ...api.SessionOption) (api.Output, error) {
+func (r *contractRuntime) Run(ctx context.Context, src api.Source, options ...api.SessionOption) (*api.Output, error) {
 	configured, err := applyAPIOptions(options)
 	if err != nil {
-		return api.Output{}, err
+		return nil, err
 	}
 
 	r.mu.Lock()
@@ -32,7 +32,7 @@ func (r *contractRuntime) Run(ctx context.Context, src api.Source, options ...ap
 	r.mu.Unlock()
 
 	if run == nil {
-		return api.Output{}, nil
+		return nil, nil
 	}
 
 	return run(ctx, src, configured)

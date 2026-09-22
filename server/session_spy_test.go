@@ -9,14 +9,14 @@ import (
 
 type apiSessionSpy struct {
 	mu         sync.Mutex
-	run        func(context.Context) (api.Output, error)
+	run        func(context.Context) (*api.Output, error)
 	close      func() error
 	closeCalls int
 }
 
-func (s *apiSessionSpy) Run(ctx context.Context) (api.Output, error) {
+func (s *apiSessionSpy) Run(ctx context.Context) (*api.Output, error) {
 	if s.run == nil {
-		return api.Output{}, nil
+		return &api.Output{}, nil
 	}
 
 	return s.run(ctx)

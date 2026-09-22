@@ -8,6 +8,12 @@ import (
 )
 
 type (
+	// CommandResult preserves an event independently of its sanitized command error.
+	CommandResult struct {
+		Event *apidebugger.Event
+		Error error
+	}
+
 	// State describes the lifecycle state in a debugger Snapshot.
 	State uint8
 
@@ -24,6 +30,7 @@ type (
 		Depth            int
 		Output           *api.Output
 		Failure          *failure.Failure
+		CommandResult    *CommandResult
 	}
 
 	// Event carries an ordered debug-session snapshot.

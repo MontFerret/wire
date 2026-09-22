@@ -11,174 +11,118 @@ import (
 	"github.com/MontFerret/wire/test/integration/harness"
 )
 
-func TestRecursiveCloseReclaimsActiveDescendants(t *testing.T) {
-	for _, owner := range []string{"session", "plan", "runtime"} {
+func TestParentClosePreservesChildrenAndActiveWork(t *testing.T) {
+	for _, owner := range []string{"plan", "runtime"} {
 		t.Run(owner, func(t *testing.T) {
-			normal, debug, direct := harness.NewBlock(t), harness.NewBlock(t), harness.NewBlock(t)
-			h := harness.New(t, harness.WithBehavior(harness.RuntimeBehavior{
-				Run: func(ctx context.Context, src api.Source, _ harness.SessionOptions) (api.Output, error) {
-					if src.Content == "blocked" {
-						return api.Output{}, direct.Wait(ctx)
-					}
-
-					return api.Output{}, nil
-				},
-				Plan: harness.PlanBehavior{
-					Session: func(options harness.SessionOptions) harness.SessionBehavior {
-						return harness.SessionBehavior{Run: func(ctx context.Context, _ int) (api.Output, error) {
-							if options.Params["block"] == true {
-								return api.Output{}, normal.Wait(ctx)
-							}
-
-							return api.Output{}, nil
-						}}
-					},
-					Debugger: harness.DebuggerBehavior{Command: func(ctx context.Context, method string, _ int) (*debugger.Event, error) {
-						if method == "Continue" {
-							return nil, debug.Wait(ctx)
+			run := harness.NewBlock(t)
+			command := harness.NewBlock(t)
+			h := harness.New(t, harness.WithBehavior(harness.RuntimeBehavior{Plan: harness.PlanBehavior{
+				Session: func(harness.SessionOptions) harness.SessionBehavior {
+					return harness.SessionBehavior{Run: func(ctx context.Context, invocation int) (*api.Output, error) {
+						if invocation > 1 {
+							return &api.Output{}, nil
 						}
 
-						return &debugger.Event{Reason: debugger.ReasonEntry}, nil
-					}},
+						return &api.Output{}, run.Wait(ctx)
+					}}
 				},
-			}))
+				Debugger: harness.DebuggerBehavior{Command: func(ctx context.Context, method string, _ int) (*debugger.Event, error) {
+					if method == "Continue" {
+						return &debugger.Event{Reason: debugger.ReasonCompleted, Output: &api.Output{}}, command.Wait(ctx)
+					}
 
-			other, err := h.OpenRuntime()
-			if err != nil {
-				t.Fatal(err)
-			}
+					return &debugger.Event{Reason: debugger.ReasonEntry}, nil
+				}},
+			}}))
 
 			plan, err := h.Runtime().CompileDebug(h.Context(), api.Source{Content: "RETURN 1"})
 			if err != nil {
 				t.Fatal(err)
 			}
 
-			siblingPlan, err := h.Runtime().Compile(h.Context(), api.Source{Content: "RETURN 2"})
+			h.Own(plan)
+
+			session, err := plan.NewSession(h.Context())
 			if err != nil {
 				t.Fatal(err)
 			}
 
-			session, err := plan.NewSession(h.Context(), api.WithParam("block", true))
+			h.Own(session)
+
+			debug, err := plan.NewDebugSession(h.Context())
 			if err != nil {
 				t.Fatal(err)
 			}
 
-			sibling, err := siblingPlan.NewSession(h.Context())
-			if err != nil {
+			h.Own(debug)
+
+			if _, err := debug.Start(h.Context()); err != nil {
 				t.Fatal(err)
 			}
 
-			debugSession, err := plan.NewDebugSession(h.Context())
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			if _, err := debugSession.Start(h.Context()); err != nil {
-				t.Fatal(err)
-			}
-
-			normalResult := make(chan error, 1)
-			go func() {
-				_, err := session.Run(h.Context())
-				normalResult <- err
-			}()
-			harness.Await(t, normal.Started)
-			type debugOutcome struct {
-				event *debugger.Event
-				err   error
-			}
-			debugResult := make(chan debugOutcome, 1)
-			directResult := make(chan error, 1)
-
-			if owner != "session" {
-				go func() {
-					event, err := debugSession.Continue(h.Context())
-					debugResult <- debugOutcome{event: event, err: err}
-				}()
-				harness.Await(t, debug.Started)
-			}
+			results := make(chan error, 2)
+			go func() { _, err := session.Run(h.Context()); results <- err }()
+			go func() { _, err := debug.Continue(h.Context()); results <- err }()
+			harness.Await(t, run.Started)
+			harness.Await(t, command.Started)
+			closeParent := plan.Close
 
 			if owner == "runtime" {
-				go func() {
-					_, err := h.Runtime().Run(h.Context(), api.Source{Content: "blocked"})
-					directResult <- err
-				}()
-				harness.Await(t, direct.Started)
+				closeParent = h.Runtime().Close
 			}
 
-			closeOwner := session.Close
-
-			switch owner {
-			case "plan":
-				closeOwner = plan.Close
-			case "runtime":
-				closeOwner = h.Runtime().Close
-			}
-
-			if err := closeOwner(); err != nil {
+			if err := closeParent(); err != nil {
 				t.Fatal(err)
-			}
-
-			if err := harness.Await(t, normalResult); err == nil {
-				t.Fatal("active Run succeeded after recursive close")
-			}
-
-			harness.Await(t, normal.Cancelled)
-			harness.Await(t, normal.Finished)
-
-			if owner != "session" {
-				// A terminated debugger event or a closed-handle error both settle the command.
-				result := harness.Await(t, debugResult)
-				if result.err == nil && (result.event == nil || result.event.Reason != debugger.ReasonTerminated) {
-					t.Fatalf("recursive close returned a successful debugger stop: %#v", result.event)
-				}
-
-				harness.Await(t, debug.Cancelled)
-				harness.Await(t, debug.Finished)
-			} else {
-				if _, err := debugSession.Frames(); err != nil {
-					t.Fatalf("Session.Close invalidated sibling debugger: %v", err)
-				}
-			}
-
-			if owner == "runtime" {
-				if err := harness.Await(t, directResult); err == nil {
-					t.Fatal("direct Run survived Runtime.Close")
-				}
-
-				harness.Await(t, direct.Cancelled)
-				harness.Await(t, direct.Finished)
-			} else {
-				if _, err := sibling.Run(h.Context()); err != nil {
-					t.Fatalf("unrelated sibling invalidated: %v", err)
-				}
-			}
-
-			if _, err := other.Run(h.Context(), api.Source{Content: "RETURN 3"}); err != nil {
-				t.Fatalf("other logical Runtime invalidated: %v", err)
 			}
 
 			snapshot := h.RuntimeSpy().Recorder().Snapshot()
-
-			for _, resource := range snapshot.Resources {
-				want := 0
-
-				if resource.Kind == "session" && resource.ID == snapshot.OfKind("session")[0].ID {
-					want = 1
-				}
-
-				if owner == "plan" && (resource.ID == snapshot.OfKind("plan")[0].ID || resource.Kind == "debugger") {
-					want = 1
-				}
-
-				if owner == "runtime" && resource.Kind != "runtime" {
-					want = 1
-				}
-
-				if got := snapshot.Count(resource.ID, "Close"); got != want {
-					t.Fatalf("%s close: resource=%+v calls=%d want=%d", owner, resource, got, want)
+			for _, kind := range []string{"session", "debugger"} {
+				if snapshot.Count(snapshot.OfKind(kind)[0].ID, "Close") != 0 {
+					t.Fatalf("%s Close closed %s", owner, kind)
 				}
 			}
+
+			if owner == "plan" {
+				if child, err := plan.NewSession(h.Context()); err == nil {
+					h.Own(child)
+					t.Fatal("closed plan accepted a constructor")
+				}
+			} else {
+				if _, err := h.Runtime().Run(h.Context(), api.Source{Content: "RETURN 2"}); err == nil {
+					t.Fatal("closed runtime accepted work")
+				}
+
+				extra, err := plan.NewSession(h.Context())
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				h.Own(extra)
+
+				if err := extra.Close(); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			run.Release()
+			command.Release()
+			for range 2 {
+				if err := harness.Await(t, results); err != nil {
+					t.Fatalf("parent Close cancelled caller work: %v", err)
+				}
+			}
+
+			if _, err := session.Run(h.Context()); err != nil {
+				t.Fatalf("surviving session cannot run again: %v", err)
+			}
+
+			for _, closeResource := range []func() error{debug.Close, session.Close, plan.Close, h.Runtime().Close} {
+				if err := closeResource(); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			h.RuntimeSpy().Recorder().AssertClosed(t)
 		})
 	}
 }
@@ -188,8 +132,8 @@ func TestConcurrentSiblingSessionsRemainIndependent(t *testing.T) {
 	h := harness.New(t, harness.WithBehavior(harness.RuntimeBehavior{Plan: harness.PlanBehavior{Session: func(options harness.SessionOptions) harness.SessionBehavior {
 		index := int(options.Params["index"].(int64))
 
-		return harness.SessionBehavior{Run: func(ctx context.Context, _ int) (api.Output, error) {
-			return api.Output{ContentType: "text/plain", Content: []byte(fmt.Sprint(index))}, blocks[index].Wait(ctx)
+		return harness.SessionBehavior{Run: func(ctx context.Context, _ int) (*api.Output, error) {
+			return &api.Output{ContentType: "text/plain", Content: []byte(fmt.Sprint(index))}, blocks[index].Wait(ctx)
 		}}
 	}}}))
 
@@ -197,6 +141,8 @@ func TestConcurrentSiblingSessionsRemainIndependent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	h.Own(plan)
 
 	var sessions []api.Session
 
@@ -206,11 +152,13 @@ func TestConcurrentSiblingSessionsRemainIndependent(t *testing.T) {
 			t.Fatal(err)
 		}
 
+		h.Own(session)
+
 		sessions = append(sessions, session)
 	}
 
 	type result struct {
-		output api.Output
+		output *api.Output
 		err    error
 	}
 	results := []chan result{make(chan result, 1), make(chan result, 1)}
@@ -270,11 +218,15 @@ func TestConcurrentPlanSessionCreation(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	h.Own(plan)
+
 	results := make(chan error, workers)
 
 	for range workers {
 		go func() {
 			session, err := plan.NewSession(h.Context())
+			h.Own(session)
+
 			if err == nil {
 				_, err = session.Run(h.Context())
 			}
@@ -322,6 +274,8 @@ func TestConcurrentPlansShareRuntime(t *testing.T) {
 	for index := range workers {
 		go func() {
 			plan, err := h.Runtime().Compile(h.Context(), api.Source{Name: fmt.Sprintf("plan-%d.fql", index), Content: "RETURN 1"})
+			h.Own(plan)
+
 			if err != nil {
 				results <- err
 
@@ -329,6 +283,8 @@ func TestConcurrentPlansShareRuntime(t *testing.T) {
 			}
 
 			session, err := plan.NewSession(h.Context())
+			h.Own(session)
+
 			if err == nil {
 				_, err = session.Run(h.Context())
 			}

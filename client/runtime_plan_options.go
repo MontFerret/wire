@@ -12,6 +12,8 @@ type runtimePlanOptions struct {
 	hasOptimizationLevel bool
 }
 
+var _ api.PlanOptions = (*runtimePlanOptions)(nil)
+
 func applyRuntimePlanOptions(options []api.PlanOption) (runtimePlanOptions, error) {
 	configured := runtimePlanOptions{}
 	var result error

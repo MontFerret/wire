@@ -3,16 +3,22 @@ package client
 import (
 	"context"
 	"errors"
+	"sync"
 
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
 )
 
 // planHandle is a compiled remote runtime plan owned by one connectionHandle.
 type planHandle struct {
-	client     *connectionHandle
-	id         string
-	parameters []string
-	close      *closeState
+	client      *connectionHandle
+	id          string
+	parameters  []string
+	close       *closeState
+	owner       *remoteRuntime
+	lifecycleMu sync.Mutex
+	creating    sync.WaitGroup
+	children    int
+	apiClose    closeState
 }
 
 // Parameters returns a copy of the FQL parameters declared by this plan.
@@ -26,8 +32,20 @@ func (p *planHandle) Parameters() []string {
 
 // NewDebugSession creates a Unified API debug session for a plan compiled with
 // CompileDebug.
-func (p *planHandle) NewDebugSession(ctx context.Context, configured runtimeSessionOptions) (*debugSessionHandle, error) {
-	if err := p.checkOpen(); err != nil {
+func (p *planHandle) NewDebugSession(ctx context.Context, configured runtimeSessionOptions) (result *debugSessionHandle, resultErr error) {
+	if err := p.beginChild(); err != nil {
+		return nil, err
+	}
+
+	defer func() {
+		p.creating.Done()
+
+		if result == nil {
+			resultErr = errors.Join(resultErr, p.childDone(ctx))
+		}
+	}()
+
+	if err := p.checkTransportOpen(); err != nil {
 		return nil, err
 	}
 
@@ -37,10 +55,12 @@ func (p *planHandle) NewDebugSession(ctx context.Context, configured runtimeSess
 	}
 
 	response, err := p.client.debugClient.CreateDebugSession(ctx, &wirev1.CreateDebugSessionRequest{
-		ConnectionId:      p.client.connectionProto(),
-		PlanId:            &wirev1.PlanId{Value: p.id},
-		Parameters:        converted,
-		OutputContentType: configured.outputContentType,
+		ConnectionId:         p.client.connectionProto(),
+		PlanId:               &wirev1.PlanId{Value: p.id},
+		Parameters:           converted,
+		OutputContentType:    configured.outputContentType,
+		OutputContentTypeSet: configured.outputContentTypeSet,
+		FsRoot:               configured.fsRoot,
 	})
 	if err != nil {
 		return nil, allocationRPCError(err)
@@ -68,7 +88,7 @@ func (p *planHandle) Close(ctx context.Context) error {
 	return p.close.Wait(ctx)
 }
 
-func (p *planHandle) checkOpen() error {
+func (p *planHandle) checkTransportOpen() error {
 	if p == nil || p.client == nil || p.id == "" || p.close == nil || p.close.Started() {
 		return ErrClosed
 	}
@@ -88,7 +108,13 @@ func (p *planHandle) ancestorCloseResult(ctx context.Context) (bool, error) {
 	return p.client.closeResult(ctx)
 }
 
-func (p *planHandle) release(ctx context.Context) error {
+func (p *planHandle) release(ctx context.Context) (resultErr error) {
+	defer func() {
+		if p.owner != nil {
+			resultErr = errors.Join(resultErr, p.owner.drop())
+		}
+	}()
+
 	if closing, err := p.client.closeResult(ctx); closing {
 		return err
 	}
@@ -108,8 +134,20 @@ func (p *planHandle) release(ctx context.Context) error {
 func (p *planHandle) newSession(
 	ctx context.Context,
 	configured runtimeSessionOptions,
-) (*sessionHandle, error) {
-	if err := p.checkOpen(); err != nil {
+) (result *sessionHandle, resultErr error) {
+	if err := p.beginChild(); err != nil {
+		return nil, err
+	}
+
+	defer func() {
+		p.creating.Done()
+
+		if result == nil {
+			resultErr = errors.Join(resultErr, p.childDone(ctx))
+		}
+	}()
+
+	if err := p.checkTransportOpen(); err != nil {
 		return nil, err
 	}
 
@@ -119,10 +157,12 @@ func (p *planHandle) newSession(
 	}
 
 	response, err := p.client.sessionClient.CreateSession(ctx, &wirev1.CreateSessionRequest{
-		ConnectionId:      p.client.connectionProto(),
-		PlanId:            &wirev1.PlanId{Value: p.id},
-		Parameters:        converted,
-		OutputContentType: configured.outputContentType,
+		ConnectionId:         p.client.connectionProto(),
+		PlanId:               &wirev1.PlanId{Value: p.id},
+		Parameters:           converted,
+		OutputContentType:    configured.outputContentType,
+		OutputContentTypeSet: configured.outputContentTypeSet,
+		FsRoot:               configured.fsRoot,
 	})
 	if err != nil {
 		return nil, allocationRPCError(err)
@@ -139,4 +179,76 @@ func (p *planHandle) newSession(
 		id:     value.GetId().GetValue(),
 		close:  &closeState{},
 	}, nil
+}
+
+func (p *planHandle) beginChild() error {
+	if p == nil {
+		return ErrClosed
+	}
+
+	p.lifecycleMu.Lock()
+	defer p.lifecycleMu.Unlock()
+
+	if p.apiClose.Started() {
+		return ErrClosed
+	}
+
+	if err := p.checkTransportOpen(); err != nil {
+		return err
+	}
+
+	p.children++
+	p.creating.Add(1)
+
+	return nil
+}
+
+func (p *planHandle) childDone(ctx context.Context) error {
+	p.lifecycleMu.Lock()
+	p.children--
+	release := p.children == 0 && p.apiClose.Started()
+	p.lifecycleMu.Unlock()
+
+	if !release {
+		return nil
+	}
+
+	// ClosePlan must settle before the transport handle can be released.
+	_ = p.apiClose.Wait(context.Background())
+
+	return p.Close(ctx)
+}
+
+func (p *planHandle) closeAPI(ctx context.Context) error {
+	p.lifecycleMu.Lock()
+	started := p.apiClose.Begin()
+	p.lifecycleMu.Unlock()
+
+	if started {
+		go settleHandleClose(ctx, "plan API", &p.apiClose, p.settleAPIClose)
+	}
+
+	return p.apiClose.Wait(ctx)
+}
+
+func (p *planHandle) settleAPIClose(ctx context.Context) error {
+	p.creating.Wait()
+
+	if closing, err := p.ancestorCloseResult(ctx); closing {
+		return err
+	}
+
+	_, err := p.client.planClient.ClosePlan(ctx, &wirev1.ClosePlanRequest{
+		ConnectionId: p.client.connectionProto(), PlanId: &wirev1.PlanId{Value: p.id},
+	})
+	result := decodeError(err)
+	p.lifecycleMu.Lock()
+	release := p.children == 0
+	p.lifecycleMu.Unlock()
+
+	if release {
+		result = errors.Join(result, p.Close(ctx))
+	}
+
+	return result
 }

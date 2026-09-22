@@ -251,10 +251,14 @@ type ExecuteRequest struct {
 	ConnectionId *ConnectionId          `protobuf:"bytes,1,opt,name=connection_id,json=connectionId,proto3" json:"connection_id,omitempty"`
 	PlanId       *PlanId                `protobuf:"bytes,2,opt,name=plan_id,json=planId,proto3" json:"plan_id,omitempty"`
 	Parameters   *Parameters            `protobuf:"bytes,3,opt,name=parameters,proto3" json:"parameters,omitempty"`
-	// output_content_type requests a runtime-supported encoded output codec; empty preserves the runtime default.
+	// output_content_type requests a runtime-supported encoded output codec; empty preserves the runtime default only when output_content_type_set is false.
 	OutputContentType string `protobuf:"bytes,4,opt,name=output_content_type,json=outputContentType,proto3" json:"output_content_type,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// Presence distinguishes an omitted root from an explicitly empty root.
+	FsRoot *string `protobuf:"bytes,5,opt,name=fs_root,json=fsRoot,proto3,oneof" json:"fs_root,omitempty"`
+	// Explicit empty content types are forwarded to the hosted runtime.
+	OutputContentTypeSet bool `protobuf:"varint,6,opt,name=output_content_type_set,json=outputContentTypeSet,proto3" json:"output_content_type_set,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *ExecuteRequest) Reset() {
@@ -313,6 +317,20 @@ func (x *ExecuteRequest) GetOutputContentType() string {
 		return x.OutputContentType
 	}
 	return ""
+}
+
+func (x *ExecuteRequest) GetFsRoot() string {
+	if x != nil && x.FsRoot != nil {
+		return *x.FsRoot
+	}
+	return ""
+}
+
+func (x *ExecuteRequest) GetOutputContentTypeSet() bool {
+	if x != nil {
+		return x.OutputContentTypeSet
+	}
+	return false
 }
 
 type ExecuteResponse struct {
@@ -699,14 +717,18 @@ const file_ferret_wire_v1_execution_proto_rawDesc = "" +
 	"\afailure\x18\x05 \x01(\v2\x17.ferret.wire.v1.FailureR\afailureJ\x04\b\x02\x10\x03R\aplan_id\"\xce\x01\n" +
 	"\x16WatchExecutionResponse\x12\x1a\n" +
 	"\bsequence\x18\x02 \x01(\x04R\bsequence\x127\n" +
-	"\texecution\x18\b \x01(\v2\x19.ferret.wire.v1.ExecutionR\texecutionJ\x04\b\x01\x10\x02J\x04\b\x03\x10\x04J\x04\b\x04\x10\x05J\x04\b\x05\x10\x06J\x04\b\x06\x10\aJ\x04\b\a\x10\bR\fexecution_idR\x06outputR\astartedR\tcompletedR\x06failedR\tcancelled\"\xf0\x01\n" +
+	"\texecution\x18\b \x01(\v2\x19.ferret.wire.v1.ExecutionR\texecutionJ\x04\b\x01\x10\x02J\x04\b\x03\x10\x04J\x04\b\x04\x10\x05J\x04\b\x05\x10\x06J\x04\b\x06\x10\aJ\x04\b\a\x10\bR\fexecution_idR\x06outputR\astartedR\tcompletedR\x06failedR\tcancelled\"\xd1\x02\n" +
 	"\x0eExecuteRequest\x12A\n" +
 	"\rconnection_id\x18\x01 \x01(\v2\x1c.ferret.wire.v1.ConnectionIdR\fconnectionId\x12/\n" +
 	"\aplan_id\x18\x02 \x01(\v2\x16.ferret.wire.v1.PlanIdR\x06planId\x12:\n" +
 	"\n" +
 	"parameters\x18\x03 \x01(\v2\x1a.ferret.wire.v1.ParametersR\n" +
 	"parameters\x12.\n" +
-	"\x13output_content_type\x18\x04 \x01(\tR\x11outputContentType\"J\n" +
+	"\x13output_content_type\x18\x04 \x01(\tR\x11outputContentType\x12\x1c\n" +
+	"\afs_root\x18\x05 \x01(\tH\x00R\x06fsRoot\x88\x01\x01\x125\n" +
+	"\x17output_content_type_set\x18\x06 \x01(\bR\x14outputContentTypeSetB\n" +
+	"\n" +
+	"\b_fs_root\"J\n" +
 	"\x0fExecuteResponse\x127\n" +
 	"\texecution\x18\x01 \x01(\v2\x19.ferret.wire.v1.ExecutionR\texecution\"\x90\x01\n" +
 	"\x11RunSessionRequest\x12A\n" +
@@ -820,6 +842,7 @@ func file_ferret_wire_v1_execution_proto_init() {
 	file_ferret_wire_v1_runtime_proto_init()
 	file_ferret_wire_v1_session_proto_init()
 	file_ferret_wire_v1_value_proto_init()
+	file_ferret_wire_v1_execution_proto_msgTypes[3].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

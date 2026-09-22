@@ -19,6 +19,7 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
+	PlanService_ClosePlan_FullMethodName    = "/ferret.wire.v1.PlanService/ClosePlan"
 	PlanService_Compile_FullMethodName      = "/ferret.wire.v1.PlanService/Compile"
 	PlanService_CompileDebug_FullMethodName = "/ferret.wire.v1.PlanService/CompileDebug"
 	PlanService_ReleasePlan_FullMethodName  = "/ferret.wire.v1.PlanService/ReleasePlan"
@@ -30,6 +31,8 @@ const (
 //
 // PlanService creates reusable plans owned by one logical connection.
 type PlanServiceClient interface {
+	// ClosePlan closes only the hosted plan; returned descendants remain caller-owned.
+	ClosePlan(ctx context.Context, in *ClosePlanRequest, opts ...grpc.CallOption) (*ClosePlanResponse, error)
 	// Compile creates a reusable connection-owned runtime plan from source.
 	Compile(ctx context.Context, in *CompileRequest, opts ...grpc.CallOption) (*CompileResponse, error)
 	// CompileDebug creates the same Plan resource with debugger metadata.
@@ -45,6 +48,16 @@ type planServiceClient struct {
 
 func NewPlanServiceClient(cc grpc.ClientConnInterface) PlanServiceClient {
 	return &planServiceClient{cc}
+}
+
+func (c *planServiceClient) ClosePlan(ctx context.Context, in *ClosePlanRequest, opts ...grpc.CallOption) (*ClosePlanResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ClosePlanResponse)
+	err := c.cc.Invoke(ctx, PlanService_ClosePlan_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *planServiceClient) Compile(ctx context.Context, in *CompileRequest, opts ...grpc.CallOption) (*CompileResponse, error) {
@@ -83,6 +96,8 @@ func (c *planServiceClient) ReleasePlan(ctx context.Context, in *ReleasePlanRequ
 //
 // PlanService creates reusable plans owned by one logical connection.
 type PlanServiceServer interface {
+	// ClosePlan closes only the hosted plan; returned descendants remain caller-owned.
+	ClosePlan(context.Context, *ClosePlanRequest) (*ClosePlanResponse, error)
 	// Compile creates a reusable connection-owned runtime plan from source.
 	Compile(context.Context, *CompileRequest) (*CompileResponse, error)
 	// CompileDebug creates the same Plan resource with debugger metadata.
@@ -100,6 +115,9 @@ type PlanServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedPlanServiceServer struct{}
 
+func (UnimplementedPlanServiceServer) ClosePlan(context.Context, *ClosePlanRequest) (*ClosePlanResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ClosePlan not implemented")
+}
 func (UnimplementedPlanServiceServer) Compile(context.Context, *CompileRequest) (*CompileResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Compile not implemented")
 }
@@ -128,6 +146,24 @@ func RegisterPlanServiceServer(s grpc.ServiceRegistrar, srv PlanServiceServer) {
 		t.testEmbeddedByValue()
 	}
 	s.RegisterService(&PlanService_ServiceDesc, srv)
+}
+
+func _PlanService_ClosePlan_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ClosePlanRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PlanServiceServer).ClosePlan(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: PlanService_ClosePlan_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PlanServiceServer).ClosePlan(ctx, req.(*ClosePlanRequest))
+	}
+	return interceptor(ctx, in, info, handler)
 }
 
 func _PlanService_Compile_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -191,6 +227,10 @@ var PlanService_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "ferret.wire.v1.PlanService",
 	HandlerType: (*PlanServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "ClosePlan",
+			Handler:    _PlanService_ClosePlan_Handler,
+		},
 		{
 			MethodName: "Compile",
 			Handler:    _PlanService_Compile_Handler,

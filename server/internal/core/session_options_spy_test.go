@@ -16,6 +16,7 @@ func applySessionOptions(options []api.SessionOption) (sessionOptions, error) {
 }
 
 type sessionOptions struct {
+	fsRoot      *string
 	params      map[string]any
 	contentType string
 }
@@ -53,3 +54,6 @@ func (o sessionOptions) clone() sessionOptions {
 
 	return o
 }
+
+// SetFSRoot records the portable root without interpreting it.
+func (o *sessionOptions) SetFSRoot(root string) error { o.fsRoot = &root; return nil }

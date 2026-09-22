@@ -8,12 +8,12 @@ import (
 	"github.com/MontFerret/wire/pkg/execution"
 )
 
-func executionOutput(snapshot execution.Snapshot) api.Output {
+func executionOutput(snapshot execution.Snapshot) *api.Output {
 	if snapshot.Output == nil {
-		return api.Output{}
+		return nil
 	}
 
-	return api.Output{
+	return &api.Output{
 		ContentType: snapshot.Output.ContentType,
 		Content:     append([]byte(nil), snapshot.Output.Content...),
 	}

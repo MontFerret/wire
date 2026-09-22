@@ -18,6 +18,8 @@ type Plan struct {
 	plan       api.Plan
 	parameters []string
 	debuggable bool
+	sourceName string
+	close      lifecycle.Close
 	// Child collections and creation admission are guarded by store.mu.
 	creating      sync.WaitGroup
 	sessions      map[SessionID]*Session
@@ -208,5 +210,37 @@ func (p *Plan) settleRelease() {
 		err = errors.Join(err, session.Release(context.Background()))
 	}
 
-	err = errors.Join(err, closeAPIPlan(p.plan))
+	err = errors.Join(err, p.Close(context.Background()))
+}
+
+// Close prevents new constructors and closes only the hosted plan. Constructors
+// admitted before Close retain their contexts and may publish caller-owned children.
+func (p *Plan) Close(ctx context.Context) error {
+	p.store.mu.Lock()
+	started := p.close.Begin()
+	p.store.mu.Unlock()
+
+	if started {
+		go p.settleClose()
+	}
+
+	return p.close.Wait(ctx)
+}
+
+func (p *Plan) settleClose() {
+	p.creating.Wait()
+	p.store.mu.Lock()
+	var constructors []<-chan struct{}
+	for _, execution := range p.executions {
+		if execution.constructed != nil {
+			constructors = append(constructors, execution.constructed)
+		}
+	}
+
+	p.store.mu.Unlock()
+	for _, done := range constructors {
+		<-done
+	}
+
+	p.close.Finish(closeAPIPlan(p.plan))
 }

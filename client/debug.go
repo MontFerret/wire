@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"errors"
 
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
 )
@@ -134,10 +135,12 @@ func (d *debugSessionHandle) checkOpen() error {
 		return ErrClosed
 	}
 
-	return d.plan.checkOpen()
+	return d.plan.checkTransportOpen()
 }
 
-func (d *debugSessionHandle) release(ctx context.Context) error {
+func (d *debugSessionHandle) release(ctx context.Context) (resultErr error) {
+	defer func() { resultErr = errors.Join(resultErr, d.plan.childDone(ctx)) }()
+
 	if closing, err := d.plan.ancestorCloseResult(ctx); closing {
 		return err
 	}

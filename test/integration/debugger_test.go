@@ -53,10 +53,14 @@ func TestDebuggerRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	h.Own(plan)
+
 	session, err := plan.NewDebugSession(h.Context(), api.WithParam("input", int64(7)), api.WithOutputContentType("application/json"))
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	h.Own(session)
 
 	var breakpoints []debugger.Breakpoint
 
@@ -65,9 +69,9 @@ func TestDebuggerRoundTrip(t *testing.T) {
 		var breakpoint debugger.Breakpoint
 
 		if index == 0 {
-			breakpoint, err = session.SetBreakpoint(requested)
+			breakpoint, err = session.SetBreakpoint(h.Context(), requested)
 		} else {
-			breakpoint, err = session.SetBreakpointAt(requested, debugger.BreakpointOptions{BindingMode: mode})
+			breakpoint, err = session.SetBreakpointAt(h.Context(), requested, debugger.BreakpointOptions{BindingMode: mode})
 		}
 
 		if err != nil {
@@ -82,21 +86,21 @@ func TestDebuggerRoundTrip(t *testing.T) {
 		breakpoints = append(breakpoints, breakpoint)
 	}
 
-	if !reflect.DeepEqual(session.Breakpoints(), breakpoints) {
-		t.Fatalf("breakpoint snapshot=%+v", session.Breakpoints())
+	if !reflect.DeepEqual(requireBreakpoints(t, session), breakpoints) {
+		t.Fatalf("breakpoint snapshot=%+v", requireBreakpoints(t, session))
 	}
 
-	session.Breakpoints()[0].ID = 999
+	requireBreakpoints(t, session)[0].ID = 999
 
-	if !reflect.DeepEqual(session.Breakpoints(), breakpoints) {
+	if !reflect.DeepEqual(requireBreakpoints(t, session), breakpoints) {
 		t.Fatal("breakpoint snapshot not defensive")
 	}
 
-	if err := session.DeleteBreakpoint(breakpoints[0].ID); err != nil {
+	if err := session.DeleteBreakpoint(h.Context(), breakpoints[0].ID); err != nil {
 		t.Fatal(err)
 	}
 
-	if !reflect.DeepEqual(session.Breakpoints(), breakpoints[1:]) {
+	if !reflect.DeepEqual(requireBreakpoints(t, session), breakpoints[1:]) {
 		t.Fatal("breakpoint deletion not reflected")
 	}
 
@@ -118,7 +122,7 @@ func TestDebuggerRoundTrip(t *testing.T) {
 		t.Fatalf("breakpoint event=%#v", stopped)
 	}
 
-	frames, err := session.Frames()
+	frames, err := session.Frames(h.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,9 +138,9 @@ func TestDebuggerRoundTrip(t *testing.T) {
 		var locals []debugger.Variable
 
 		if index == 0 {
-			locals, err = session.Locals()
+			locals, err = session.Locals(h.Context())
 		} else {
-			locals, err = session.FrameLocals(index)
+			locals, err = session.FrameLocals(h.Context(), index)
 		}
 
 		if err != nil {
@@ -149,7 +153,7 @@ func TestDebuggerRoundTrip(t *testing.T) {
 		}
 	}
 
-	variables, err := session.Variables(9)
+	variables, err := session.Variables(h.Context(), 9)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,7 +200,7 @@ func TestDebuggerRoundTrip(t *testing.T) {
 	}()
 	harness.Await(t, pause.Started)
 
-	if err := session.Pause(); err != nil {
+	if err := session.Pause(h.Context()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -277,4 +281,15 @@ func TestDebuggerRoundTrip(t *testing.T) {
 	if snapshot.Count(id, "Close") != 1 {
 		t.Fatal("debugger cleanup was not exactly once")
 	}
+}
+
+func requireBreakpoints(t *testing.T, session debugger.Session) []debugger.Breakpoint {
+	t.Helper()
+
+	values, err := session.Breakpoints(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return values
 }

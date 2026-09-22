@@ -6,7 +6,7 @@ import (
 	"github.com/MontFerret/wire/server/internal/core"
 )
 
-func decodeSessionOptions(parameters *wirev1.Parameters, contentType string) ([]api.SessionOption, error) {
+func decodeSessionOptions(parameters *wirev1.Parameters, contentType string, contentTypeSet bool, fsRoot *string) ([]api.SessionOption, error) {
 	values, err := decodeParameters(parameters)
 	if err != nil {
 		return nil, &core.DomainError{Kind: core.ErrorKindInvalidRequest, Message: err.Error()}
@@ -14,8 +14,12 @@ func decodeSessionOptions(parameters *wirev1.Parameters, contentType string) ([]
 
 	options := []api.SessionOption{api.WithParams(values)}
 
-	if contentType != "" {
+	if contentTypeSet || contentType != "" {
 		options = append(options, api.WithOutputContentType(contentType))
+	}
+
+	if fsRoot != nil {
+		options = append(options, api.WithFSRoot(*fsRoot))
 	}
 
 	return options, nil

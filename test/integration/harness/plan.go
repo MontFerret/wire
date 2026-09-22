@@ -11,6 +11,8 @@ type (
 	// PlanBehavior configures child creation, option observation, and plan cleanup hooks.
 	PlanBehavior struct {
 		Params          []string
+		ParamsError     error
+		Metadata        func() ([]string, error)
 		NewSession      func(context.Context, SessionOptions) error
 		NewDebugSession func(context.Context, SessionOptions) error
 		Session         func(SessionOptions) SessionBehavior
@@ -20,19 +22,24 @@ type (
 
 	// PlanSpy records hosted plan calls and creates observable child resources.
 	PlanSpy struct {
-		id       int
-		recorder *Recorder
-		behavior PlanBehavior
+		id         int
+		sourceName string
+		recorder   *Recorder
+		behavior   PlanBehavior
 	}
 )
 
 var _ api.Plan = (*PlanSpy)(nil)
 
 // Params records inspection and returns a copy of the configured parameter names.
-func (p *PlanSpy) Params() []string {
+func (p *PlanSpy) Params() ([]string, error) {
 	p.recorder.record(Call{Resource: p.id, Method: "Params"})
 
-	return append([]string(nil), p.behavior.Params...)
+	if p.behavior.Metadata != nil {
+		return p.behavior.Metadata()
+	}
+
+	return append([]string(nil), p.behavior.Params...), p.behavior.ParamsError
 }
 
 // NewSession records applied options and creates a child spy after the creation hook succeeds.
@@ -73,7 +80,10 @@ func (p *PlanSpy) NewDebugSession(ctx context.Context, options ...api.SessionOpt
 		}
 	}
 
-	return newDebuggerSpy(p.recorder, p.id, p.behavior.Debugger), nil
+	session := newDebuggerSpy(p.recorder, p.id, p.behavior.Debugger)
+	session.sourceName = p.sourceName
+
+	return session, nil
 }
 
 // Close records entry and settlement around the configured cleanup hook.

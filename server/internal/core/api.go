@@ -13,7 +13,7 @@ import (
 
 func apiPlanParameters(plan api.Plan) ([]string, error) {
 	parameters, err := panicboundary.Call(func() ([]string, error) {
-		return plan.Params(), nil
+		return plan.Params()
 	})
 	if err != nil {
 		return nil, runtimePanicError("read runtime plan parameters", err)

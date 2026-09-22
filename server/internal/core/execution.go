@@ -16,24 +16,25 @@ import (
 
 // Execution owns one asynchronous run and retains its terminal result until release.
 type Execution struct {
-	mu        sync.Mutex
-	id        ExecutionID
-	store     *ResourceStore
-	plan      *Plan
-	session   *Session
-	operation func(context.Context) (api.Output, error)
-	ctx       context.Context
-	cancel    context.CancelCauseFunc
-	options   []api.SessionOption
-	state     wireexecution.State
-	output    *api.Output
-	failure   *failure.Failure
-	events    *eventStream[wireexecution.Event]
-	done      chan struct{}
-	release   lifecycle.Close
+	mu          sync.Mutex
+	id          ExecutionID
+	store       *ResourceStore
+	plan        *Plan
+	session     *Session
+	operation   func(context.Context) (*api.Output, error)
+	ctx         context.Context
+	cancel      context.CancelCauseFunc
+	options     []api.SessionOption
+	state       wireexecution.State
+	output      *api.Output
+	failure     *failure.Failure
+	events      *eventStream[wireexecution.Event]
+	done        chan struct{}
+	release     lifecycle.Close
+	constructed chan struct{}
 }
 
-func newExecution(store *ResourceStore, plan *Plan, session *Session, operation func(context.Context) (api.Output, error), options []api.SessionOption) *Execution {
+func newExecution(store *ResourceStore, plan *Plan, session *Session, operation func(context.Context) (*api.Output, error), options []api.SessionOption) *Execution {
 	lifetime := store.ctx
 
 	if session != nil {
@@ -41,6 +42,7 @@ func newExecution(store *ResourceStore, plan *Plan, session *Session, operation 
 	}
 
 	ctx, cancel := context.WithCancelCause(lifetime)
+
 	execution := &Execution{
 		id:        ExecutionID(uuid.NewString()),
 		store:     store,
@@ -54,6 +56,10 @@ func newExecution(store *ResourceStore, plan *Plan, session *Session, operation 
 		events:    newEventStream(store.limits.Watchers, cloneExecutionEvent, sequenceExecutionEvent),
 		done:      make(chan struct{}),
 	}
+	if plan != nil && session == nil && operation == nil {
+		execution.constructed = make(chan struct{})
+	}
+
 	execution.publishLocked(false)
 
 	return execution
@@ -104,9 +110,17 @@ func (e *Execution) run() {
 			err = errors.Join(err, closeAPISession(session))
 		}
 
+		if e.constructed != nil {
+			close(e.constructed)
+		}
+
 		e.finish(nil, err, failure.CategoryInternalRuntime)
 
 		return
+	}
+
+	if e.constructed != nil {
+		close(e.constructed)
 	}
 
 	if isNil(session) {
@@ -115,16 +129,12 @@ func (e *Execution) run() {
 		return
 	}
 
-	output, runErr := panicboundary.Call(func() (api.Output, error) {
+	output, runErr := panicboundary.Call(func() (*api.Output, error) {
 		return session.Run(e.ctx)
 	})
+	result := cloneOutput(output)
 	closeErr := closeAPISession(session)
 	err = errors.Join(runErr, closeErr)
-
-	result := &api.Output{
-		ContentType: output.ContentType,
-		Content:     append([]byte(nil), output.Content...),
-	}
 
 	var panicErr *panicboundary.Error
 	if errors.As(runErr, &panicErr) {
@@ -142,10 +152,7 @@ func (e *Execution) run() {
 
 func (e *Execution) runOperation() {
 	output, runErr := e.operation(e.ctx)
-	result := &api.Output{
-		ContentType: output.ContentType,
-		Content:     append([]byte(nil), output.Content...),
-	}
+	result := cloneOutput(output)
 	category := failure.CategoryExecution
 
 	var domain *DomainError
@@ -163,6 +170,11 @@ func (e *Execution) finish(output *api.Output, err error, category failure.Categ
 
 	if e.state != wireexecution.StateRunning {
 		return
+	}
+
+	if output == nil && err == nil {
+		err = errors.New("runtime returned no output")
+		category = failure.CategoryInternalRuntime
 	}
 
 	e.output = output

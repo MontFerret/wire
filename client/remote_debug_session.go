@@ -3,21 +3,23 @@ package client
 import (
 	"context"
 	"errors"
-	"sort"
 	"sync"
 
 	"github.com/MontFerret/api/debugger"
 	"github.com/MontFerret/api/source"
+	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
 )
 
 type remoteDebugSession struct {
-	session *debugSessionHandle
-	ctx     context.Context
-	cancel  context.CancelFunc
-
-	commandMu    sync.Mutex
-	breakpointMu sync.Mutex
-	breakpoints  map[debugger.BreakpointID]debugger.Breakpoint
+	session          *debugSessionHandle
+	ctx              context.Context
+	cancel           context.CancelFunc
+	commandMu        sync.Mutex
+	snapshotMu       sync.Mutex
+	finalBreakpoints []debugger.Breakpoint
+	breakpointErr    error
+	lifetimeDone     chan struct{}
+	close            closeState
 }
 
 var _ debugger.Session = (*remoteDebugSession)(nil)
@@ -25,208 +27,224 @@ var _ debugger.Session = (*remoteDebugSession)(nil)
 func newRemoteDebugSession(session *debugSessionHandle) *remoteDebugSession {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	return &remoteDebugSession{
-		session:     session,
-		ctx:         ctx,
-		cancel:      cancel,
-		breakpoints: make(map[debugger.BreakpointID]debugger.Breakpoint),
-	}
+	return &remoteDebugSession{session: session, ctx: ctx, cancel: cancel}
 }
 
 func (d *remoteDebugSession) Start(ctx context.Context) (*debugger.Event, error) {
-	return d.runCommand(ctx, d.session.Start)
+	return d.runCommand(ctx, wirev1.DebugCommand_DEBUG_COMMAND_START)
 }
 
 func (d *remoteDebugSession) Continue(ctx context.Context) (*debugger.Event, error) {
-	return d.runCommand(ctx, d.session.Continue)
+	return d.runCommand(ctx, wirev1.DebugCommand_DEBUG_COMMAND_CONTINUE)
 }
 
 func (d *remoteDebugSession) StepIn(ctx context.Context) (*debugger.Event, error) {
-	return d.runCommand(ctx, d.session.StepIn)
+	return d.runCommand(ctx, wirev1.DebugCommand_DEBUG_COMMAND_STEP_IN)
 }
 
 func (d *remoteDebugSession) StepOver(ctx context.Context) (*debugger.Event, error) {
-	return d.runCommand(ctx, d.session.StepOver)
+	return d.runCommand(ctx, wirev1.DebugCommand_DEBUG_COMMAND_STEP_OVER)
 }
 
 func (d *remoteDebugSession) StepOut(ctx context.Context) (*debugger.Event, error) {
-	return d.runCommand(ctx, d.session.StepOut)
+	return d.runCommand(ctx, wirev1.DebugCommand_DEBUG_COMMAND_STEP_OUT)
 }
 
-func (d *remoteDebugSession) runCommand(
-	ctx context.Context,
-	command func(context.Context) error,
-) (*debugger.Event, error) {
-	if d == nil || d.session == nil {
-		return nil, ErrClosed
-	}
-
-	if ctx == nil {
-		ctx = context.Background()
+func (d *remoteDebugSession) runCommand(ctx context.Context, command wirev1.DebugCommand) (*debugger.Event, error) {
+	if err := d.operationError(ctx); err != nil {
+		return nil, err
 	}
 
 	d.commandMu.Lock()
 	defer d.commandMu.Unlock()
 
+	if err := d.operationError(ctx); err != nil {
+		return nil, err
+	}
+
 	operation, cancel := context.WithCancel(ctx)
 	stop := context.AfterFunc(d.ctx, cancel)
+	retained := false
 	defer func() {
-		stop()
-		cancel()
+		if !retained {
+			stop()
+			cancel()
+		}
 	}()
 
-	events, err := d.session.Watch(operation)
+	stream, err := d.session.client.debugClient.RunCommand(operation, &wirev1.RunCommandRequest{
+		ConnectionId: d.session.client.connectionProto(), DebugSessionId: &wirev1.DebugSessionId{Value: d.session.id}, Command: command,
+	})
 	if err != nil {
 		return nil, d.commandError(ctx, err)
 	}
-	defer events.cancel()
 
-	if _, err := events.Recv(); err != nil {
+	response, err := stream.Recv()
+	if err != nil {
 		return nil, d.commandError(ctx, err)
 	}
 
-	if err := command(operation); err != nil {
-		return nil, d.commandError(ctx, err)
+	result, err := convertCommandResult(response.GetResult())
+	if err != nil {
+		return nil, err
 	}
 
-	for {
-		event, err := events.Recv()
-		if err != nil {
-			return nil, d.commandError(ctx, err)
-		}
-
-		converted, terminal, err := remoteDebuggerEvent(event)
-		if err != nil {
-			return nil, err
-		}
-
-		if terminal {
-			return converted, nil
-		}
+	if result == nil {
+		return nil, invalidDebuggerResponse("command result is missing")
 	}
+
+	if command == wirev1.DebugCommand_DEBUG_COMMAND_START && result.Event != nil &&
+		result.Event.Reason != debugger.ReasonCompleted && result.Event.Reason != debugger.ReasonTerminated {
+		retained = true
+		done := make(chan struct{})
+		d.snapshotMu.Lock()
+		d.lifetimeDone = done
+		d.snapshotMu.Unlock()
+		// Start's context remains attached after its initial stop. The server sends
+		// exactly one result; closing this stream ends the hosted execution context.
+		go func() {
+			defer close(done)
+			defer stop()
+			defer cancel()
+			_, _ = stream.Recv()
+		}()
+	}
+
+	return result.Event, result.Error
 }
 
 func (d *remoteDebugSession) commandError(ctx context.Context, err error) error {
 	if ctxErr := ctx.Err(); ctxErr != nil {
-		closeErr := d.Close()
-
-		return errors.Join(ctxErr, closeErr)
+		return ctxErr
 	}
 
 	if d.ctx.Err() != nil {
 		return ErrClosed
 	}
 
-	return err
+	return decodeError(err)
 }
 
-func (d *remoteDebugSession) Pause() error {
-	if d == nil || d.session == nil {
-		return ErrClosed
-	}
-
-	return d.session.Pause(d.ctx)
-}
-
-func (d *remoteDebugSession) SetBreakpoint(location source.Location) (debugger.Breakpoint, error) {
-	return d.SetBreakpointAt(location, debugger.BreakpointOptions{
-		BindingMode: debugger.BreakpointBindNextExecutableInSource,
-	})
-}
-
-func (d *remoteDebugSession) SetBreakpointAt(
-	location source.Location,
-	options debugger.BreakpointOptions,
-) (debugger.Breakpoint, error) {
-	if d == nil || d.session == nil {
-		return debugger.Breakpoint{}, ErrClosed
-	}
-
-	breakpoint, err := d.session.SetBreakpointAt(d.ctx, location, options)
-	if err != nil {
-		return debugger.Breakpoint{}, err
-	}
-
-	d.breakpointMu.Lock()
-	d.breakpoints[breakpoint.ID] = breakpoint
-	d.breakpointMu.Unlock()
-
-	return breakpoint, nil
-}
-
-func (d *remoteDebugSession) DeleteBreakpoint(id debugger.BreakpointID) error {
-	if d == nil || d.session == nil {
-		return ErrClosed
-	}
-
-	if err := d.session.DeleteBreakpoint(d.ctx, id); err != nil {
+func (d *remoteDebugSession) operationError(ctx context.Context) error {
+	if err := runtimeContextError(ctx); err != nil {
 		return err
 	}
 
-	d.breakpointMu.Lock()
-	delete(d.breakpoints, id)
-	d.breakpointMu.Unlock()
-
-	return nil
-}
-
-func (d *remoteDebugSession) Breakpoints() []debugger.Breakpoint {
-	if d == nil {
-		return nil
+	if d == nil || d.session == nil || d.close.Started() {
+		return ErrClosed
 	}
 
-	d.breakpointMu.Lock()
-	result := make([]debugger.Breakpoint, 0, len(d.breakpoints))
-	for _, breakpoint := range d.breakpoints {
-		result = append(result, breakpoint)
-	}
-
-	d.breakpointMu.Unlock()
-
-	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
-
-	return result
+	return d.session.checkOpen()
 }
 
-func (d *remoteDebugSession) Frames() ([]debugger.Frame, error) {
+func (d *remoteDebugSession) Pause(ctx context.Context) error {
+	if err := d.operationError(ctx); err != nil {
+		return err
+	}
+
+	return d.session.Pause(ctx)
+}
+
+func (d *remoteDebugSession) SetBreakpoint(ctx context.Context, location source.Location) (debugger.Breakpoint, error) {
+	if err := d.operationError(ctx); err != nil {
+		return debugger.Breakpoint{}, err
+	}
+
+	return d.session.setBreakpoint(ctx, location, nil)
+}
+
+func (d *remoteDebugSession) SetBreakpointAt(ctx context.Context, location source.Location, options debugger.BreakpointOptions) (debugger.Breakpoint, error) {
+	if err := d.operationError(ctx); err != nil {
+		return debugger.Breakpoint{}, err
+	}
+
+	return d.session.SetBreakpointAt(ctx, location, options)
+}
+
+func (d *remoteDebugSession) ReplaceBreakpoints(ctx context.Context, sourceName string, requests []debugger.BreakpointRequest) ([]debugger.Breakpoint, error) {
+	if err := d.operationError(ctx); err != nil {
+		return nil, err
+	}
+
+	return d.session.replaceBreakpoints(ctx, sourceName, requests)
+}
+
+func (d *remoteDebugSession) DeleteBreakpoint(ctx context.Context, id debugger.BreakpointID) error {
+	if err := d.operationError(ctx); err != nil {
+		return err
+	}
+
+	return d.session.DeleteBreakpoint(ctx, id)
+}
+
+func (d *remoteDebugSession) Breakpoints(ctx context.Context) ([]debugger.Breakpoint, error) {
+	if err := runtimeContextError(ctx); err != nil {
+		return nil, err
+	}
+
 	if d == nil || d.session == nil {
 		return nil, ErrClosed
 	}
 
-	return d.session.Frames(d.ctx)
-}
+	if d.close.Started() {
+		// Enumeration has its own retained result, independent from cleanup errors.
+		_ = d.close.Wait(ctx)
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 
-func (d *remoteDebugSession) Locals() ([]debugger.Variable, error) {
-	return d.FrameLocals(0)
-}
+		d.snapshotMu.Lock()
+		defer d.snapshotMu.Unlock()
 
-func (d *remoteDebugSession) FrameLocals(frame int) ([]debugger.Variable, error) {
-	if d == nil || d.session == nil {
-		return nil, ErrClosed
+		return append([]debugger.Breakpoint(nil), d.finalBreakpoints...), d.breakpointErr
 	}
 
-	return d.session.FrameLocals(d.ctx, frame)
+	return d.session.breakpoints(ctx)
 }
 
-func (d *remoteDebugSession) Variables(reference debugger.ValueReference) ([]debugger.Variable, error) {
-	if d == nil || d.session == nil {
-		return nil, ErrClosed
+func (d *remoteDebugSession) Frames(ctx context.Context) ([]debugger.Frame, error) {
+	if err := d.operationError(ctx); err != nil {
+		return nil, err
 	}
 
-	return d.session.Variables(d.ctx, reference)
+	return d.session.Frames(ctx)
+}
+
+func (d *remoteDebugSession) Locals(ctx context.Context) ([]debugger.Variable, error) {
+	if err := d.operationError(ctx); err != nil {
+		return nil, err
+	}
+
+	return d.session.locals(ctx)
+}
+
+func (d *remoteDebugSession) FrameLocals(ctx context.Context, frame int) ([]debugger.Variable, error) {
+	if err := d.operationError(ctx); err != nil {
+		return nil, err
+	}
+
+	return d.session.FrameLocals(ctx, frame)
+}
+
+func (d *remoteDebugSession) Variables(ctx context.Context, reference debugger.ValueReference) ([]debugger.Variable, error) {
+	if err := d.operationError(ctx); err != nil {
+		return nil, err
+	}
+
+	return d.session.Variables(ctx, reference)
 }
 
 func (d *remoteDebugSession) Evaluate(ctx context.Context, expression string) (debugger.Value, error) {
-	return d.EvaluateFrame(ctx, 0, expression)
+	if err := d.operationError(ctx); err != nil {
+		return debugger.Value{}, err
+	}
+
+	return d.session.evaluate(ctx, expression)
 }
 
-func (d *remoteDebugSession) EvaluateFrame(
-	ctx context.Context,
-	frame int,
-	expression string,
-) (debugger.Value, error) {
-	if d == nil || d.session == nil {
-		return debugger.Value{}, ErrClosed
+func (d *remoteDebugSession) EvaluateFrame(ctx context.Context, frame int, expression string) (debugger.Value, error) {
+	if err := d.operationError(ctx); err != nil {
+		return debugger.Value{}, err
 	}
 
 	return d.session.EvaluateFrame(ctx, frame, expression)
@@ -237,7 +255,46 @@ func (d *remoteDebugSession) Close() error {
 		return ErrClosed
 	}
 
-	d.cancel()
+	return boundedCleanup(context.Background(), convenienceCleanupTimeout, d.closeWithContext)
+}
 
-	return boundedCleanup(context.Background(), convenienceCleanupTimeout, d.session.Close)
+func (d *remoteDebugSession) closeWithContext(ctx context.Context) error {
+	if d.close.Begin() {
+		d.cancel()
+		go settleHandleClose(ctx, "debugger API", &d.close, d.settleClose)
+	}
+
+	return d.close.Wait(ctx)
+}
+
+func (d *remoteDebugSession) settleClose(ctx context.Context) error {
+	if closing, err := d.session.plan.ancestorCloseResult(ctx); closing {
+		d.snapshotMu.Lock()
+		d.breakpointErr = ErrClosed
+		d.snapshotMu.Unlock()
+
+		return errors.Join(err, d.session.Close(ctx))
+	}
+
+	_, terminateErr := d.session.client.debugClient.Terminate(ctx, &wirev1.TerminateRequest{
+		ConnectionId: d.session.client.connectionProto(), DebugSessionId: &wirev1.DebugSessionId{Value: d.session.id},
+	})
+	points, pointsErr := d.session.breakpoints(ctx)
+	d.snapshotMu.Lock()
+	d.finalBreakpoints, d.breakpointErr = points, pointsErr
+	d.snapshotMu.Unlock()
+	releaseErr := d.session.Close(ctx)
+	// Cancellation unblocks command receivers before Close joins their local work.
+	d.commandMu.Lock()
+	// All admitted receivers have returned after lifetime cancellation.
+	d.snapshotMu.Lock()
+	done := d.lifetimeDone
+	d.snapshotMu.Unlock()
+	d.commandMu.Unlock()
+
+	if done != nil {
+		<-done
+	}
+
+	return errors.Join(decodeError(terminateErr), releaseErr)
 }

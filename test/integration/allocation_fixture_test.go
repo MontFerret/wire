@@ -53,6 +53,8 @@ func newRuntimeAllocationFixture(t *testing.T, operation allocationOperation) *r
 	switch operation.method {
 	case harness.CreateSession, harness.CreateDebugger, harness.RunSession:
 		f.plan, err = f.remote.CompileDebug(h.Context(), api.Source{Content: "RETURN 1"})
+		h.Own(f.plan)
+
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -60,6 +62,8 @@ func newRuntimeAllocationFixture(t *testing.T, operation allocationOperation) *r
 
 	if operation.method == harness.RunSession {
 		f.session, err = f.plan.NewSession(h.Context())
+		h.Own(f.session)
+
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -98,6 +102,8 @@ func (f *runtimeAllocationFixture) allocate(ctx context.Context, cancelInOption 
 			return nil, err
 		}
 
+		f.h.Own(plan)
+
 		return plan.Close, nil
 	case harness.CreateSession:
 		session, err := f.plan.NewSession(ctx, sessionOptions...)
@@ -105,12 +111,16 @@ func (f *runtimeAllocationFixture) allocate(ctx context.Context, cancelInOption 
 			return nil, err
 		}
 
+		f.h.Own(session)
+
 		return session.Close, nil
 	case harness.CreateDebugger:
 		session, err := f.plan.NewDebugSession(ctx, sessionOptions...)
 		if err != nil {
 			return nil, err
 		}
+
+		f.h.Own(session)
 
 		return session.Close, nil
 	case harness.RunSession:

@@ -15,8 +15,8 @@ type apiRuntimeSpy struct {
 	closeCalls int
 }
 
-func (r *apiRuntimeSpy) Run(context.Context, api.Source, ...api.SessionOption) (api.Output, error) {
-	return api.Output{ContentType: "application/json", Content: []byte("1")}, nil
+func (r *apiRuntimeSpy) Run(context.Context, api.Source, ...api.SessionOption) (*api.Output, error) {
+	return &api.Output{ContentType: "application/json", Content: []byte("1")}, nil
 }
 
 func (r *apiRuntimeSpy) Compile(ctx context.Context, src api.Source, _ ...api.PlanOption) (api.Plan, error) {

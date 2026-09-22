@@ -11,8 +11,10 @@ type (
 
 	// SessionOptions records parameters and output format supplied through API options.
 	SessionOptions struct {
-		Params      map[string]any
-		ContentType string
+		FSRoot         *string
+		Params         map[string]any
+		ContentType    string
+		ContentTypeSet bool
 	}
 )
 
@@ -48,6 +50,7 @@ func (o *SessionOptions) SetParams(values map[string]any) error {
 // SetOutputContentType records the requested output format verbatim.
 func (o *SessionOptions) SetOutputContentType(value string) error {
 	o.ContentType = value
+	o.ContentTypeSet = true
 
 	return nil
 }
@@ -99,3 +102,6 @@ func applyOptions(options []api.SessionOption) (SessionOptions, error) {
 
 	return configured, nil
 }
+
+// SetFSRoot records the portable root without interpreting it.
+func (o *SessionOptions) SetFSRoot(root string) error { o.FSRoot = &root; return nil }

@@ -159,7 +159,14 @@ func (s *DebugService) SetBreakpoint(ctx context.Context, request *wirev1.SetBre
 		return nil, rpcError(err)
 	}
 
-	value, err := session.SetBreakpointAt(operation, location, options)
+	var value debugger.Breakpoint
+
+	if request.GetOptions() == nil {
+		value, err = session.SetBreakpoint(operation, location)
+	} else {
+		value, err = session.SetBreakpointAt(operation, location, options)
+	}
+
 	if err != nil {
 		return nil, rpcError(err)
 	}

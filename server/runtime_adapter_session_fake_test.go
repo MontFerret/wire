@@ -9,12 +9,12 @@ import (
 
 type contractSession struct {
 	mu         sync.Mutex
-	run        func(context.Context, int) (api.Output, error)
+	run        func(context.Context, int) (*api.Output, error)
 	runCalls   int
 	closeCalls int
 }
 
-func (s *contractSession) Run(ctx context.Context) (api.Output, error) {
+func (s *contractSession) Run(ctx context.Context) (*api.Output, error) {
 	s.mu.Lock()
 	s.runCalls++
 	call := s.runCalls
@@ -22,7 +22,7 @@ func (s *contractSession) Run(ctx context.Context) (api.Output, error) {
 	s.mu.Unlock()
 
 	if run == nil {
-		return api.Output{}, nil
+		return &api.Output{}, nil
 	}
 
 	return run(ctx, call)

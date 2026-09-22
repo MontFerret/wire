@@ -9,7 +9,7 @@ import (
 type (
 	// SessionBehavior configures run and cleanup hooks for a durable hosted session.
 	SessionBehavior struct {
-		Run   func(context.Context, int) (api.Output, error)
+		Run   func(context.Context, int) (*api.Output, error)
 		Close func() error
 	}
 
@@ -24,7 +24,7 @@ type (
 var _ api.Session = (*SessionSpy)(nil)
 
 // Run records entry and settlement, passing the invocation count to the configured hook.
-func (s *SessionSpy) Run(ctx context.Context) (api.Output, error) {
+func (s *SessionSpy) Run(ctx context.Context) (*api.Output, error) {
 	call := s.recorder.record(Call{Resource: s.id, Method: "Run"})
 	defer s.recorder.record(Call{Resource: s.id, Method: "RunFinished"})
 
@@ -32,7 +32,7 @@ func (s *SessionSpy) Run(ctx context.Context) (api.Output, error) {
 		return s.behavior.Run(ctx, call)
 	}
 
-	return api.Output{}, nil
+	return &api.Output{}, nil
 }
 
 // Close records entry and settlement around the configured cleanup hook.

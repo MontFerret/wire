@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"sort"
 	"sync"
 
 	"github.com/MontFerret/api/debugger"
@@ -24,6 +25,7 @@ type spyDebugger struct {
 	pauseCalls       int
 	close            func() error
 	closeCalls       int
+	nextID           debugger.BreakpointID
 }
 
 func (d *spyDebugger) Start(ctx context.Context) (*debugger.Event, error) {
@@ -58,7 +60,7 @@ func (d *spyDebugger) resumeDebug(ctx context.Context) (*debugger.Event, error) 
 	return d.resume(ctx)
 }
 
-func (d *spyDebugger) Pause() error {
+func (d *spyDebugger) Pause(_ context.Context) error {
 	d.mu.Lock()
 	d.pauseCalls++
 	pause := d.pause
@@ -71,18 +73,29 @@ func (d *spyDebugger) Pause() error {
 	return pause()
 }
 
-func (d *spyDebugger) SetBreakpoint(position source.Location) (debugger.Breakpoint, error) {
-	return d.SetBreakpointAt(position, debugger.BreakpointOptions{})
+func (d *spyDebugger) SetBreakpoint(ctx context.Context, position source.Location) (debugger.Breakpoint, error) {
+	return d.SetBreakpointAt(ctx, position, debugger.BreakpointOptions{})
 }
 
-func (d *spyDebugger) SetBreakpointAt(position source.Location, options debugger.BreakpointOptions) (debugger.Breakpoint, error) {
+func (d *spyDebugger) SetBreakpointAt(_ context.Context, position source.Location, options debugger.BreakpointOptions) (debugger.Breakpoint, error) {
 	d.mu.Lock()
 	d.setCalls++
 	setBreakpoint := d.setBreakpoint
 	d.mu.Unlock()
 
 	if setBreakpoint != nil {
-		return setBreakpoint(position, options)
+		value, err := setBreakpoint(position, options)
+		if err == nil {
+			d.mu.Lock()
+			if d.breakpoints == nil {
+				d.breakpoints = make(map[debugger.BreakpointID]debugger.Breakpoint)
+			}
+
+			d.breakpoints[value.ID] = value
+			d.mu.Unlock()
+		}
+
+		return value, err
 	}
 
 	d.mu.Lock()
@@ -110,14 +123,21 @@ func (d *spyDebugger) SetBreakpointAt(position source.Location, options debugger
 	return value, nil
 }
 
-func (d *spyDebugger) DeleteBreakpoint(id debugger.BreakpointID) error {
+func (d *spyDebugger) DeleteBreakpoint(_ context.Context, id debugger.BreakpointID) error {
 	d.mu.Lock()
 	d.deleteCalls++
 	deleteBreakpoint := d.deleteBreakpoint
 	d.mu.Unlock()
 
 	if deleteBreakpoint != nil {
-		return deleteBreakpoint(id)
+		err := deleteBreakpoint(id)
+		if err == nil {
+			d.mu.Lock()
+			delete(d.breakpoints, id)
+			d.mu.Unlock()
+		}
+
+		return err
 	}
 
 	d.mu.Lock()
@@ -128,7 +148,7 @@ func (d *spyDebugger) DeleteBreakpoint(id debugger.BreakpointID) error {
 	return nil
 }
 
-func (d *spyDebugger) Breakpoints() []debugger.Breakpoint {
+func (d *spyDebugger) Breakpoints(_ context.Context) ([]debugger.Breakpoint, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
@@ -137,22 +157,22 @@ func (d *spyDebugger) Breakpoints() []debugger.Breakpoint {
 		result = append(result, value)
 	}
 
-	return result
+	return result, nil
 }
 
-func (d *spyDebugger) Frames() ([]debugger.Frame, error) {
+func (d *spyDebugger) Frames(_ context.Context) ([]debugger.Frame, error) {
 	return append([]debugger.Frame(nil), d.frames...), nil
 }
 
-func (d *spyDebugger) Locals() ([]debugger.Variable, error) {
+func (d *spyDebugger) Locals(_ context.Context) ([]debugger.Variable, error) {
 	return append([]debugger.Variable(nil), d.locals...), nil
 }
 
-func (d *spyDebugger) FrameLocals(int) ([]debugger.Variable, error) {
+func (d *spyDebugger) FrameLocals(_ context.Context, _ int) ([]debugger.Variable, error) {
 	return append([]debugger.Variable(nil), d.locals...), nil
 }
 
-func (d *spyDebugger) Variables(reference debugger.ValueReference) ([]debugger.Variable, error) {
+func (d *spyDebugger) Variables(_ context.Context, reference debugger.ValueReference) ([]debugger.Variable, error) {
 	if d.variables != nil {
 		return d.variables(reference)
 	}
@@ -200,4 +220,67 @@ func (d *spyDebugger) pauses() int {
 	defer d.mu.Unlock()
 
 	return d.pauseCalls
+}
+
+// ReplaceBreakpoints implements atomic fixture publication with stable IDs.
+func (d *spyDebugger) ReplaceBreakpoints(ctx context.Context, sourceName string, requests []debugger.BreakpointRequest) ([]debugger.Breakpoint, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	if d.breakpoints == nil {
+		d.breakpoints = make(map[debugger.BreakpointID]debugger.Breakpoint)
+	}
+
+	existing := make([]debugger.Breakpoint, 0, len(d.breakpoints))
+	for _, value := range d.breakpoints {
+		if value.ID > d.nextID {
+			d.nextID = value.ID
+		}
+
+		if value.RequestedLocation.SourceName == sourceName {
+			existing = append(existing, value)
+		}
+	}
+
+	sort.Slice(existing, func(i, j int) bool { return existing[i].ID < existing[j].ID })
+	result := make([]debugger.Breakpoint, len(requests))
+	used := make(map[debugger.BreakpointID]bool)
+	for i, request := range requests {
+		location := source.Location{SourceName: sourceName, Position: request.Position}
+		for _, value := range existing {
+			if !used[value.ID] && value.RequestedLocation == location && value.BindingMode == request.Options.BindingMode {
+				result[i] = value
+				used[value.ID] = true
+
+				break
+			}
+		}
+
+		if result[i].ID == 0 {
+			d.nextID++
+
+			result[i] = debugger.Breakpoint{ID: d.nextID, RequestedLocation: location, Location: source.Range{Location: location}, BindingMode: request.Options.BindingMode, FunctionID: debugger.NoFunction, Bound: request.Position.Line < 100}
+			if !result[i].Bound {
+				result[i].Location = source.Range{}
+			}
+		}
+	}
+
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	for _, value := range existing {
+		delete(d.breakpoints, value.ID)
+	}
+
+	for _, value := range result {
+		d.breakpoints[value.ID] = value
+	}
+
+	return result, nil
 }

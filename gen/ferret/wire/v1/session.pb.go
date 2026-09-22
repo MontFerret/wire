@@ -116,10 +116,14 @@ type CreateSessionRequest struct {
 	PlanId       *PlanId                `protobuf:"bytes,2,opt,name=plan_id,json=planId,proto3" json:"plan_id,omitempty"`
 	Parameters   *Parameters            `protobuf:"bytes,3,opt,name=parameters,proto3" json:"parameters,omitempty"`
 	// output_content_type requests a runtime-supported encoded output codec;
-	// empty preserves the runtime default.
+	// empty preserves the runtime default only when output_content_type_set is false.
 	OutputContentType string `protobuf:"bytes,4,opt,name=output_content_type,json=outputContentType,proto3" json:"output_content_type,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// Presence distinguishes an omitted root from an explicitly empty root.
+	FsRoot *string `protobuf:"bytes,5,opt,name=fs_root,json=fsRoot,proto3,oneof" json:"fs_root,omitempty"`
+	// Explicit empty content types are forwarded to the hosted runtime.
+	OutputContentTypeSet bool `protobuf:"varint,6,opt,name=output_content_type_set,json=outputContentTypeSet,proto3" json:"output_content_type_set,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *CreateSessionRequest) Reset() {
@@ -178,6 +182,20 @@ func (x *CreateSessionRequest) GetOutputContentType() string {
 		return x.OutputContentType
 	}
 	return ""
+}
+
+func (x *CreateSessionRequest) GetFsRoot() string {
+	if x != nil && x.FsRoot != nil {
+		return *x.FsRoot
+	}
+	return ""
+}
+
+func (x *CreateSessionRequest) GetOutputContentTypeSet() bool {
+	if x != nil {
+		return x.OutputContentTypeSet
+	}
+	return false
 }
 
 type CreateSessionResponse struct {
@@ -320,14 +338,18 @@ const file_ferret_wire_v1_session_proto_rawDesc = "" +
 	"\tSessionId\x12\x14\n" +
 	"\x05value\x18\x01 \x01(\tR\x05value\"4\n" +
 	"\aSession\x12)\n" +
-	"\x02id\x18\x01 \x01(\v2\x19.ferret.wire.v1.SessionIdR\x02id\"\xf6\x01\n" +
+	"\x02id\x18\x01 \x01(\v2\x19.ferret.wire.v1.SessionIdR\x02id\"\xd7\x02\n" +
 	"\x14CreateSessionRequest\x12A\n" +
 	"\rconnection_id\x18\x01 \x01(\v2\x1c.ferret.wire.v1.ConnectionIdR\fconnectionId\x12/\n" +
 	"\aplan_id\x18\x02 \x01(\v2\x16.ferret.wire.v1.PlanIdR\x06planId\x12:\n" +
 	"\n" +
 	"parameters\x18\x03 \x01(\v2\x1a.ferret.wire.v1.ParametersR\n" +
 	"parameters\x12.\n" +
-	"\x13output_content_type\x18\x04 \x01(\tR\x11outputContentType\"J\n" +
+	"\x13output_content_type\x18\x04 \x01(\tR\x11outputContentType\x12\x1c\n" +
+	"\afs_root\x18\x05 \x01(\tH\x00R\x06fsRoot\x88\x01\x01\x125\n" +
+	"\x17output_content_type_set\x18\x06 \x01(\bR\x14outputContentTypeSetB\n" +
+	"\n" +
+	"\b_fs_root\"J\n" +
 	"\x15CreateSessionResponse\x121\n" +
 	"\asession\x18\x01 \x01(\v2\x17.ferret.wire.v1.SessionR\asession\"\x94\x01\n" +
 	"\x15ReleaseSessionRequest\x12A\n" +
@@ -390,6 +412,7 @@ func file_ferret_wire_v1_session_proto_init() {
 	file_ferret_wire_v1_plan_proto_init()
 	file_ferret_wire_v1_runtime_proto_init()
 	file_ferret_wire_v1_value_proto_init()
+	file_ferret_wire_v1_session_proto_msgTypes[2].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

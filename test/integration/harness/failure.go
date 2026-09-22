@@ -69,6 +69,7 @@ const (
 	CancelExecution  Operation = "cancel execution"
 	WatchExecution   Operation = "watch execution"
 	WatchDebugger    Operation = "watch debugger"
+	RunDebugCommand  Operation = "run debug command"
 
 	Deliver         Outcome = "success"
 	LostDeadline    Outcome = "deadline"
@@ -106,6 +107,8 @@ func operationFor(method string) Operation {
 		return CancelExecution
 	case wirev1.ExecutionService_WatchExecution_FullMethodName:
 		return WatchExecution
+	case wirev1.DebugService_RunCommand_FullMethodName:
+		return RunDebugCommand
 	case wirev1.DebugService_WatchDebug_FullMethodName:
 		return WatchDebugger
 	default:
@@ -209,7 +212,7 @@ func (f *Faults) NewStream(ctx context.Context, description *grpc.StreamDesc, me
 		return nil, err
 	}
 
-	return &failingStream{ClientStream: stream, cancel: cancel, err: failure.err, after: failure.after}, nil
+	return &failingStream{ClientStream: stream, cancel: cancel, err: failure.err, after: failure.after, received: operationFor(method) == RunDebugCommand}, nil
 }
 
 func (s *failingStream) RecvMsg(message any) error {

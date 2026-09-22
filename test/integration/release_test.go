@@ -50,6 +50,8 @@ func TestRuntimeCompletedExecutionReleaseFailurePreservesParents(t *testing.T) {
 					}
 
 					sibling, err := f.plan.NewSession(harness.Context(t))
+					f.h.Own(sibling)
+
 					if err != nil {
 						t.Fatalf("release failure invalidated Plan: %v", err)
 					}
@@ -80,10 +82,14 @@ func TestKnownResourceCloseFailurePreservesSiblings(t *testing.T) {
 					t.Fatal(err)
 				}
 
+				f.h.Own(siblingPlan)
+
 				sibling, err := siblingPlan.NewSession(f.h.Context())
 				if err != nil {
 					t.Fatal(err)
 				}
+
+				f.h.Own(sibling)
 
 				closeHandle, err := f.allocate(f.h.Context(), nil)
 				if err != nil {
@@ -91,6 +97,7 @@ func TestKnownResourceCloseFailurePreservesSiblings(t *testing.T) {
 				}
 
 				releaseErr := status.Error(codes.Unavailable, "known resource release failed")
+				f.h.ExpectCleanupError(releaseErr)
 				fail := f.gate.Fail
 
 				if acknowledged {

@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"errors"
+	"sort"
 	"sync"
 
 	"github.com/google/uuid"
@@ -23,17 +24,21 @@ type DebugSession struct {
 	// so pause and cancellation can reach the hosted debugger.
 	operationMu sync.Mutex
 	// stateMu protects only Wire-visible state and never spans a runtime call.
-	stateMu     sync.Mutex
-	id          DebugSessionID
-	plan        *Plan
-	session     debugger.Session
-	ctx         context.Context
-	cancel      context.CancelCauseFunc
-	state       debugSessionState
-	breakpoints *breakpointSet
-	events      *eventStream[wiredebugger.Event]
-	close       lifecycle.Close
-	release     lifecycle.Close
+	stateMu        sync.Mutex
+	id             DebugSessionID
+	plan           *Plan
+	session        debugger.Session
+	ctx            context.Context
+	cancel         context.CancelCauseFunc
+	state          debugSessionState
+	breakpoints    *breakpointSet
+	events         *eventStream[wiredebugger.Event]
+	close          lifecycle.Close
+	release        lifecycle.Close
+	commands       sync.WaitGroup
+	poisoned       error
+	commandStreams int
+	done           chan struct{}
 }
 
 func newDebugSession(plan *Plan, hosted debugger.Session) *DebugSession {
@@ -44,6 +49,7 @@ func newDebugSession(plan *Plan, hosted debugger.Session) *DebugSession {
 		session:     hosted,
 		ctx:         ctx,
 		cancel:      cancel,
+		done:        make(chan struct{}),
 		state:       debugSessionState{status: wiredebugger.StateCreated},
 		breakpoints: newBreakpointSet(plan.store.limits.Breakpoints),
 		events:      newEventStream(plan.store.limits.Watchers, cloneDebugEvent, sequenceDebugEvent),
@@ -96,26 +102,25 @@ func (d *DebugSession) ID() DebugSessionID {
 
 // Stop closes a nonterminal debugger and returns its terminal snapshot.
 func (d *DebugSession) Stop(ctx context.Context) (wiredebugger.Snapshot, error) {
-	snapshot := d.Snapshot()
-	if !snapshot.State.Terminal() {
-		if err := d.Close(ctx); err != nil {
-			return wiredebugger.Snapshot{}, err
-		}
-
-		snapshot = d.Snapshot()
+	if err := d.Close(ctx); err != nil {
+		return d.Snapshot(), err
 	}
 
-	return snapshot, nil
+	return d.Snapshot(), nil
 }
 
 // Pause requests interruption of a running debugger; a later event reports the stop.
 func (d *DebugSession) Pause(ctx context.Context) (wiredebugger.Snapshot, error) {
-	if err := ctx.Err(); err != nil {
+	if err := debugContextError(ctx); err != nil {
 		return wiredebugger.Snapshot{}, err
 	}
 
 	d.operationMu.Lock()
 	defer d.operationMu.Unlock()
+
+	if err := debugContextError(ctx); err != nil {
+		return wiredebugger.Snapshot{}, err
+	}
 
 	d.stateMu.Lock()
 	if d.state.status != wiredebugger.StateRunning {
@@ -126,7 +131,10 @@ func (d *DebugSession) Pause(ctx context.Context) (wiredebugger.Snapshot, error)
 
 	d.stateMu.Unlock()
 
-	if err := panicboundary.Do(d.session.Pause); err != nil {
+	operation, cancel := OperationContext(ctx, d.ctx)
+	defer cancel()
+
+	if err := panicboundary.Do(func() error { return d.session.Pause(operation) }); err != nil {
 		if panicErr := d.poisonAfterRuntimePanic("pause runtime debugger", err); panicErr != nil {
 			return wiredebugger.Snapshot{}, panicErr
 		}
@@ -142,23 +150,27 @@ func (d *DebugSession) SetBreakpoint(
 	ctx context.Context,
 	location source.Location,
 ) (debugger.Breakpoint, error) {
-	return d.SetBreakpointAt(ctx, location, debugger.BreakpointOptions{
-		BindingMode: debugger.BreakpointBindNextExecutableInSource,
-	})
+	return d.setBreakpoint(ctx, location, nil)
 }
 
-// SetBreakpointAt validates and installs a breakpoint in a created or stopped debugger.
+// SetBreakpointAt validates and installs a breakpoint in a nonterminal debugger.
 func (d *DebugSession) SetBreakpointAt(
 	ctx context.Context,
 	location source.Location,
 	options debugger.BreakpointOptions,
 ) (debugger.Breakpoint, error) {
-	if err := ctx.Err(); err != nil {
-		return debugger.Breakpoint{}, err
+	return d.setBreakpoint(ctx, location, &options)
+}
+
+func (d *DebugSession) setBreakpoint(ctx context.Context, location source.Location, configured *debugger.BreakpointOptions) (debugger.Breakpoint, error) {
+	options := debugger.BreakpointOptions{}
+
+	if configured != nil {
+		options = *configured
 	}
 
-	if location.SourceName == "" {
-		return debugger.Breakpoint{}, invalidRequest("breakpoint source name is required")
+	if err := debugContextError(ctx); err != nil {
+		return debugger.Breakpoint{}, err
 	}
 
 	if location.Line <= 0 {
@@ -176,20 +188,31 @@ func (d *DebugSession) SetBreakpointAt(
 	status := d.state.status
 	d.stateMu.Unlock()
 
-	if status != wiredebugger.StateCreated && status != wiredebugger.StateStopped {
-		return debugger.Breakpoint{}, invalidState("breakpoints require a created or stopped debug session", nil)
+	if status.Terminal() || d.close.Started() {
+		return debugger.Breakpoint{}, invalidState("debug session is terminal", nil)
+	}
+
+	if _, err := d.readBreakpoints(ctx); err != nil {
+		return debugger.Breakpoint{}, err
 	}
 
 	if err := d.breakpoints.checkCapacity(); err != nil {
 		return debugger.Breakpoint{}, err
 	}
 
-	if err := ctx.Err(); err != nil {
+	if err := debugContextError(ctx); err != nil {
 		return debugger.Breakpoint{}, err
 	}
 
+	operation, cancel := OperationContext(ctx, d.ctx)
+	defer cancel()
+
 	value, err := panicboundary.Call(func() (debugger.Breakpoint, error) {
-		return d.session.SetBreakpointAt(location, options)
+		if configured == nil {
+			return d.session.SetBreakpoint(operation, location)
+		}
+
+		return d.session.SetBreakpointAt(operation, location, options)
 	})
 	if err != nil {
 		if panicErr := d.poisonAfterRuntimePanic("set runtime breakpoint", err); panicErr != nil {
@@ -204,9 +227,9 @@ func (d *DebugSession) SetBreakpointAt(
 	return value, nil
 }
 
-// DeleteBreakpoint removes a known breakpoint from a created or stopped debugger.
+// DeleteBreakpoint removes a known breakpoint from a nonterminal debugger.
 func (d *DebugSession) DeleteBreakpoint(ctx context.Context, breakpointID debugger.BreakpointID) error {
-	if err := ctx.Err(); err != nil {
+	if err := debugContextError(ctx); err != nil {
 		return err
 	}
 
@@ -221,8 +244,12 @@ func (d *DebugSession) DeleteBreakpoint(ctx context.Context, breakpointID debugg
 	status := d.state.status
 	d.stateMu.Unlock()
 
-	if status != wiredebugger.StateCreated && status != wiredebugger.StateStopped {
-		return invalidState("breakpoints require a created or stopped debug session", nil)
+	if status.Terminal() || d.close.Started() {
+		return invalidState("debug session is terminal", nil)
+	}
+
+	if _, err := d.readBreakpoints(ctx); err != nil {
+		return err
 	}
 
 	value, err := d.breakpoints.get(breakpointID)
@@ -230,11 +257,14 @@ func (d *DebugSession) DeleteBreakpoint(ctx context.Context, breakpointID debugg
 		return err
 	}
 
-	if err := ctx.Err(); err != nil {
+	if err := debugContextError(ctx); err != nil {
 		return err
 	}
 
-	if err := panicboundary.Do(func() error { return d.session.DeleteBreakpoint(value.ID) }); err != nil {
+	operation, cancel := OperationContext(ctx, d.ctx)
+	defer cancel()
+
+	if err := panicboundary.Do(func() error { return d.session.DeleteBreakpoint(operation, value.ID) }); err != nil {
 		if panicErr := d.poisonAfterRuntimePanic("delete runtime breakpoint", err); panicErr != nil {
 			return panicErr
 		}
@@ -274,6 +304,10 @@ func (d *DebugSession) StepOut(ctx context.Context) (wiredebugger.Snapshot, erro
 
 // Frames returns a detached frame slice while the debugger is stopped.
 func (d *DebugSession) Frames(ctx context.Context) ([]debugger.Frame, error) {
+	if err := debugContextError(ctx); err != nil {
+		return nil, err
+	}
+
 	d.operationMu.Lock()
 	defer d.operationMu.Unlock()
 
@@ -281,7 +315,10 @@ func (d *DebugSession) Frames(ctx context.Context) ([]debugger.Frame, error) {
 		return nil, err
 	}
 
-	values, err := panicboundary.Call(d.session.Frames)
+	operation, cancel := OperationContext(ctx, d.ctx)
+	defer cancel()
+
+	values, err := panicboundary.Call(func() ([]debugger.Frame, error) { return d.session.Frames(operation) })
 	if err != nil {
 		if panicErr := d.poisonAfterRuntimePanic("read runtime debugger frames", err); panicErr != nil {
 			return nil, panicErr
@@ -295,6 +332,10 @@ func (d *DebugSession) Frames(ctx context.Context) ([]debugger.Frame, error) {
 
 // FrameLocals reads variables in a nonnegative frame index while the debugger is stopped.
 func (d *DebugSession) FrameLocals(ctx context.Context, frame int) ([]debugger.Variable, error) {
+	if err := debugContextError(ctx); err != nil {
+		return nil, err
+	}
+
 	if frame < 0 {
 		return nil, invalidRequest("frame index must not be negative")
 	}
@@ -306,8 +347,11 @@ func (d *DebugSession) FrameLocals(ctx context.Context, frame int) ([]debugger.V
 		return nil, err
 	}
 
+	operation, cancel := OperationContext(ctx, d.ctx)
+	defer cancel()
+
 	values, err := panicboundary.Call(func() ([]debugger.Variable, error) {
-		return d.session.FrameLocals(frame)
+		return d.session.FrameLocals(operation, frame)
 	})
 	if err != nil {
 		if panicErr := d.poisonAfterRuntimePanic("read runtime debugger frame locals", err); panicErr != nil {
@@ -325,6 +369,10 @@ func (d *DebugSession) Variables(
 	ctx context.Context,
 	reference debugger.ValueReference,
 ) ([]debugger.Variable, error) {
+	if err := debugContextError(ctx); err != nil {
+		return nil, err
+	}
+
 	if reference <= 0 {
 		return nil, invalidRequest("value reference must be positive")
 	}
@@ -336,8 +384,11 @@ func (d *DebugSession) Variables(
 		return nil, err
 	}
 
+	operation, cancel := OperationContext(ctx, d.ctx)
+	defer cancel()
+
 	values, err := panicboundary.Call(func() ([]debugger.Variable, error) {
-		return d.session.Variables(reference)
+		return d.session.Variables(operation, reference)
 	})
 	if err != nil {
 		if panicErr := d.poisonAfterRuntimePanic("read runtime debugger variables", err); panicErr != nil {
@@ -356,6 +407,10 @@ func (d *DebugSession) EvaluateFrame(
 	frame int,
 	expression string,
 ) (debugger.Value, error) {
+	if err := debugContextError(ctx); err != nil {
+		return debugger.Value{}, err
+	}
+
 	if frame < 0 {
 		return debugger.Value{}, invalidRequest("frame index must not be negative")
 	}
@@ -409,14 +464,14 @@ func (d *DebugSession) start(
 	initial bool,
 	command func(context.Context) (*debugger.Event, error),
 ) (wiredebugger.Snapshot, error) {
-	if err := ctx.Err(); err != nil {
+	if err := debugContextError(ctx); err != nil {
 		return wiredebugger.Snapshot{}, err
 	}
 
 	d.operationMu.Lock()
 	defer d.operationMu.Unlock()
 
-	if err := ctx.Err(); err != nil {
+	if err := debugContextError(ctx); err != nil {
 		return wiredebugger.Snapshot{}, err
 	}
 
@@ -427,12 +482,13 @@ func (d *DebugSession) start(
 		expected = wiredebugger.StateCreated
 	}
 
-	if d.state.status != expected {
+	if d.state.status != expected || d.close.Started() {
 		d.stateMu.Unlock()
 
 		return wiredebugger.Snapshot{}, invalidState("debug command is not valid in the current state", nil)
 	}
 
+	d.commands.Add(1)
 	d.state.beginRunning()
 	kind := wiredebugger.EventContinued
 
@@ -450,11 +506,13 @@ func (d *DebugSession) start(
 }
 
 func (d *DebugSession) runCommand(command func(context.Context) (*debugger.Event, error)) {
+	defer d.commands.Done()
+
 	event, err := panicboundary.Call(func() (*debugger.Event, error) {
 		return command(d.ctx)
 	})
 	if err != nil {
-		d.finishCommand(nil, err)
+		d.finishCommand(event, err)
 
 		return
 	}
@@ -478,9 +536,19 @@ func (d *DebugSession) finishCommand(event *debugger.Event, commandErr error) {
 		return
 	}
 
+	var panicErr *panicboundary.Error
+	if errors.As(commandErr, &panicErr) {
+		d.poisoned = runtimePanicError("run runtime command", commandErr)
+	}
+
+	d.state.result = cloneCommandResult(&wiredebugger.CommandResult{Event: event, Error: commandErr})
+	if event != nil {
+		d.state.output = cloneOutput(event.Output)
+	}
+
 	terminal := false
 
-	if commandErr != nil {
+	if event == nil && commandErr != nil {
 		if errors.Is(commandErr, context.Canceled) || errors.Is(context.Cause(d.ctx), context.Canceled) {
 			d.state.status = wiredebugger.StateTerminated
 			d.publishLocked(wiredebugger.EventTerminated, true)
@@ -564,7 +632,7 @@ func (d *DebugSession) finishCommand(event *debugger.Event, commandErr error) {
 }
 
 func (d *DebugSession) requireStopped(ctx context.Context) error {
-	if err := ctx.Err(); err != nil {
+	if err := debugContextError(ctx); err != nil {
 		return err
 	}
 
@@ -588,6 +656,8 @@ func (d *DebugSession) poisonAfterRuntimePanic(operation string, err error) erro
 	}
 
 	d.stateMu.Lock()
+
+	d.poisoned = runtimePanicError(operation, err)
 	if !d.state.status.Terminal() {
 		d.state.status = wiredebugger.StateFailed
 		d.state.failure = failureFromError(failure.CategoryInternalRuntime, err)
@@ -623,7 +693,11 @@ func (d *DebugSession) publishLocked(kind wiredebugger.EventKind, terminal bool)
 // Terminal command paths commit cleanup without waiting from the command
 // goroutine, allowing runtime Close implementations to wait for that command.
 func (d *DebugSession) beginClose() {
-	if d.close.Begin() {
+	d.stateMu.Lock()
+	started := d.close.Begin()
+	d.stateMu.Unlock()
+
+	if started {
 		go d.settleClose()
 	}
 }
@@ -636,10 +710,20 @@ func (d *DebugSession) settleClose() {
 		}
 
 		d.close.Finish(err)
+		close(d.done)
 	}()
 
 	d.cancel(context.Canceled)
 	err = closeAPIDebugSession(d.session)
+
+	var panicErr *panicboundary.Error
+	if errors.As(err, &panicErr) {
+		d.stateMu.Lock()
+		d.poisoned = err
+		d.stateMu.Unlock()
+	}
+
+	d.commands.Wait()
 
 	d.operationMu.Lock()
 	d.stateMu.Lock()
@@ -653,3 +737,320 @@ func (d *DebugSession) settleClose() {
 
 	d.events.close()
 }
+
+// Done closes after hosted debugger cleanup and all admitted commands settle.
+func (d *DebugSession) Done() <-chan struct{} { return d.done }
+
+// RunCommand retains the caller context through the hosted command. The caller
+// keeps a successful Start context alive for the execution's remaining lifetime.
+func (d *DebugSession) RunCommand(ctx context.Context, initial bool, command func(context.Context) (*debugger.Event, error)) (*wiredebugger.CommandResult, error) {
+	if err := debugContextError(ctx); err != nil {
+		return nil, err
+	}
+
+	d.operationMu.Lock()
+	if err := debugContextError(ctx); err != nil {
+		d.operationMu.Unlock()
+
+		return nil, err
+	}
+
+	d.stateMu.Lock()
+	expected := wiredebugger.StateStopped
+
+	if initial {
+		expected = wiredebugger.StateCreated
+	}
+
+	if d.state.status != expected || d.close.Started() {
+		d.stateMu.Unlock()
+		d.operationMu.Unlock()
+
+		return nil, invalidState("debug command is not valid in the current state", nil)
+	}
+
+	previous := d.state
+	d.commands.Add(1)
+	d.state.beginRunning()
+	kind := wiredebugger.EventContinued
+
+	if initial {
+		kind = wiredebugger.EventStarted
+	}
+
+	d.publishLocked(kind, false)
+	d.stateMu.Unlock()
+	d.operationMu.Unlock()
+	defer d.commands.Done()
+	operation, cancel := OperationContext(ctx, d.ctx)
+
+	event, err := panicboundary.Call(func() (*debugger.Event, error) { return command(operation) })
+	if initial && event != nil && event.Reason != debugger.ReasonCompleted && event.Reason != debugger.ReasonTerminated {
+		context.AfterFunc(operation, cancel)
+	} else {
+		cancel()
+	}
+
+	if event == nil && err == nil {
+		err = errors.New("debug execution returned no event")
+	}
+
+	if event == nil && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
+		d.operationMu.Lock()
+		d.stateMu.Lock()
+		if !d.close.Started() && d.state.status == wiredebugger.StateRunning {
+			d.state = previous
+			d.state.result = cloneCommandResult(&wiredebugger.CommandResult{Error: err})
+			kind := wiredebugger.EventStopped
+
+			if initial {
+				kind = wiredebugger.EventCreated
+			}
+
+			d.publishLocked(kind, false)
+		}
+
+		d.stateMu.Unlock()
+		d.operationMu.Unlock()
+	} else {
+		d.finishCommand(event, err)
+	}
+
+	return cloneCommandResult(&wiredebugger.CommandResult{Event: event, Error: err}), nil
+}
+
+// Command resolves canonical execution operations without exposing hosted state.
+func (d *DebugSession) Command(name string) (func(context.Context) (*debugger.Event, error), error) {
+	switch name {
+	case "start":
+		return d.session.Start, nil
+	case "continue":
+		return d.session.Continue, nil
+	case "step-in":
+		return d.session.StepIn, nil
+	case "step-over":
+		return d.session.StepOver, nil
+	case "step-out":
+		return d.session.StepOut, nil
+	default:
+		return nil, invalidRequest("invalid debug command")
+	}
+}
+
+// Breakpoints reads the hosted snapshot, including after hosted Close.
+func (d *DebugSession) Breakpoints(ctx context.Context) ([]debugger.Breakpoint, error) {
+	if err := debugContextError(ctx); err != nil {
+		return nil, err
+	}
+
+	d.operationMu.Lock()
+	defer d.operationMu.Unlock()
+
+	return d.readBreakpoints(ctx)
+}
+
+func (d *DebugSession) readBreakpoints(ctx context.Context) ([]debugger.Breakpoint, error) {
+	if err := debugContextError(ctx); err != nil {
+		return nil, err
+	}
+
+	d.stateMu.Lock()
+	poisoned := d.poisoned
+	d.stateMu.Unlock()
+
+	if poisoned != nil {
+		return nil, poisoned
+	}
+
+	values, err := panicboundary.Call(func() ([]debugger.Breakpoint, error) { return d.session.Breakpoints(ctx) })
+	if err != nil {
+		if panicErr := d.poisonAfterRuntimePanic("list runtime breakpoints", err); panicErr != nil {
+			return nil, panicErr
+		}
+
+		return nil, invalidState("breakpoint listing failed", err)
+	}
+
+	result := append([]debugger.Breakpoint(nil), values...)
+	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
+	d.breakpoints.values = make(map[debugger.BreakpointID]debugger.Breakpoint, len(result))
+	for _, value := range result {
+		d.breakpoints.add(value)
+	}
+
+	return result, nil
+}
+
+// ReplaceBreakpoints preserves atomic hosted publication and charges the resulting
+// source set, including unresolved requests and breakpoints in other sources.
+func (d *DebugSession) ReplaceBreakpoints(ctx context.Context, sourceName string, requests []debugger.BreakpointRequest) ([]debugger.Breakpoint, error) {
+	if err := debugContextError(ctx); err != nil {
+		return nil, err
+	}
+
+	if len(requests) > d.breakpoints.limit {
+		return nil, resourceExhausted("breakpoint limit reached")
+	}
+
+	for _, request := range requests {
+		if request.Position.Line <= 0 || request.Position.Column < 0 {
+			return nil, invalidRequest("invalid breakpoint position")
+		}
+
+		switch request.Options.BindingMode {
+		case debugger.BreakpointBindNextExecutableInSource, debugger.BreakpointBindExact, debugger.BreakpointBindNextExecutableInFunction:
+		default:
+			return nil, invalidRequest("invalid breakpoint binding mode")
+		}
+	}
+
+	d.operationMu.Lock()
+	defer d.operationMu.Unlock()
+	d.stateMu.Lock()
+	terminal := d.state.status.Terminal() || d.close.Started()
+	d.stateMu.Unlock()
+
+	if terminal {
+		return nil, invalidState("debug session is terminal", nil)
+	}
+
+	existing, err := d.readBreakpoints(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	canonical := sourceName
+	if canonical == "" {
+		canonical = d.plan.sourceName
+	}
+
+	count := len(requests)
+	for _, value := range existing {
+		name := value.RequestedLocation.SourceName
+		if name == "" {
+			name = d.plan.sourceName
+		}
+
+		if name != canonical {
+			count++
+		}
+	}
+
+	if count > d.breakpoints.limit {
+		return nil, resourceExhausted("breakpoint limit reached")
+	}
+
+	if err := debugContextError(ctx); err != nil {
+		return nil, err
+	}
+
+	operation, cancel := OperationContext(ctx, d.ctx)
+	defer cancel()
+
+	values, err := panicboundary.Call(func() ([]debugger.Breakpoint, error) {
+		return d.session.ReplaceBreakpoints(operation, sourceName, requests)
+	})
+	if err != nil {
+		if panicErr := d.poisonAfterRuntimePanic("replace runtime breakpoints", err); panicErr != nil {
+			return nil, panicErr
+		}
+
+		return nil, invalidState("breakpoint replacement failed", err)
+	}
+
+	// Publication has succeeded. Never turn subsequent cancellation into a rollback.
+	for _, value := range existing {
+		name := value.RequestedLocation.SourceName
+		if name == "" {
+			name = d.plan.sourceName
+		}
+
+		if name == canonical {
+			d.breakpoints.delete(value.ID)
+		}
+	}
+
+	for _, value := range values {
+		d.breakpoints.add(value)
+	}
+
+	return append([]debugger.Breakpoint(nil), values...), nil
+}
+
+// Locals invokes the hosted default-frame operation directly.
+func (d *DebugSession) Locals(ctx context.Context) ([]debugger.Variable, error) {
+	if err := debugContextError(ctx); err != nil {
+		return nil, err
+	}
+
+	d.operationMu.Lock()
+	defer d.operationMu.Unlock()
+
+	if err := d.requireStopped(ctx); err != nil {
+		return nil, err
+	}
+
+	operation, cancel := OperationContext(ctx, d.ctx)
+	defer cancel()
+
+	values, err := panicboundary.Call(func() ([]debugger.Variable, error) { return d.session.Locals(operation) })
+	if err != nil {
+		if panicErr := d.poisonAfterRuntimePanic("read runtime locals", err); panicErr != nil {
+			return nil, panicErr
+		}
+
+		return nil, invalidState("locals failed", err)
+	}
+
+	return append([]debugger.Variable(nil), values...), nil
+}
+
+// Evaluate invokes the hosted default-frame operation directly.
+func (d *DebugSession) Evaluate(ctx context.Context, expression string) (debugger.Value, error) {
+	if err := debugContextError(ctx); err != nil {
+		return debugger.Value{}, err
+	}
+
+	d.operationMu.Lock()
+	defer d.operationMu.Unlock()
+
+	if err := d.requireStopped(ctx); err != nil {
+		return debugger.Value{}, err
+	}
+
+	operation, cancel := OperationContext(ctx, d.ctx)
+	defer cancel()
+
+	value, err := panicboundary.Call(func() (debugger.Value, error) { return d.session.Evaluate(operation, expression) })
+	if err != nil {
+		if panicErr := d.poisonAfterRuntimePanic("evaluate runtime expression", err); panicErr != nil {
+			return debugger.Value{}, panicErr
+		}
+
+		return debugger.Value{}, invalidState("evaluation failed", err)
+	}
+
+	return value, nil
+}
+
+// ReserveCommandStream bounds live command receivers, including Start's retained
+// lifetime stream. The extra slot permits a resume with the minimum watch limit.
+// Admission stays charged until the RPC handler exits, even after command completion.
+func (d *DebugSession) ReserveCommandStream() (func(), error) {
+	d.stateMu.Lock()
+	if d.commandStreams > d.plan.store.limits.Watchers {
+		d.stateMu.Unlock()
+
+		return nil, resourceExhausted("debug command stream limit reached")
+	}
+
+	d.commandStreams++
+	d.stateMu.Unlock()
+	var once sync.Once
+
+	return func() { once.Do(func() { d.stateMu.Lock(); d.commandStreams--; d.stateMu.Unlock() }) }, nil
+}
+
+// BreakpointLimit lets the transport reject oversized batches before allocating
+// their decoded representation. Replacement still validates the resulting set.
+func (d *DebugSession) BreakpointLimit() int { return d.breakpoints.limit }

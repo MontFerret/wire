@@ -27,10 +27,14 @@ type RunRequest struct {
 	Source       *Source                `protobuf:"bytes,2,opt,name=source,proto3" json:"source,omitempty"`
 	Parameters   *Parameters            `protobuf:"bytes,3,opt,name=parameters,proto3" json:"parameters,omitempty"`
 	// output_content_type requests a runtime-supported encoded output codec;
-	// empty preserves the runtime default.
+	// empty preserves the runtime default only when output_content_type_set is false.
 	OutputContentType string `protobuf:"bytes,4,opt,name=output_content_type,json=outputContentType,proto3" json:"output_content_type,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// Presence distinguishes an omitted root from an explicitly empty root.
+	FsRoot *string `protobuf:"bytes,5,opt,name=fs_root,json=fsRoot,proto3,oneof" json:"fs_root,omitempty"`
+	// Explicit empty content types are forwarded to the hosted runtime.
+	OutputContentTypeSet bool `protobuf:"varint,6,opt,name=output_content_type_set,json=outputContentTypeSet,proto3" json:"output_content_type_set,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *RunRequest) Reset() {
@@ -91,6 +95,20 @@ func (x *RunRequest) GetOutputContentType() string {
 	return ""
 }
 
+func (x *RunRequest) GetFsRoot() string {
+	if x != nil && x.FsRoot != nil {
+		return *x.FsRoot
+	}
+	return ""
+}
+
+func (x *RunRequest) GetOutputContentTypeSet() bool {
+	if x != nil {
+		return x.OutputContentTypeSet
+	}
+	return false
+}
+
 type RunResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// execution is present and already in RUNNING state.
@@ -140,7 +158,7 @@ var File_ferret_wire_v1_runtime_service_proto protoreflect.FileDescriptor
 
 const file_ferret_wire_v1_runtime_service_proto_rawDesc = "" +
 	"\n" +
-	"$ferret/wire/v1/runtime_service.proto\x12\x0eferret.wire.v1\x1a\x1eferret/wire/v1/execution.proto\x1a\x1cferret/wire/v1/runtime.proto\x1a\x1bferret/wire/v1/source.proto\x1a\x1aferret/wire/v1/value.proto\"\xeb\x01\n" +
+	"$ferret/wire/v1/runtime_service.proto\x12\x0eferret.wire.v1\x1a\x1eferret/wire/v1/execution.proto\x1a\x1cferret/wire/v1/runtime.proto\x1a\x1bferret/wire/v1/source.proto\x1a\x1aferret/wire/v1/value.proto\"\xcc\x02\n" +
 	"\n" +
 	"RunRequest\x12A\n" +
 	"\rconnection_id\x18\x01 \x01(\v2\x1c.ferret.wire.v1.ConnectionIdR\fconnectionId\x12.\n" +
@@ -148,7 +166,11 @@ const file_ferret_wire_v1_runtime_service_proto_rawDesc = "" +
 	"\n" +
 	"parameters\x18\x03 \x01(\v2\x1a.ferret.wire.v1.ParametersR\n" +
 	"parameters\x12.\n" +
-	"\x13output_content_type\x18\x04 \x01(\tR\x11outputContentType\"F\n" +
+	"\x13output_content_type\x18\x04 \x01(\tR\x11outputContentType\x12\x1c\n" +
+	"\afs_root\x18\x05 \x01(\tH\x00R\x06fsRoot\x88\x01\x01\x125\n" +
+	"\x17output_content_type_set\x18\x06 \x01(\bR\x14outputContentTypeSetB\n" +
+	"\n" +
+	"\b_fs_root\"F\n" +
 	"\vRunResponse\x127\n" +
 	"\texecution\x18\x01 \x01(\v2\x19.ferret.wire.v1.ExecutionR\texecution2\x82\x02\n" +
 	"\x0eRuntimeService\x12>\n" +
@@ -208,6 +230,7 @@ func file_ferret_wire_v1_runtime_service_proto_init() {
 	file_ferret_wire_v1_runtime_proto_init()
 	file_ferret_wire_v1_source_proto_init()
 	file_ferret_wire_v1_value_proto_init()
+	file_ferret_wire_v1_runtime_service_proto_msgTypes[0].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

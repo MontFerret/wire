@@ -19,11 +19,11 @@ type contractPlan struct {
 	closeCalls      int
 }
 
-func (p *contractPlan) Params() []string {
+func (p *contractPlan) Params() ([]string, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	return p.params
+	return p.params, nil
 }
 
 func (p *contractPlan) NewSession(ctx context.Context, options ...api.SessionOption) (api.Session, error) {

@@ -45,11 +45,11 @@ func (d *boundaryDebugger) StepOut(context.Context) (*debugger.Event, error) {
 	return d.command("step-out")
 }
 
-func (d *boundaryDebugger) Pause() error {
+func (d *boundaryDebugger) Pause(_ context.Context) error {
 	return d.record("pause")
 }
 
-func (d *boundaryDebugger) Frames() ([]debugger.Frame, error) {
+func (d *boundaryDebugger) Frames(_ context.Context) ([]debugger.Frame, error) {
 	if err := d.record("frames"); err != nil {
 		return nil, err
 	}
@@ -57,7 +57,7 @@ func (d *boundaryDebugger) Frames() ([]debugger.Frame, error) {
 	return []debugger.Frame{{Name: "main"}}, nil
 }
 
-func (d *boundaryDebugger) FrameLocals(_ int) ([]debugger.Variable, error) {
+func (d *boundaryDebugger) FrameLocals(_ context.Context, _ int) ([]debugger.Variable, error) {
 	if err := d.record("frame-locals"); err != nil {
 		return nil, err
 	}
@@ -65,7 +65,7 @@ func (d *boundaryDebugger) FrameLocals(_ int) ([]debugger.Variable, error) {
 	return []debugger.Variable{{Name: "frame"}}, nil
 }
 
-func (d *boundaryDebugger) Variables(_ debugger.ValueReference) ([]debugger.Variable, error) {
+func (d *boundaryDebugger) Variables(_ context.Context, _ debugger.ValueReference) ([]debugger.Variable, error) {
 	if err := d.record("variables"); err != nil {
 		return nil, err
 	}
@@ -85,10 +85,8 @@ func (d *boundaryDebugger) EvaluateFrame(
 	return debugger.Value{Type: "string", Display: "value"}, nil
 }
 
-func (d *boundaryDebugger) SetBreakpointAt(
-	location source.Location,
-	options debugger.BreakpointOptions,
-) (debugger.Breakpoint, error) {
+func (d *boundaryDebugger) SetBreakpointAt(_ context.Context, location source.Location,
+	options debugger.BreakpointOptions) (debugger.Breakpoint, error) {
 	if err := d.record("set-breakpoint"); err != nil {
 		return debugger.Breakpoint{}, err
 	}
@@ -96,7 +94,7 @@ func (d *boundaryDebugger) SetBreakpointAt(
 	return debugger.Breakpoint{ID: 7, RequestedLocation: location, BindingMode: options.BindingMode}, nil
 }
 
-func (d *boundaryDebugger) DeleteBreakpoint(debugger.BreakpointID) error {
+func (d *boundaryDebugger) DeleteBreakpoint(_ context.Context, _ debugger.BreakpointID) error {
 	return d.record("delete-breakpoint")
 }
 
@@ -133,14 +131,18 @@ func (d *boundaryDebugger) snapshotCalls() []string {
 	return append([]string(nil), d.calls...)
 }
 
-func (d *borrowedInspectionDebugger) Frames() ([]debugger.Frame, error) {
+func (d *borrowedInspectionDebugger) Frames(_ context.Context) ([]debugger.Frame, error) {
 	return d.frames, nil
 }
 
-func (d *borrowedInspectionDebugger) FrameLocals(int) ([]debugger.Variable, error) {
+func (d *borrowedInspectionDebugger) FrameLocals(_ context.Context, _ int) ([]debugger.Variable, error) {
 	return d.locals, nil
 }
 
-func (d *borrowedInspectionDebugger) Variables(debugger.ValueReference) ([]debugger.Variable, error) {
+func (d *borrowedInspectionDebugger) Variables(_ context.Context, _ debugger.ValueReference) ([]debugger.Variable, error) {
 	return d.values, nil
+}
+
+func (d *boundaryDebugger) SetBreakpoint(ctx context.Context, location source.Location) (debugger.Breakpoint, error) {
+	return d.SetBreakpointAt(ctx, location, debugger.BreakpointOptions{})
 }

@@ -35,3 +35,11 @@ func (c *connectionHandle) reclaimAllocation(ctx context.Context, err error, par
 
 	return errors.Join(result, closeErr)
 }
+
+func runtimeContextError(ctx context.Context) error {
+	if ctx == nil {
+		return errors.New("context must not be nil")
+	}
+
+	return ctx.Err()
+}

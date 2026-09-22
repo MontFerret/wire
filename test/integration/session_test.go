@@ -20,12 +20,12 @@ import (
 func TestSessionRejectsOverlapAndReopensAfterRelease(t *testing.T) {
 	block := harness.NewBlock(t)
 	h := harness.New(t, harness.WithBehavior(harness.RuntimeBehavior{Plan: harness.PlanBehavior{Session: func(harness.SessionOptions) harness.SessionBehavior {
-		return harness.SessionBehavior{Run: func(ctx context.Context, call int) (api.Output, error) {
+		return harness.SessionBehavior{Run: func(ctx context.Context, call int) (*api.Output, error) {
 			if call == 1 {
-				return api.Output{}, block.Wait(ctx)
+				return &api.Output{}, block.Wait(ctx)
 			}
 
-			return api.Output{ContentType: "text/plain", Content: []byte("reused")}, nil
+			return &api.Output{ContentType: "text/plain", Content: []byte("reused")}, nil
 		}}
 	}}}))
 
@@ -34,10 +34,14 @@ func TestSessionRejectsOverlapAndReopensAfterRelease(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	h.Own(plan)
+
 	session, err := plan.NewSession(h.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	h.Own(session)
 
 	ctx, cancel := context.WithCancel(h.Context())
 	defer cancel()
@@ -83,12 +87,12 @@ func TestSessionCompletionRacesCancellationWithoutDuplicateCleanup(t *testing.T)
 			limits := server.DefaultLimits()
 			limits.MaxExecutionsPerConnection = 1
 			h := harness.New(t, harness.WithServerOptions(server.WithLimits(limits)), harness.WithBehavior(harness.RuntimeBehavior{Plan: harness.PlanBehavior{Session: func(harness.SessionOptions) harness.SessionBehavior {
-				return harness.SessionBehavior{Run: func(ctx context.Context, call int) (api.Output, error) {
+				return harness.SessionBehavior{Run: func(ctx context.Context, call int) (*api.Output, error) {
 					if call == 1 {
-						return api.Output{}, block.Wait(ctx)
+						return &api.Output{}, block.Wait(ctx)
 					}
 
-					return api.Output{}, nil
+					return &api.Output{}, nil
 				}}
 			}}}))
 
@@ -97,10 +101,14 @@ func TestSessionCompletionRacesCancellationWithoutDuplicateCleanup(t *testing.T)
 				t.Fatal(err)
 			}
 
+			h.Own(plan)
+
 			session, err := plan.NewSession(h.Context())
 			if err != nil {
 				t.Fatal(err)
 			}
+
+			h.Own(session)
 
 			ctx, cancel := context.WithCancel(h.Context())
 			defer cancel()

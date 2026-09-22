@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/MontFerret/api"
+	"github.com/MontFerret/api/debugger"
 	"github.com/MontFerret/wire/client"
 	"github.com/MontFerret/wire/pkg/failure"
 	"github.com/MontFerret/wire/test/integration/harness"
@@ -29,15 +30,15 @@ func TestRuntimeAndSessionOutputRoundTrip(t *testing.T) {
 			t.Run(map[bool]string{true: "runtime/", false: "session/"}[direct]+test.name, func(t *testing.T) {
 				wantContent := bytes.Clone(test.output.Content)
 				h := harness.New(t, harness.WithBehavior(harness.RuntimeBehavior{
-					Run: func(context.Context, api.Source, harness.SessionOptions) (api.Output, error) {
-						return test.output, test.err
+					Run: func(context.Context, api.Source, harness.SessionOptions) (*api.Output, error) {
+						return &test.output, test.err
 					},
 					Plan: harness.PlanBehavior{Session: func(harness.SessionOptions) harness.SessionBehavior {
-						return harness.SessionBehavior{Run: func(context.Context, int) (api.Output, error) { return test.output, test.err }}
+						return harness.SessionBehavior{Run: func(context.Context, int) (*api.Output, error) { return &test.output, test.err }}
 					}},
 				}))
 				src := api.Source{Name: "results.fql", Content: "RETURN @input"}
-				run := func() (api.Output, error) { return h.Runtime().Run(h.Context(), src) }
+				run := func() (*api.Output, error) { return h.Runtime().Run(h.Context(), src) }
 
 				if !direct {
 					plan, err := h.Runtime().Compile(h.Context(), src)
@@ -45,12 +46,16 @@ func TestRuntimeAndSessionOutputRoundTrip(t *testing.T) {
 						t.Fatal(err)
 					}
 
+					h.Own(plan)
+
 					session, err := plan.NewSession(h.Context())
 					if err != nil {
 						t.Fatal(err)
 					}
 
-					run = func() (api.Output, error) { return session.Run(h.Context()) }
+					h.Own(session)
+
+					run = func() (*api.Output, error) { return session.Run(h.Context()) }
 				}
 
 				for range 2 {
@@ -131,13 +136,19 @@ func TestSessionOptionsRoundTrip(t *testing.T) {
 						t.Fatal(err)
 					}
 
+					h.Own(plan)
+
 					method = "NewSession"
 
 					if mode == "session" {
-						_, err = plan.NewSession(h.Context(), options...)
+						var session api.Session
+						session, err = plan.NewSession(h.Context(), options...)
+						h.Own(session)
 					} else {
 						method = "NewDebugSession"
-						_, err = plan.NewDebugSession(h.Context(), options...)
+						var session debugger.Session
+						session, err = plan.NewDebugSession(h.Context(), options...)
+						h.Own(session)
 					}
 
 					if err != nil {

@@ -22,10 +22,12 @@ func (c *connectionHandle) run(
 	}
 
 	response, err := c.runtimeClient.Run(ctx, &wirev1.RunRequest{
-		ConnectionId:      c.connectionProto(),
-		Source:            &wirev1.Source{Name: src.Name, Content: src.Content},
-		Parameters:        converted,
-		OutputContentType: configured.outputContentType,
+		ConnectionId:         c.connectionProto(),
+		Source:               &wirev1.Source{Name: src.Name, Content: src.Content},
+		Parameters:           converted,
+		OutputContentType:    configured.outputContentType,
+		OutputContentTypeSet: configured.outputContentTypeSet,
+		FsRoot:               configured.fsRoot,
 	})
 	if err != nil {
 		return nil, allocationRPCError(err)

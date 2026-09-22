@@ -17,14 +17,6 @@ func CompilePlan(ctx context.Context, runtime api.Runtime, store *ResourceStore,
 		return nil, err
 	}
 
-	if source.Content == "" {
-		return nil, invalidRequest("source content is required")
-	}
-
-	if source.Name == "" {
-		source.Name = "anonymous"
-	}
-
 	if err := store.beginCreation(planResource, nil); err != nil {
 		return nil, err
 	}
@@ -75,6 +67,7 @@ func CompilePlan(ctx context.Context, runtime api.Runtime, store *ResourceStore,
 		plan:          compiled,
 		parameters:    parameters,
 		debuggable:    debug,
+		sourceName:    source.Name,
 		sessions:      make(map[SessionID]*Session),
 		executions:    make(map[ExecutionID]*Execution),
 		debugSessions: make(map[DebugSessionID]*DebugSession),

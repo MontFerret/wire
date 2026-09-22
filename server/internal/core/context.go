@@ -17,3 +17,11 @@ func OperationContext(parent, lifetime context.Context) (context.Context, contex
 		cancel(context.Canceled)
 	}
 }
+
+func debugContextError(ctx context.Context) error {
+	if ctx == nil {
+		return invalidRequest("context must not be nil")
+	}
+
+	return ctx.Err()
+}
