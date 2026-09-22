@@ -2,8 +2,13 @@ package server_test
 
 import (
 	"context"
+	"errors"
+	"io"
+	"sync"
 	"sync/atomic"
 	"testing"
+
+	"google.golang.org/protobuf/proto"
 
 	"github.com/MontFerret/api"
 	"github.com/MontFerret/api/debugger"
@@ -27,20 +32,24 @@ func (d *unstartedProtocolDebugger) Close() error {
 // the handwritten client no longer exposes a second resource programming model.
 func TestProtocolResourceOperationsRemainAvailable(t *testing.T) {
 	started := make(chan struct{})
+	cancellationObserved := make(chan struct{})
+	finishRun := make(chan struct{})
 	var sessionCloses atomic.Int64
 	debug := &unstartedProtocolDebugger{}
 	plan := &contractPlan{
 		newSession: func(_ context.Context, options apiSessionOptions) (api.Session, error) {
-			if options.contentType != "text/plain" || options.params["input"] != int64(7) {
+			if options.fsRoot == nil || *options.fsRoot != "" || options.contentType != "" || options.params["input"] != int64(7) {
 				t.Errorf("Execute lost session options: %+v", options)
 			}
 
 			return &apiSessionSpy{
-				run: func(ctx context.Context) (api.Output, error) {
+				run: func(ctx context.Context) (*api.Output, error) {
 					close(started)
 					<-ctx.Done()
+					close(cancellationObserved)
+					<-finishRun
 
-					return api.Output{}, ctx.Err()
+					return nil, ctx.Err()
 				},
 				close: func() error {
 					sessionCloses.Add(1)
@@ -77,6 +86,10 @@ func TestProtocolResourceOperationsRemainAvailable(t *testing.T) {
 			t.Error(err)
 		}
 	}()
+
+	// On assertion failure, unblock the hosted run before connection teardown waits for it.
+	unblockRun := sync.OnceFunc(func() { close(finishRun) })
+	defer unblockRun()
 	planRPC := wirev1.NewPlanServiceClient(env.conn)
 
 	compiled, err := planRPC.CompileDebug(ctx, &wirev1.CompileDebugRequest{ConnectionId: connectionID, Source: &wirev1.Source{Content: "RETURN @input"}})
@@ -88,7 +101,7 @@ func TestProtocolResourceOperationsRemainAvailable(t *testing.T) {
 	executionRPC := wirev1.NewExecutionServiceClient(env.conn)
 
 	created, err := executionRPC.Execute(ctx, &wirev1.ExecuteRequest{
-		ConnectionId: connectionID, PlanId: planID, OutputContentType: "text/plain",
+		ConnectionId: connectionID, PlanId: planID, OutputContentTypeSet: true, FsRoot: new(string),
 		Parameters: &wirev1.Parameters{Values: map[string]*wirev1.Value{"input": {Value: &wirev1.Value_IntegerValue{IntegerValue: 7}}}},
 	})
 	if err != nil {
@@ -106,14 +119,53 @@ func TestProtocolResourceOperationsRemainAvailable(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	select {
+	case <-cancellationObserved:
+	case <-ctx.Done():
+		t.Fatal("CancelExecution did not reach the hosted session")
+	}
+
 	watch, err := executionRPC.WatchExecution(ctx, &wirev1.WatchExecutionRequest{ConnectionId: connectionID, ExecutionId: executionID})
 	if err != nil {
 		t.Fatal(err)
 	}
 
+	running, err := watch.Recv()
+	if err != nil || running.GetExecution().GetState() != wirev1.ExecutionState_EXECUTION_STATE_RUNNING {
+		t.Fatalf("cancellation settled before the hosted run returned: %v, %v", running, err)
+	}
+
+	if running.GetExecution().GetId().GetValue() != executionID.GetValue() || running.GetSequence() == 0 {
+		t.Fatalf("unexpected running event: %v", running)
+	}
+
+	unblockRun()
+
 	event, err := watch.Recv()
 	if err != nil || event.GetExecution().GetState() != wirev1.ExecutionState_EXECUTION_STATE_CANCELLED {
 		t.Fatalf("CancelExecution lost its terminal event: %v, %v", event, err)
+	}
+
+	if event.GetExecution().GetId().GetValue() != executionID.GetValue() || event.GetSequence() <= running.GetSequence() {
+		t.Fatalf("unexpected terminal event after %v: %v", running, event)
+	}
+
+	if _, err := watch.Recv(); !errors.Is(err, io.EOF) {
+		t.Fatalf("execution watch did not end after cancellation: %v", err)
+	}
+
+	lateWatch, err := executionRPC.WatchExecution(ctx, &wirev1.WatchExecutionRequest{ConnectionId: connectionID, ExecutionId: executionID})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	replayed, err := lateWatch.Recv()
+	if err != nil || !proto.Equal(replayed, event) {
+		t.Fatalf("late execution watch lost terminal event %v: %v, %v", event, replayed, err)
+	}
+
+	if _, err := lateWatch.Recv(); !errors.Is(err, io.EOF) {
+		t.Fatalf("late execution watch did not end after terminal replay: %v", err)
 	}
 
 	if _, err := executionRPC.ReleaseExecution(ctx, &wirev1.ReleaseExecutionRequest{ConnectionId: connectionID, ExecutionId: executionID}); err != nil {

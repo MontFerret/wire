@@ -39,13 +39,15 @@ func TestCompileRoundTrip(t *testing.T) {
 					t.Fatal(err)
 				}
 
-				if !reflect.DeepEqual(plan.Params(), []string{"input", "other"}) {
-					t.Fatalf("Params=%v", plan.Params())
+				h.Own(plan)
+
+				if !reflect.DeepEqual(requirePlanParams(t, plan), []string{"input", "other"}) {
+					t.Fatalf("Params=%v", requirePlanParams(t, plan))
 				}
 
-				plan.Params()[0] = "changed"
+				requirePlanParams(t, plan)[0] = "changed"
 
-				if plan.Params()[0] != "input" {
+				if requirePlanParams(t, plan)[0] != "input" {
 					t.Fatal("Params was not defensive")
 				}
 
@@ -111,6 +113,7 @@ func TestCompileOptionsApplyOnceBeforeDispatch(t *testing.T) {
 				}
 
 				plan, err := compile(ctx, api.Source{Content: "RETURN 1"}, options...)
+				h.Own(plan)
 
 				if outcome == "already cancelled" {
 					if len(order) != 0 {
@@ -160,8 +163,8 @@ func TestCompileOptionsApplyOnceBeforeDispatch(t *testing.T) {
 
 func TestReusablePlanAndDurableSessions(t *testing.T) {
 	h := harness.New(t, harness.WithBehavior(harness.RuntimeBehavior{Plan: harness.PlanBehavior{Session: func(options harness.SessionOptions) harness.SessionBehavior {
-		return harness.SessionBehavior{Run: func(context.Context, int) (api.Output, error) {
-			return api.Output{ContentType: options.ContentType, Content: []byte(options.Params["input"].(string))}, nil
+		return harness.SessionBehavior{Run: func(context.Context, int) (*api.Output, error) {
+			return &api.Output{ContentType: options.ContentType, Content: []byte(options.Params["input"].(string))}, nil
 		}}
 	}}}))
 
@@ -170,6 +173,8 @@ func TestReusablePlanAndDurableSessions(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	h.Own(plan)
+
 	var sessions []api.Session
 
 	for _, value := range []string{"first", "second", "third"} {
@@ -177,6 +182,8 @@ func TestReusablePlanAndDurableSessions(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+
+		h.Own(session)
 
 		sessions = append(sessions, session)
 
@@ -236,5 +243,22 @@ func TestReusablePlanAndDurableSessions(t *testing.T) {
 		t.Fatalf("NewSession after Close: %v", err)
 	}
 
+	for _, session := range sessions {
+		if err := session.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+
 	h.RuntimeSpy().Recorder().AssertClosed(t)
+}
+
+func requirePlanParams(t *testing.T, plan api.Plan) []string {
+	t.Helper()
+
+	values, err := plan.Params()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return values
 }

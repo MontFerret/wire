@@ -94,12 +94,12 @@ func TestDebugSessionRetainsBreakpointValidationAndStateGating(t *testing.T) {
 	}
 
 	location := source.Location{SourceName: "query.fql", Position: source.Position{Line: 1}}
-	if _, err := session.SetBreakpointAt(context.Background(), location, debugger.BreakpointOptions{}); !hasCategory(err, ErrorKindInvalidState) {
-		t.Fatalf("running session accepted breakpoint mutation: %v", err)
+	if _, err := session.SetBreakpointAt(context.Background(), location, debugger.BreakpointOptions{}); err != nil {
+		t.Fatalf("running session rejected breakpoint mutation: %v", err)
 	}
 
 	setCalls, _ := runtime.breakpointCalls()
-	if setCalls != 0 {
+	if setCalls != 1 {
 		t.Fatalf("state-gated breakpoint reached runtime %d times", setCalls)
 	}
 }

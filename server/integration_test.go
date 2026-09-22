@@ -39,8 +39,8 @@ func TestUnifiedRuntimeCompileExecuteAndBorrowedOwnership(t *testing.T) {
 	plan := &apiPlanSpy{
 		params: []string{"input"},
 		newSession: func(context.Context, apiSessionOptions) (api.Session, error) {
-			return &apiSessionSpy{run: func(context.Context) (api.Output, error) {
-				return api.Output{ContentType: "application/json", Content: outputBytes}, nil
+			return &apiSessionSpy{run: func(context.Context) (*api.Output, error) {
+				return &api.Output{ContentType: "application/json", Content: outputBytes}, nil
 			}}, nil
 		},
 	}
@@ -82,8 +82,13 @@ func TestUnifiedRuntimeCompileExecuteAndBorrowedOwnership(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if !reflect.DeepEqual(compiled.Params(), []string{"input"}) {
-		t.Fatalf("unexpected plan parameters: %#v", compiled.Params())
+	params, err := compiled.Params()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !reflect.DeepEqual(params, []string{"input"}) {
+		t.Fatalf("unexpected plan parameters: %#v", params)
 	}
 
 	parameters := map[string]any{
@@ -172,11 +177,11 @@ func TestUnifiedRuntimeCompileExecuteAndBorrowedOwnership(t *testing.T) {
 
 func TestServerShutdownClosesOwnedResourcesWithoutClosingRuntime(t *testing.T) {
 	started := make(chan struct{})
-	session := &apiSessionSpy{run: func(ctx context.Context) (api.Output, error) {
+	session := &apiSessionSpy{run: func(ctx context.Context) (*api.Output, error) {
 		close(started)
 		<-ctx.Done()
 
-		return api.Output{}, ctx.Err()
+		return nil, ctx.Err()
 	}}
 	plan := &apiPlanSpy{newSession: func(context.Context, apiSessionOptions) (api.Session, error) {
 		return session, nil
@@ -309,8 +314,8 @@ func TestPortableDiagnosticsCrossImmediateAndAsynchronousFailures(t *testing.T) 
 
 	t.Run("execution failure", func(t *testing.T) {
 		plan := &apiPlanSpy{newSession: func(context.Context, apiSessionOptions) (api.Session, error) {
-			return &apiSessionSpy{run: func(context.Context) (api.Output, error) {
-				return api.Output{ContentType: "text/plain", Content: []byte("partial")},
+			return &apiSessionSpy{run: func(context.Context) (*api.Output, error) {
+				return &api.Output{ContentType: "text/plain", Content: []byte("partial")},
 					errors.Join(errors.New("runtime execution secret"), values)
 			}}, nil
 		}}
@@ -367,8 +372,8 @@ func testDiagnostics() diagnostics.Diagnostics {
 
 func TestMessageLimitsRemainAtTheGRPCBoundary(t *testing.T) {
 	plan := &apiPlanSpy{newSession: func(context.Context, apiSessionOptions) (api.Session, error) {
-		return &apiSessionSpy{run: func(context.Context) (api.Output, error) {
-			return api.Output{ContentType: "application/json", Content: []byte(strings.Repeat("x", 2048))}, nil
+		return &apiSessionSpy{run: func(context.Context) (*api.Output, error) {
+			return &api.Output{ContentType: "application/json", Content: []byte(strings.Repeat("x", 2048))}, nil
 		}}, nil
 	}}
 	runtime := &apiRuntimeSpy{compile: func(context.Context, api.Source, bool) (api.Plan, error) {

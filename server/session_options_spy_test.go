@@ -1,6 +1,7 @@
 package server_test
 
 type apiSessionOptions struct {
+	fsRoot      *string
 	params      map[string]any
 	contentType string
 }
@@ -35,3 +36,6 @@ func (o apiSessionOptions) clone() apiSessionOptions {
 
 	return o
 }
+
+// SetFSRoot records the portable root without interpreting it.
+func (o *apiSessionOptions) SetFSRoot(root string) error { o.fsRoot = &root; return nil }

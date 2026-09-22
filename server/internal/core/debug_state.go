@@ -16,6 +16,7 @@ type debugSessionState struct {
 	depth    int
 	output   *api.Output
 	failure  *failure.Failure
+	result   *wiredebugger.CommandResult
 }
 
 func (s *debugSessionState) beginRunning() {
@@ -25,6 +26,7 @@ func (s *debugSessionState) beginRunning() {
 	s.hitIDs = nil
 	s.depth = 0
 	s.failure = nil
+	s.result = nil
 }
 
 func (s *debugSessionState) terminate() {
@@ -33,6 +35,7 @@ func (s *debugSessionState) terminate() {
 	s.location = nil
 	s.depth = 0
 	s.failure = nil
+	s.result = nil
 }
 
 func (s *debugSessionState) snapshot() wiredebugger.Snapshot {
@@ -44,5 +47,6 @@ func (s *debugSessionState) snapshot() wiredebugger.Snapshot {
 		Depth:            s.depth,
 		Output:           s.output,
 		Failure:          s.failure,
+		CommandResult:    s.result,
 	})
 }

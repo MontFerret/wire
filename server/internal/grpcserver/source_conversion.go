@@ -51,10 +51,6 @@ func sourceLocation(value source.Location) (*wirev1.Location, error) {
 		return nil, nil
 	}
 
-	if value.SourceName == "" {
-		return nil, runtimeConversionError("runtime returned a source location with no source name")
-	}
-
 	if value.Line <= 0 || value.Column < 0 {
 		return nil, runtimeConversionError("runtime returned an invalid source location")
 	}
@@ -98,10 +94,6 @@ func sourceRange(value source.Range) (*wirev1.Range, error) {
 func sourceLocationFromProto(value *wirev1.Location, name string) (source.Location, error) {
 	if value == nil {
 		return source.Location{}, &core.DomainError{Kind: core.ErrorKindInvalidRequest, Message: name + " is required"}
-	}
-
-	if value.GetSourceName() == "" {
-		return source.Location{}, &core.DomainError{Kind: core.ErrorKindInvalidRequest, Message: name + " source name is required"}
 	}
 
 	position := value.GetPosition()

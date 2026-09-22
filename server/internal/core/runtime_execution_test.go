@@ -12,8 +12,8 @@ import (
 )
 
 func TestRunUsesBorrowedRuntimeWithoutPlan(t *testing.T) {
-	hosted := &spyRuntime{run: func(_ context.Context, _ api.Source, options sessionOptions) (api.Output, error) {
-		return api.Output{ContentType: options.contentType, Content: []byte("direct")}, nil
+	hosted := &spyRuntime{run: func(_ context.Context, _ api.Source, options sessionOptions) (*api.Output, error) {
+		return &api.Output{ContentType: options.contentType, Content: []byte("direct")}, nil
 	}}
 	connection := newTestConnection(t, hosted)
 
@@ -58,7 +58,7 @@ func TestRunUsesBorrowedRuntimeWithoutPlan(t *testing.T) {
 }
 
 func TestRunPanicIsContainedAsInternalFailure(t *testing.T) {
-	hosted := &spyRuntime{run: func(context.Context, api.Source, sessionOptions) (api.Output, error) {
+	hosted := &spyRuntime{run: func(context.Context, api.Source, sessionOptions) (*api.Output, error) {
 		panic("runtime secret")
 	}}
 	connection := newTestConnection(t, hosted)
@@ -97,11 +97,16 @@ func TestRunRejectsCancelledAndInvalidRequestsBeforeAllocation(t *testing.T) {
 		t.Fatalf("cancelled direct run was admitted: %v", err)
 	}
 
-	if _, err := connection.Run(context.Background(), runRequest{}); !hasCategory(err, ErrorKindInvalidRequest) {
-		t.Fatalf("empty direct source was admitted: %v", err)
+	if ids := connection.resources.executions; len(ids) != 0 {
+		t.Fatalf("cancelled direct run leaked executions: %#v", ids)
 	}
 
-	if ids := connection.resources.executions; len(ids) != 0 {
-		t.Fatalf("rejected direct runs leaked executions: %#v", ids)
+	run, err := connection.Run(context.Background(), runRequest{})
+	if err != nil {
+		t.Fatalf("empty source was not delegated: %v", err)
+	}
+
+	if err := connection.ReleaseExecution(testContext(t), run.ID); err != nil {
+		t.Fatal(err)
 	}
 }

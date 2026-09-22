@@ -49,7 +49,13 @@ func convertDebugSessionSnapshot(value *wirev1.DebugSession) (wiredebugger.Snaps
 		return wiredebugger.Snapshot{}, err
 	}
 
+	result, err := convertCommandResult(value.GetCommandResult())
+	if err != nil {
+		return wiredebugger.Snapshot{}, err
+	}
+
 	return wiredebugger.Snapshot{
+		CommandResult:    result,
 		State:            state,
 		StopReason:       stopReason,
 		Location:         location,
@@ -136,10 +142,6 @@ func convertDebugEventKind(value wirev1.DebugEventKind) (wiredebugger.EventKind,
 func convertSourceLocation(value *wirev1.Location) (*source.Location, error) {
 	if value == nil {
 		return nil, nil
-	}
-
-	if value.GetSourceName() == "" {
-		return nil, invalidDebuggerResponse("source location source name is missing")
 	}
 
 	position := value.GetPosition()

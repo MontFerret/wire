@@ -2,7 +2,7 @@
 
 Ferret Wire is a versioned gRPC boundary for hosting an implementation of the [Unified Ferret API](https://github.com/MontFerret/api) in another process. It lets a host expose compilation, execution, and source-level debugging without moving runtime construction, configuration, policy, or listener security into this library.
 
-This module targets Go 1.25 and Unified API `v1.0.0-alpha.11`. The v1 protobuf package is `ferret.wire.v1`; its sources live in `proto/ferret/wire/v1`, and the checked-in Go bindings live in `gen/ferret/wire/v1`.
+This module targets Go 1.25 and Unified API `v1.0.0-alpha.19`. The v1 protobuf package is `ferret.wire.v1`; its sources live in `proto/ferret/wire/v1`, and the checked-in Go bindings live in `gen/ferret/wire/v1`.
 
 ## Ownership and architecture
 
@@ -96,10 +96,10 @@ transport setup. `client.New` borrows the supplied connection and returns
 `api.Runtime`; subsequent operations use the same interfaces as a local runtime:
 
 ```go
-func runRemote(ctx context.Context, conn grpc.ClientConnInterface) (out api.Output, err error) {
+func runRemote(ctx context.Context, conn grpc.ClientConnInterface) (out *api.Output, err error) {
     remote, err := client.New(ctx, conn)
     if err != nil {
-        return api.Output{}, err
+        return nil, err
     }
     defer func() { err = errors.Join(err, remote.Close()) }()
 
@@ -109,7 +109,7 @@ func runRemote(ctx context.Context, conn grpc.ClientConnInterface) (out api.Outp
         api.WithOptimizationLevel(api.OptimizationBasic),
     )
     if err != nil {
-        return api.Output{}, err
+        return nil, err
     }
     defer func() { err = errors.Join(err, plan.Close()) }()
 
@@ -119,7 +119,7 @@ func runRemote(ctx context.Context, conn grpc.ClientConnInterface) (out api.Outp
         api.WithOutputContentType("application/json"),
     )
     if err != nil {
-        return api.Output{}, err
+        return nil, err
     }
     defer func() { err = errors.Join(err, session.Close()) }()
 
@@ -129,7 +129,7 @@ func runRemote(ctx context.Context, conn grpc.ClientConnInterface) (out api.Outp
 
 For a one-shot invocation, `remote.Run(ctx, source, options...)` calls the hosted
 `api.Runtime.Run` directly. Plans and durable sessions may be reused; normal
-session runs are sequential. Output remains `api.Output`: content type and
+session runs are sequential. Output is `*api.Output`: content type and
 encoded bytes.
 
 For debugging, use `remote.CompileDebug`, `plan.NewDebugSession`, and the
@@ -142,6 +142,20 @@ cleanup and leave `conn` open. Allocation replies that race cancellation are
 reclaimed automatically. If a reply is lost, the adapter closes the nearest
 owning session or plan and escalates to its logical runtime only when needed.
 See [allocation and cancellation](docs/client.md#allocation-and-cancellation).
+
+Ordinary `Runtime.Close` rejects new root calls and defers connection teardown
+until admitted work and caller-owned descendants finish. `Plan.Close` closes
+only the hosted plan after admitted constructors settle; existing children
+survive. Close every returned child. Transport release and lost-allocation
+recovery still cascade. Output presence and available output accompanying an
+error are preserved. Filesystem roots and output content types preserve explicit
+empty settings; the hosted runtime owns their validation.
+
+Debugger methods take caller contexts. `RunCommand` streams preserve Start's
+execution lifetime and each resume's request context; cancellation does not
+release the debugger. Atomic breakpoint replacement works while running, and
+breakpoint enumeration remains available after explicit Close. See the complete
+[alpha.19 method and setter audit](docs/uapi-audit.md).
 
 The public client exports only `New`, `Error`, `ErrClosed`, and
 `ErrExecutionCancelled`. Existing users of `NewRuntime` should call `New`;

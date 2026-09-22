@@ -62,24 +62,24 @@ func (e *executionHandle) Watch(ctx context.Context) (*executionEvents, error) {
 // returns ErrExecutionCancelled. Caller cancellation returns the waiting
 // context's error. Wait does not release the execution or retain mutable
 // snapshot state.
-func (e *executionHandle) Wait(ctx context.Context) (api.Output, error) {
+func (e *executionHandle) Wait(ctx context.Context) (*api.Output, error) {
 	events, err := e.Watch(ctx)
 	if err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
-			return api.Output{}, ctxErr
+			return nil, ctxErr
 		}
 
-		return api.Output{}, err
+		return nil, err
 	}
 
 	for {
 		event, receiveErr := events.Recv()
 		if receiveErr != nil {
 			if ctxErr := ctx.Err(); ctxErr != nil {
-				return api.Output{}, ctxErr
+				return nil, ctxErr
 			}
 
-			return api.Output{}, receiveErr
+			return nil, receiveErr
 		}
 
 		if !event.Snapshot.State.Terminal() {
@@ -90,7 +90,7 @@ func (e *executionHandle) Wait(ctx context.Context) (api.Output, error) {
 		switch event.Snapshot.State {
 		case execution.StateCompleted:
 			if event.Snapshot.Output == nil {
-				return api.Output{}, errors.New("Wire server returned a completed execution without output")
+				return nil, errors.New("Wire server returned a completed execution without output")
 			}
 
 			return output, nil
@@ -155,7 +155,7 @@ func (e *executionHandle) release(ctx context.Context) error {
 
 // waitAndRelease is the adapter's one-shot invocation lifecycle. Release itself
 // cancels running work and waits for teardown; a separate Cancel RPC is redundant.
-func (e *executionHandle) waitAndRelease(ctx context.Context) (api.Output, error) {
+func (e *executionHandle) waitAndRelease(ctx context.Context) (*api.Output, error) {
 	output, waitErr := e.Wait(ctx)
 
 	// The ID is known: a failed release is retained on this handle and does

@@ -36,12 +36,12 @@ func TestConnectionLossReclaimsResources(t *testing.T) {
 			t.Run(mode+map[bool]string{false: "/transport", true: "/server"}[shutdown], func(t *testing.T) {
 				block := harness.NewBlock(t)
 				h := harness.New(t, harness.WithBehavior(harness.RuntimeBehavior{
-					Run: func(ctx context.Context, _ api.Source, _ harness.SessionOptions) (api.Output, error) {
-						return api.Output{}, block.Wait(ctx)
+					Run: func(ctx context.Context, _ api.Source, _ harness.SessionOptions) (*api.Output, error) {
+						return nil, block.Wait(ctx)
 					},
 					Plan: harness.PlanBehavior{
 						Session: func(harness.SessionOptions) harness.SessionBehavior {
-							return harness.SessionBehavior{Run: func(ctx context.Context, _ int) (api.Output, error) { return api.Output{}, block.Wait(ctx) }}
+							return harness.SessionBehavior{Run: func(ctx context.Context, _ int) (*api.Output, error) { return nil, block.Wait(ctx) }}
 						},
 						Debugger: harness.DebuggerBehavior{Command: func(ctx context.Context, _ string, _ int) (*debugger.Event, error) { return nil, block.Wait(ctx) }},
 					},
@@ -59,11 +59,15 @@ func TestConnectionLossReclaimsResources(t *testing.T) {
 						t.Fatal(err)
 					}
 
+					h.Own(plan)
+
 					if mode == "session" {
 						session, err := plan.NewSession(h.Context())
 						if err != nil {
 							t.Fatal(err)
 						}
+
+						h.Own(session)
 
 						run = func() error {
 							_, err := session.Run(h.Context())
@@ -75,6 +79,8 @@ func TestConnectionLossReclaimsResources(t *testing.T) {
 						if err != nil {
 							t.Fatal(err)
 						}
+
+						h.Own(session)
 
 						run = func() error {
 							var err error
@@ -133,7 +139,7 @@ func expectedConnectionLoss(err error, mode string, shutdown bool) bool {
 		return true
 	}
 
-	if errors.Is(err, client.ErrClosed) || errors.Is(err, client.ErrExecutionCancelled) {
+	if errors.Is(err, context.Canceled) || errors.Is(err, client.ErrClosed) || errors.Is(err, client.ErrExecutionCancelled) {
 		return true
 	}
 
@@ -162,8 +168,8 @@ func TestWatchTerminationReturnsError(t *testing.T) {
 			t.Run(map[bool]string{false: "execution/", true: "debugger/"}[debug]+watchErr.Error(), func(t *testing.T) {
 				block := harness.NewBlock(t)
 				h := harness.New(t, harness.WithBehavior(harness.RuntimeBehavior{
-					Run: func(ctx context.Context, _ api.Source, _ harness.SessionOptions) (api.Output, error) {
-						return api.Output{}, block.Wait(ctx)
+					Run: func(ctx context.Context, _ api.Source, _ harness.SessionOptions) (*api.Output, error) {
+						return nil, block.Wait(ctx)
 					},
 					Plan: harness.PlanBehavior{Debugger: harness.DebuggerBehavior{Command: func(ctx context.Context, _ string, _ int) (*debugger.Event, error) { return nil, block.Wait(ctx) }}},
 				}))
@@ -181,12 +187,16 @@ func TestWatchTerminationReturnsError(t *testing.T) {
 						t.Fatal(err)
 					}
 
+					h.Own(plan)
+
 					session, err := plan.NewDebugSession(h.Context())
 					if err != nil {
 						t.Fatal(err)
 					}
 
-					operation = harness.WatchDebugger
+					h.Own(session)
+
+					operation = harness.RunDebugCommand
 					run = func() error {
 						_, err := session.Start(h.Context())
 
@@ -226,10 +236,14 @@ func TestDebuggerCommandFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	h.Own(plan)
+
 	session, err := plan.NewDebugSession(h.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	h.Own(session)
 
 	_, err = session.Start(h.Context())
 

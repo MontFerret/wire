@@ -50,6 +50,11 @@ func debugSession(id core.DebugSessionID, value wiredebugger.Snapshot) (*wirev1.
 		hitIDs[i] = converted
 	}
 
+	result, err := commandResult(value.CommandResult)
+	if err != nil {
+		return nil, err
+	}
+
 	return &wirev1.DebugSession{
 		Id:               &wirev1.DebugSessionId{Value: string(id)},
 		State:            state,
@@ -59,6 +64,7 @@ func debugSession(id core.DebugSessionID, value wiredebugger.Snapshot) (*wirev1.
 		Output:           output(value.Output),
 		Failure:          convertedFailure,
 		Depth:            int64(value.Depth),
+		CommandResult:    result,
 	}, nil
 }
 
@@ -150,7 +156,7 @@ func breakpoint(value debugger.Breakpoint) (*wirev1.Breakpoint, error) {
 		return nil, err
 	}
 
-	functionID, err := debuggerIDToProto(value.FunctionID, "breakpoint function ID", true)
+	functionID, err := functionIDToProto(value.FunctionID)
 	if err != nil {
 		return nil, err
 	}
@@ -184,6 +190,7 @@ func breakpoint(value debugger.Breakpoint) (*wirev1.Breakpoint, error) {
 		Location:          resolved,
 		PointId:           pointID,
 		FunctionId:        functionID,
+		SignedFunctionId:  signedFunctionID(value.FunctionID),
 		BindingMode:       bindingMode,
 		Bound:             value.Bound,
 	}, nil
@@ -227,7 +234,7 @@ func breakpointOptions(value *wirev1.BreakpointOptions) (debugger.BreakpointOpti
 }
 
 func frame(value debugger.Frame) (*wirev1.Frame, error) {
-	functionID, err := debuggerIDToProto(value.FunctionID, "frame function ID", true)
+	functionID, err := functionIDToProto(value.FunctionID)
 	if err != nil {
 		return nil, err
 	}
@@ -237,7 +244,7 @@ func frame(value debugger.Frame) (*wirev1.Frame, error) {
 		return nil, err
 	}
 
-	return &wirev1.Frame{Name: value.Name, Location: location, FunctionId: functionID}, nil
+	return &wirev1.Frame{Name: value.Name, Location: location, FunctionId: functionID, SignedFunctionId: signedFunctionID(value.FunctionID)}, nil
 }
 
 func debugValue(value debugger.Value) (*wirev1.DebugValue, error) {
@@ -287,6 +294,34 @@ func variablesToProto(values []debugger.Variable) ([]*wirev1.Variable, error) {
 	result := make([]*wirev1.Variable, len(values))
 	for i, value := range values {
 		converted, err := variable(value)
+		if err != nil {
+			return nil, err
+		}
+
+		result[i] = converted
+	}
+
+	return result, nil
+}
+
+func functionIDToProto(value debugger.FunctionID) (uint64, error) {
+	if value == debugger.NoFunction {
+		return 0, nil
+	}
+
+	return debuggerIDToProto(value, "function ID", true)
+}
+
+func signedFunctionID(value debugger.FunctionID) *int64 {
+	result := int64(value)
+
+	return &result
+}
+
+func breakpointsToProto(values []debugger.Breakpoint) ([]*wirev1.Breakpoint, error) {
+	result := make([]*wirev1.Breakpoint, len(values))
+	for i, value := range values {
+		converted, err := breakpoint(value)
 		if err != nil {
 			return nil, err
 		}

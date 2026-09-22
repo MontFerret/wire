@@ -1,9 +1,11 @@
 package client
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
 	"github.com/MontFerret/api/diagnostics"
@@ -48,6 +50,16 @@ func (e *Error) Unwrap() error {
 	}
 
 	return e.cause
+}
+
+// Is preserves context identity without replacing the underlying gRPC status.
+func (e *Error) Is(target error) bool {
+	if e == nil {
+		return false
+	}
+
+	return target == context.Canceled && status.Code(e.cause) == codes.Canceled ||
+		target == context.DeadlineExceeded && status.Code(e.cause) == codes.DeadlineExceeded
 }
 
 func decodeError(err error) error {

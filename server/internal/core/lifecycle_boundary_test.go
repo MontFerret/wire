@@ -237,10 +237,10 @@ func TestConcurrentPlanReleaseSharesResultAndClosesOnce(t *testing.T) {
 func TestResourceLimitsAndConnectionIsolationRemainWireOwned(t *testing.T) {
 	plan := &spyPlan{
 		newSession: func(context.Context, sessionOptions) (api.Session, error) {
-			return &spySession{run: func(ctx context.Context) (api.Output, error) {
+			return &spySession{run: func(ctx context.Context) (*api.Output, error) {
 				<-ctx.Done()
 
-				return api.Output{}, ctx.Err()
+				return nil, ctx.Err()
 			}}, nil
 		},
 		newDebugSession: func(context.Context, sessionOptions) (debugger.Session, error) {
@@ -457,12 +457,12 @@ func TestConnectionCloseCancelsExecutionAndReleasesWireResources(t *testing.T) {
 	started := make(chan struct{})
 	finished := make(chan struct{})
 	var finishOnce sync.Once
-	session := &spySession{run: func(ctx context.Context) (api.Output, error) {
+	session := &spySession{run: func(ctx context.Context) (*api.Output, error) {
 		close(started)
 		<-ctx.Done()
 		finishOnce.Do(func() { close(finished) })
 
-		return api.Output{}, ctx.Err()
+		return nil, ctx.Err()
 	}}
 	plan := &spyPlan{newSession: func(context.Context, sessionOptions) (api.Session, error) {
 		return session, nil
@@ -520,8 +520,8 @@ func TestConnectionCloseCancelsExecutionAndReleasesWireResources(t *testing.T) {
 
 func TestSessionClosePanicIsContainedAndAttemptedOnce(t *testing.T) {
 	session := &spySession{
-		run: func(context.Context) (api.Output, error) {
-			return api.Output{ContentType: "application/json", Content: []byte("1")}, nil
+		run: func(context.Context) (*api.Output, error) {
+			return &api.Output{ContentType: "application/json", Content: []byte("1")}, nil
 		},
 		close: func() error { panic("close secret") },
 	}
@@ -614,11 +614,11 @@ func TestPlanReleaseSettlesChildrenBeforeClosingAPIPlan(t *testing.T) {
 	}
 	executionStarted := make(chan struct{})
 	executionSession := &spySession{
-		run: func(ctx context.Context) (api.Output, error) {
+		run: func(ctx context.Context) (*api.Output, error) {
 			close(executionStarted)
 			<-ctx.Done()
 
-			return api.Output{}, ctx.Err()
+			return nil, ctx.Err()
 		},
 		close: func() error {
 			record("execution")

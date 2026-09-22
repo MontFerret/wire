@@ -9,7 +9,7 @@ import (
 
 type spyRuntime struct {
 	mu                  sync.Mutex
-	run                 func(context.Context, api.Source, sessionOptions) (api.Output, error)
+	run                 func(context.Context, api.Source, sessionOptions) (*api.Output, error)
 	compile             func(context.Context, api.Source, bool) (api.Plan, error)
 	runSources          []api.Source
 	runOptions          []sessionOptions
@@ -19,10 +19,10 @@ type spyRuntime struct {
 	closeCalls          int
 }
 
-func (r *spyRuntime) Run(ctx context.Context, src api.Source, options ...api.SessionOption) (api.Output, error) {
+func (r *spyRuntime) Run(ctx context.Context, src api.Source, options ...api.SessionOption) (*api.Output, error) {
 	configured, err := applySessionOptions(options)
 	if err != nil {
-		return api.Output{}, err
+		return nil, err
 	}
 
 	r.mu.Lock()
@@ -32,7 +32,7 @@ func (r *spyRuntime) Run(ctx context.Context, src api.Source, options ...api.Ses
 	r.mu.Unlock()
 
 	if run == nil {
-		return api.Output{}, nil
+		return nil, nil
 	}
 
 	return run(ctx, src, configured)

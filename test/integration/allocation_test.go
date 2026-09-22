@@ -29,6 +29,8 @@ func TestRuntimeLostAllocationReclaimsNearestParentAndPreservesSiblings(t *testi
 						var err error
 
 						parent, err = f.remote.Compile(harness.Context(t), api.Source{Content: "RETURN 2"})
+						f.h.Own(parent)
+
 						if err != nil {
 							t.Fatal(err)
 						}
@@ -37,6 +39,8 @@ func TestRuntimeLostAllocationReclaimsNearestParentAndPreservesSiblings(t *testi
 					var err error
 
 					sibling, err = parent.NewSession(harness.Context(t))
+					f.h.Own(sibling)
+
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -98,6 +102,8 @@ func TestRuntimeLostAllocationReclaimsNearestParentAndPreservesSiblings(t *testi
 
 				// This second logical client borrows the same physical connection.
 				plan, err := f.other.Compile(harness.Context(t), api.Source{Content: "RETURN 3"})
+				f.h.Own(plan)
+
 				if err != nil {
 					t.Fatalf("caller-owned transport or sibling client was closed: %v", err)
 				}
@@ -121,6 +127,8 @@ func TestRuntimeCancelledKnownAllocationPreservesParentsOnReleaseFailure(t *test
 					var err error
 
 					siblingPlan, err = f.remote.Compile(harness.Context(t), api.Source{Content: "RETURN 2"})
+					f.h.Own(siblingPlan)
+
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -130,6 +138,8 @@ func TestRuntimeCancelledKnownAllocationPreservesParentsOnReleaseFailure(t *test
 				if err != nil {
 					t.Fatal(err)
 				}
+
+				f.h.Own(sibling)
 
 				releaseErr := status.Error(codes.Unavailable, "resource release unavailable")
 				fail := f.gate.Fail
@@ -195,12 +205,17 @@ func TestRuntimeLostExecutionTriesPlanBeforeRuntime(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	f.h.Own(siblingPlan)
+
 	sibling, err := siblingPlan.NewSession(harness.Context(t))
 	if err != nil {
 		t.Fatal(err)
 	}
 
+	f.h.Own(sibling)
+
 	parentErr := status.Error(codes.Unavailable, "session release unavailable")
+	f.h.ExpectCleanupError(parentErr)
 	f.gate.Fail(operation.parentRelease, parentErr)
 	f.reply = f.gate.Arm(operation.method, harness.LostUnavailable)
 	result := make(chan error, 1)
@@ -253,8 +268,10 @@ func TestRuntimeLostAllocationEscalatesFailedParentCleanup(t *testing.T) {
 			t.Run(operation.name+map[bool]string{false: "/connection release", true: "/Connect stream"}[failConnection], func(t *testing.T) {
 				f := newRuntimeAllocationFixture(t, operation)
 				parentErr := status.Error(codes.Unavailable, "parent release unavailable")
+				f.h.ExpectCleanupError(parentErr)
 				f.gate.Fail(operation.parentRelease, parentErr)
 				planErr := status.Error(codes.Unavailable, "plan release unavailable")
+				f.h.ExpectCleanupError(planErr)
 
 				if operation.name == "session run" {
 					f.gate.Fail(harness.ReleasePlan, planErr)

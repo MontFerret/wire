@@ -81,6 +81,10 @@ func (r *ResourceStore) beginCreation(kind resourceKind, plan *Plan) error {
 		return err
 	}
 
+	if plan != nil && plan.close.Started() {
+		return invalidState("plan is closed", nil)
+	}
+
 	var count, limit int
 	var name string
 	switch kind {

@@ -13,11 +13,16 @@ import (
 type (
 	// DebuggerBehavior configures command, inspection, evaluation, and cleanup hooks.
 	DebuggerBehavior struct {
-		Command  func(context.Context, string, int) (*debugger.Event, error)
-		Pause    func() error
-		Inspect  func(string) error
-		Evaluate func(context.Context, int, string) (debugger.Value, error)
-		Close    func() error
+		Command       func(context.Context, string, int) (*debugger.Event, error)
+		Pause         func() error
+		Inspect       func(string) error
+		Evaluate      func(context.Context, int, string) (debugger.Value, error)
+		Close         func() error
+		Enumeration   func(context.Context) error
+		BeforeReplace func(context.Context) error
+		AfterReplace  func()
+		Observe       func(context.Context, string) error
+		Frames        []debugger.Frame
 	}
 
 	// BreakpointRequest records both location and binding options for transport assertions.
@@ -29,6 +34,7 @@ type (
 	// DebuggerSpy records hosted debugger operations and maintains deterministic breakpoint fixtures.
 	DebuggerSpy struct {
 		id          int
+		sourceName  string
 		recorder    *Recorder
 		behavior    DebuggerBehavior
 		mu          sync.Mutex
@@ -89,7 +95,13 @@ func (d *DebuggerSpy) StepOut(ctx context.Context) (*debugger.Event, error) {
 }
 
 // Pause records the request before invoking the optional pause hook.
-func (d *DebuggerSpy) Pause() error {
+func (d *DebuggerSpy) Pause(ctx context.Context) error {
+	if d.behavior.Observe != nil {
+		if err := d.behavior.Observe(ctx, "Pause"); err != nil {
+			return err
+		}
+	}
+
 	d.recorder.record(Call{Resource: d.id, Method: "Pause"})
 
 	if d.behavior.Pause != nil {
@@ -100,12 +112,20 @@ func (d *DebuggerSpy) Pause() error {
 }
 
 // SetBreakpoint records a breakpoint request with default options.
-func (d *DebuggerSpy) SetBreakpoint(location source.Location) (debugger.Breakpoint, error) {
-	return d.SetBreakpointAt(location, debugger.BreakpointOptions{})
+func (d *DebuggerSpy) SetBreakpoint(ctx context.Context, location source.Location) (debugger.Breakpoint, error) {
+	d.recorder.record(Call{Resource: d.id, Method: "SetBreakpoint"})
+
+	return d.SetBreakpointAt(ctx, location, debugger.BreakpointOptions{})
 }
 
 // SetBreakpointAt records location and options and assigns deterministic binding metadata.
-func (d *DebuggerSpy) SetBreakpointAt(location source.Location, options debugger.BreakpointOptions) (debugger.Breakpoint, error) {
+func (d *DebuggerSpy) SetBreakpointAt(ctx context.Context, location source.Location, options debugger.BreakpointOptions) (debugger.Breakpoint, error) {
+	if d.behavior.Observe != nil {
+		if err := d.behavior.Observe(ctx, "SetBreakpointAt"); err != nil {
+			return debugger.Breakpoint{}, err
+		}
+	}
+
 	d.recorder.record(Call{Resource: d.id, Method: "SetBreakpointAt", Argument: BreakpointRequest{Location: location, Options: options}})
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -118,7 +138,13 @@ func (d *DebuggerSpy) SetBreakpointAt(location source.Location, options debugger
 }
 
 // DeleteBreakpoint records the ID and removes it from the fixture's breakpoint set.
-func (d *DebuggerSpy) DeleteBreakpoint(id debugger.BreakpointID) error {
+func (d *DebuggerSpy) DeleteBreakpoint(ctx context.Context, id debugger.BreakpointID) error {
+	if d.behavior.Observe != nil {
+		if err := d.behavior.Observe(ctx, "DeleteBreakpoint"); err != nil {
+			return err
+		}
+	}
+
 	d.recorder.record(Call{Resource: d.id, Method: "DeleteBreakpoint", Argument: id})
 	d.mu.Lock()
 	delete(d.breakpoints, id)
@@ -128,8 +154,15 @@ func (d *DebuggerSpy) DeleteBreakpoint(id debugger.BreakpointID) error {
 }
 
 // Breakpoints returns the fixture's bindings sorted by ID for deterministic assertions.
-func (d *DebuggerSpy) Breakpoints() []debugger.Breakpoint {
+func (d *DebuggerSpy) Breakpoints(ctx context.Context) ([]debugger.Breakpoint, error) {
 	d.recorder.record(Call{Resource: d.id, Method: "Breakpoints"})
+
+	if d.behavior.Enumeration != nil {
+		if err := d.behavior.Enumeration(ctx); err != nil {
+			return nil, err
+		}
+	}
+
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
@@ -141,17 +174,27 @@ func (d *DebuggerSpy) Breakpoints() []debugger.Breakpoint {
 
 	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
 
-	return result
+	return result, nil
 }
 
 // Frames records inspection and returns two distinguishable frames after the inspection hook.
-func (d *DebuggerSpy) Frames() ([]debugger.Frame, error) {
+func (d *DebuggerSpy) Frames(ctx context.Context) ([]debugger.Frame, error) {
+	if d.behavior.Observe != nil {
+		if err := d.behavior.Observe(ctx, "Frames"); err != nil {
+			return nil, err
+		}
+	}
+
 	d.recorder.record(Call{Resource: d.id, Method: "Frames"})
 
 	if d.behavior.Inspect != nil {
 		if err := d.behavior.Inspect("Frames"); err != nil {
 			return nil, err
 		}
+	}
+
+	if d.behavior.Frames != nil {
+		return d.behavior.Frames, nil
 	}
 
 	return []debugger.Frame{
@@ -161,19 +204,33 @@ func (d *DebuggerSpy) Frames() ([]debugger.Frame, error) {
 }
 
 // Locals uses frame zero so tests can distinguish default-frame access.
-func (d *DebuggerSpy) Locals() ([]debugger.Variable, error) {
-	return d.FrameLocals(0)
+func (d *DebuggerSpy) Locals(ctx context.Context) ([]debugger.Variable, error) {
+	d.recorder.record(Call{Resource: d.id, Method: "Locals"})
+
+	return d.FrameLocals(ctx, 0)
 }
 
 // FrameLocals records the frame index and returns a distinguishable variable fixture.
-func (d *DebuggerSpy) FrameLocals(frame int) ([]debugger.Variable, error) {
+func (d *DebuggerSpy) FrameLocals(ctx context.Context, frame int) ([]debugger.Variable, error) {
+	if d.behavior.Observe != nil {
+		if err := d.behavior.Observe(ctx, "FrameLocals"); err != nil {
+			return nil, err
+		}
+	}
+
 	d.recorder.record(Call{Resource: d.id, Method: "FrameLocals", Index: frame})
 
 	return []debugger.Variable{{Name: fmt.Sprintf("local-%d", frame), Value: debugger.Value{Type: "object", Display: "{...}", Reference: 9}, Mutable: true, Param: frame == 1}}, nil
 }
 
 // Variables expands the fixture reference and rejects unknown references.
-func (d *DebuggerSpy) Variables(reference debugger.ValueReference) ([]debugger.Variable, error) {
+func (d *DebuggerSpy) Variables(ctx context.Context, reference debugger.ValueReference) ([]debugger.Variable, error) {
+	if d.behavior.Observe != nil {
+		if err := d.behavior.Observe(ctx, "Variables"); err != nil {
+			return nil, err
+		}
+	}
+
 	d.recorder.record(Call{Resource: d.id, Method: "Variables", Argument: reference})
 
 	if reference != 9 {
@@ -185,11 +242,19 @@ func (d *DebuggerSpy) Variables(reference debugger.ValueReference) ([]debugger.V
 
 // Evaluate uses frame zero so tests can distinguish default-frame evaluation.
 func (d *DebuggerSpy) Evaluate(ctx context.Context, expression string) (debugger.Value, error) {
+	d.recorder.record(Call{Resource: d.id, Method: "Evaluate"})
+
 	return d.EvaluateFrame(ctx, 0, expression)
 }
 
 // EvaluateFrame records frame and expression around the hook or deterministic fallback value.
 func (d *DebuggerSpy) EvaluateFrame(ctx context.Context, frame int, expression string) (debugger.Value, error) {
+	if d.behavior.Observe != nil {
+		if err := d.behavior.Observe(ctx, "EvaluateFrame"); err != nil {
+			return debugger.Value{}, err
+		}
+	}
+
 	d.recorder.record(Call{Resource: d.id, Method: "EvaluateFrame", Index: frame, Argument: expression})
 	defer d.recorder.record(Call{Resource: d.id, Method: "EvaluateFrameFinished"})
 
@@ -210,4 +275,83 @@ func (d *DebuggerSpy) Close() error {
 	}
 
 	return nil
+}
+
+// ReplaceBreakpoints implements atomic fixture publication with stable IDs.
+func (d *DebuggerSpy) ReplaceBreakpoints(ctx context.Context, sourceName string, requests []debugger.BreakpointRequest) ([]debugger.Breakpoint, error) {
+	d.recorder.record(Call{Resource: d.id, Method: "ReplaceBreakpoints"})
+
+	if sourceName == "" {
+		sourceName = d.sourceName
+	}
+
+	if d.behavior.BeforeReplace != nil {
+		if err := d.behavior.BeforeReplace(ctx); err != nil {
+			return nil, err
+		}
+	}
+
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	if d.breakpoints == nil {
+		d.breakpoints = make(map[debugger.BreakpointID]debugger.Breakpoint)
+	}
+
+	existing := make([]debugger.Breakpoint, 0, len(d.breakpoints))
+	for _, value := range d.breakpoints {
+		if value.ID > d.nextID {
+			d.nextID = value.ID
+		}
+
+		if value.RequestedLocation.SourceName == sourceName {
+			existing = append(existing, value)
+		}
+	}
+
+	sort.Slice(existing, func(i, j int) bool { return existing[i].ID < existing[j].ID })
+	result := make([]debugger.Breakpoint, len(requests))
+	used := make(map[debugger.BreakpointID]bool)
+	for i, request := range requests {
+		location := source.Location{SourceName: sourceName, Position: request.Position}
+		for _, value := range existing {
+			if !used[value.ID] && value.RequestedLocation == location && value.BindingMode == request.Options.BindingMode {
+				result[i] = value
+				used[value.ID] = true
+
+				break
+			}
+		}
+
+		if result[i].ID == 0 {
+			d.nextID++
+
+			result[i] = debugger.Breakpoint{ID: d.nextID, RequestedLocation: location, Location: source.Range{Location: location}, BindingMode: request.Options.BindingMode, FunctionID: debugger.NoFunction, Bound: request.Position.Line < 100}
+			if !result[i].Bound {
+				result[i].Location = source.Range{}
+			}
+		}
+	}
+
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	for _, value := range existing {
+		delete(d.breakpoints, value.ID)
+	}
+
+	for _, value := range result {
+		d.breakpoints[value.ID] = value
+	}
+
+	if d.behavior.AfterReplace != nil {
+		d.behavior.AfterReplace()
+	}
+
+	return result, nil
 }

@@ -21,22 +21,28 @@ their canonical Universal API types directly. `client` exports only `New`,
 
 `Runtime.Run` invokes the hosted `api.Runtime.Run` directly, once per call.
 `Compile` and `CompileDebug` create reusable plans through the corresponding
-hosted methods. `Plan.Params` returns a defensive copy. Each `NewSession`
+hosted methods. `Plan.Params() ([]string, error)` returns a defensive copy of metadata captured
+before the compiled plan was published. A hosted metadata error or panic closes
+the unpublished plan once and preserves its cleanup error. Each `NewSession`
 creates one durable hosted session with the supplied semantic options;
 sequential `Session.Run` calls reuse it. A concurrent run on that session is
 rejected until the previous invocation's temporary execution has been released.
 Distinct sessions and plans may execute concurrently.
 
 Each runtime/session invocation privately acquires, watches, and releases an
-execution. Output remains `api.Output`: its content type and encoded bytes are
-copied without interpretation. No IDs, RPC handles, execution snapshots, or
+execution. Output is `*api.Output`: its content type and encoded bytes are
+copied without interpretation. Nil output differs from present empty output,
+and available output survives execution or cleanup errors. A hosted `(nil, nil)`
+result is invalid. No IDs, RPC handles, execution snapshots, or
 connection metadata are exposed by the returned API interfaces.
 
 ## Options and parameters
 
 Use `api.WithOptimizationLevel` for plan compilation and `api.WithParam`,
-`api.WithParams`, and `api.WithOutputContentType` for direct runs and session
-creation. There are no Wire-specific semantic option structs.
+`api.WithParams`, `api.WithFSRoot`, and `api.WithOutputContentType` for direct runs and session
+creation. There are no Wire-specific semantic option structs. Omitted filesystem
+roots and content types differ from explicitly empty strings. Wire preserves
+both presence and value; the host owns path validation and codec availability.
 
 Omitting optimization preserves the hosted default; an explicit
 `api.OptimizationNone` transports the zero level. Non-nil callbacks run exactly
@@ -59,16 +65,16 @@ any local or remote Universal API runtime, borrowing it while owning the plan
 and session it creates:
 
 ```go
-func runQuery(ctx context.Context, runtime api.Runtime) (out api.Output, err error) {
+func runQuery(ctx context.Context, runtime api.Runtime) (out *api.Output, err error) {
     plan, err := runtime.Compile(ctx, api.NewSource("query.fql", "RETURN @input"))
     if err != nil {
-        return api.Output{}, err
+        return nil, err
     }
     defer func() { err = errors.Join(err, plan.Close()) }()
 
     session, err := plan.NewSession(ctx, api.WithParam("input", "hello"))
     if err != nil {
-        return api.Output{}, err
+        return nil, err
     }
     defer func() { err = errors.Join(err, session.Close()) }()
 
@@ -85,13 +91,25 @@ resources. Closing it never closes `conn`. Constructor failure returns a nil
 `CompileDebug` followed by `Plan.NewDebugSession` returns
 `api/debugger.Session`. `Start`, `Continue`, `StepIn`, `StepOver`, and `StepOut`
 return canonical debugger events at the next stop or completion. The private
-adapter serializes these commands and consumes Wire watches internally.
+adapter serializes these commands and uses `RunCommand` streams. Start retains
+its stream after the first stop so its context owns the hosted execution
+lifetime. Each resume has its own caller context. There is no fallback to
+legacy asynchronous command RPCs.
 
-`Pause`, breakpoint operations, `Frames`, `Locals`, `FrameLocals`, `Variables`,
-`Evaluate`, and `EvaluateFrame` retain their canonical signatures. Operations
-without a caller context use the debugger's lifetime context; closing the
-debugger cancels its pending work. Cancelling a resume command closes the
-debugger and joins any cleanup error with caller cancellation.
+`Pause`, breakpoint operations, enumeration, inspection, and evaluation all
+require a non-nil context. Cancellation is checked before and after admission
+and reaches the corresponding hosted operation. Request cancellation does not
+release the debugger. Explicit Close cancels and settles commands, closes the
+hosted debugger, captures final breakpoint data or its enumeration error, and
+releases the transport handle. Later `Breakpoints(ctx)` reads detached retained
+data or returns that error while still checking the context.
+
+`ReplaceBreakpoints` makes one atomic hosted call, including while running.
+It preserves request order, duplicates, stable IDs, unresolved entries, and
+default-source selection. Limits count the resulting set across all sources.
+An ambiguous lost mutation reply never triggers a rollback. `SetBreakpoint`
+and `SetBreakpointAt` remain distinct, as do `Locals`/`FrameLocals` and
+`Evaluate`/`EvaluateFrame`.
 
 Frame slice order defines the zero-based index for frame-local and evaluation
 operations. Breakpoint IDs and value references remain public because they are
@@ -103,7 +121,9 @@ interpreted as local paths.
 Breakpoints preserve requested/resolved locations, spans, binding mode,
 point/function IDs, and bound state. Events preserve stop reason, depth, hit
 breakpoint IDs, output, and failure. Runtime-error stops carry the failure in
-`debugger.Event.Error`; failed debugger commands return an error. Completion
+`debugger.Event.Error`; command errors are separate and may accompany an event
+and completion output. Cancellation and deadline errors retain `errors.Is`
+identity. Function IDs include `debugger.NoFunction` (-1). Completion
 and termination map to their canonical reasons, without a second event API.
 
 ## Allocation and cancellation
@@ -116,7 +136,7 @@ returning the caller's cancellation. Execution waiting uses the original caller
 context; releasing the temporary Execution also cancels unfinished work.
 
 A lost reply or a reply without a usable resource ID cannot be reclaimed by ID.
-The adapter immediately closes the narrowest known owner: a Plan for an unknown
+The adapter explicitly invokes cascading transport release on the narrowest known owner: a Plan for an unknown
 normal or debug Session, a Session for its unknown Execution, or the logical
 Runtime for a root Plan or direct Runtime Execution. Successful narrow cleanup
 preserves resources outside that subtree. Confirmed creation rejections and
@@ -151,11 +171,22 @@ Concurrent and repeated callers observe the retained release result; a caller
 whose wait expires does not abandon committed cleanup. Failed releases remain
 observable rather than being hidden or automatically retried.
 
-Closing a runtime or plan owns descendant cleanup. Descendant operations are
-rejected as soon as ancestor closure begins. A descendant closed after ancestor
-cleanup begins observes the ancestor's retained result instead of issuing a
-duplicate release. Close children before parents when each direct cleanup
-result matters; normal defer ordering provides this.
+`Plan.Close` gates new constructors, settles admitted constructors without
+canceling them, and closes the hosted plan once through `ClosePlan`. Published
+sessions and debuggers remain usable and closeable. The transport plan remains
+retained until the last child finishes, then `ReleasePlan` removes it.
+
+`Runtime.Close` immediately rejects new root calls while preserving admitted
+calls and descendants. Its logical connection is released after the last
+retained operation or plan finishes. If teardown was deferred, its later error
+belongs to the operation or child close that performs the final release; it
+never changes an earlier runtime-close result. The borrowed physical transport
+and hosted runtime stay open.
+
+`ReleasePlan`, `CloseConnection`, disconnect, and lost-allocation recovery
+retain cascading semantics. Child admission ignores ordinary ancestor API
+closure and observes transport release instead. Callers must close all children;
+closing a parent is no longer a substitute for their cleanup.
 
 Private watches are tied to operation and logical connection contexts. An
 existing watch may receive the terminal event during resource closure; new
@@ -193,5 +224,5 @@ compatibility shims.
 
 Use canonical runtime/plan/session operations, cancellation contexts, and
 debugger events. The versioned protobuf services and shared domain packages
-remain unchanged; callers implementing protocol tooling may still use the
-generated bindings directly.
+are extended additively for alpha.19; callers implementing protocol tooling may
+still use the generated bindings directly. See the [contract audit](uapi-audit.md).

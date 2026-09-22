@@ -517,6 +517,94 @@ func (*ReleasePlanResponse) Descriptor() ([]byte, []int) {
 	return file_ferret_wire_v1_plan_proto_rawDescGZIP(), []int{8}
 }
 
+type ClosePlanRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ConnectionId  *ConnectionId          `protobuf:"bytes,1,opt,name=connection_id,json=connectionId,proto3" json:"connection_id,omitempty"`
+	PlanId        *PlanId                `protobuf:"bytes,2,opt,name=plan_id,json=planId,proto3" json:"plan_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ClosePlanRequest) Reset() {
+	*x = ClosePlanRequest{}
+	mi := &file_ferret_wire_v1_plan_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ClosePlanRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ClosePlanRequest) ProtoMessage() {}
+
+func (x *ClosePlanRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_ferret_wire_v1_plan_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ClosePlanRequest.ProtoReflect.Descriptor instead.
+func (*ClosePlanRequest) Descriptor() ([]byte, []int) {
+	return file_ferret_wire_v1_plan_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *ClosePlanRequest) GetConnectionId() *ConnectionId {
+	if x != nil {
+		return x.ConnectionId
+	}
+	return nil
+}
+
+func (x *ClosePlanRequest) GetPlanId() *PlanId {
+	if x != nil {
+		return x.PlanId
+	}
+	return nil
+}
+
+type ClosePlanResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ClosePlanResponse) Reset() {
+	*x = ClosePlanResponse{}
+	mi := &file_ferret_wire_v1_plan_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ClosePlanResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ClosePlanResponse) ProtoMessage() {}
+
+func (x *ClosePlanResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_ferret_wire_v1_plan_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ClosePlanResponse.ProtoReflect.Descriptor instead.
+func (*ClosePlanResponse) Descriptor() ([]byte, []int) {
+	return file_ferret_wire_v1_plan_proto_rawDescGZIP(), []int{10}
+}
+
 var File_ferret_wire_v1_plan_proto protoreflect.FileDescriptor
 
 const file_ferret_wire_v1_plan_proto_rawDesc = "" +
@@ -548,14 +636,19 @@ const file_ferret_wire_v1_plan_proto_rawDesc = "" +
 	"\x12ReleasePlanRequest\x12A\n" +
 	"\rconnection_id\x18\x01 \x01(\v2\x1c.ferret.wire.v1.ConnectionIdR\fconnectionId\x12/\n" +
 	"\aplan_id\x18\x02 \x01(\v2\x16.ferret.wire.v1.PlanIdR\x06planId\"\x15\n" +
-	"\x13ReleasePlanResponse*\xb2\x01\n" +
+	"\x13ReleasePlanResponse\"\x86\x01\n" +
+	"\x10ClosePlanRequest\x12A\n" +
+	"\rconnection_id\x18\x01 \x01(\v2\x1c.ferret.wire.v1.ConnectionIdR\fconnectionId\x12/\n" +
+	"\aplan_id\x18\x02 \x01(\v2\x16.ferret.wire.v1.PlanIdR\x06planId\"\x13\n" +
+	"\x11ClosePlanResponse*\xb2\x01\n" +
 	"\x11OptimizationLevel\x12\"\n" +
 	"\x1eOPTIMIZATION_LEVEL_UNSPECIFIED\x10\x00\x12\x1b\n" +
 	"\x17OPTIMIZATION_LEVEL_NONE\x10\x01\x12\x1c\n" +
 	"\x18OPTIMIZATION_LEVEL_BASIC\x10\x02\x12\x1b\n" +
 	"\x17OPTIMIZATION_LEVEL_FULL\x10\x03\x12!\n" +
-	"\x1dOPTIMIZATION_LEVEL_AGGRESSIVE\x10\x042\x8c\x02\n" +
-	"\vPlanService\x12J\n" +
+	"\x1dOPTIMIZATION_LEVEL_AGGRESSIVE\x10\x042\xde\x02\n" +
+	"\vPlanService\x12P\n" +
+	"\tClosePlan\x12 .ferret.wire.v1.ClosePlanRequest\x1a!.ferret.wire.v1.ClosePlanResponse\x12J\n" +
 	"\aCompile\x12\x1e.ferret.wire.v1.CompileRequest\x1a\x1f.ferret.wire.v1.CompileResponse\x12Y\n" +
 	"\fCompileDebug\x12#.ferret.wire.v1.CompileDebugRequest\x1a$.ferret.wire.v1.CompileDebugResponse\x12V\n" +
 	"\vReleasePlan\x12\".ferret.wire.v1.ReleasePlanRequest\x1a#.ferret.wire.v1.ReleasePlanResponseB6Z4github.com/MontFerret/wire/gen/ferret/wire/v1;wirev1b\x06proto3"
@@ -573,7 +666,7 @@ func file_ferret_wire_v1_plan_proto_rawDescGZIP() []byte {
 }
 
 var file_ferret_wire_v1_plan_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_ferret_wire_v1_plan_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_ferret_wire_v1_plan_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
 var file_ferret_wire_v1_plan_proto_goTypes = []any{
 	(OptimizationLevel)(0),       // 0: ferret.wire.v1.OptimizationLevel
 	(*PlanId)(nil),               // 1: ferret.wire.v1.PlanId
@@ -585,33 +678,39 @@ var file_ferret_wire_v1_plan_proto_goTypes = []any{
 	(*CompileDebugResponse)(nil), // 7: ferret.wire.v1.CompileDebugResponse
 	(*ReleasePlanRequest)(nil),   // 8: ferret.wire.v1.ReleasePlanRequest
 	(*ReleasePlanResponse)(nil),  // 9: ferret.wire.v1.ReleasePlanResponse
-	(*ConnectionId)(nil),         // 10: ferret.wire.v1.ConnectionId
-	(*Source)(nil),               // 11: ferret.wire.v1.Source
+	(*ClosePlanRequest)(nil),     // 10: ferret.wire.v1.ClosePlanRequest
+	(*ClosePlanResponse)(nil),    // 11: ferret.wire.v1.ClosePlanResponse
+	(*ConnectionId)(nil),         // 12: ferret.wire.v1.ConnectionId
+	(*Source)(nil),               // 13: ferret.wire.v1.Source
 }
 var file_ferret_wire_v1_plan_proto_depIdxs = []int32{
 	0,  // 0: ferret.wire.v1.CompileOptions.optimization_level:type_name -> ferret.wire.v1.OptimizationLevel
 	1,  // 1: ferret.wire.v1.Plan.id:type_name -> ferret.wire.v1.PlanId
-	10, // 2: ferret.wire.v1.CompileRequest.connection_id:type_name -> ferret.wire.v1.ConnectionId
-	11, // 3: ferret.wire.v1.CompileRequest.source:type_name -> ferret.wire.v1.Source
+	12, // 2: ferret.wire.v1.CompileRequest.connection_id:type_name -> ferret.wire.v1.ConnectionId
+	13, // 3: ferret.wire.v1.CompileRequest.source:type_name -> ferret.wire.v1.Source
 	2,  // 4: ferret.wire.v1.CompileRequest.options:type_name -> ferret.wire.v1.CompileOptions
 	3,  // 5: ferret.wire.v1.CompileResponse.plan:type_name -> ferret.wire.v1.Plan
-	10, // 6: ferret.wire.v1.CompileDebugRequest.connection_id:type_name -> ferret.wire.v1.ConnectionId
-	11, // 7: ferret.wire.v1.CompileDebugRequest.source:type_name -> ferret.wire.v1.Source
+	12, // 6: ferret.wire.v1.CompileDebugRequest.connection_id:type_name -> ferret.wire.v1.ConnectionId
+	13, // 7: ferret.wire.v1.CompileDebugRequest.source:type_name -> ferret.wire.v1.Source
 	2,  // 8: ferret.wire.v1.CompileDebugRequest.options:type_name -> ferret.wire.v1.CompileOptions
 	3,  // 9: ferret.wire.v1.CompileDebugResponse.plan:type_name -> ferret.wire.v1.Plan
-	10, // 10: ferret.wire.v1.ReleasePlanRequest.connection_id:type_name -> ferret.wire.v1.ConnectionId
+	12, // 10: ferret.wire.v1.ReleasePlanRequest.connection_id:type_name -> ferret.wire.v1.ConnectionId
 	1,  // 11: ferret.wire.v1.ReleasePlanRequest.plan_id:type_name -> ferret.wire.v1.PlanId
-	4,  // 12: ferret.wire.v1.PlanService.Compile:input_type -> ferret.wire.v1.CompileRequest
-	6,  // 13: ferret.wire.v1.PlanService.CompileDebug:input_type -> ferret.wire.v1.CompileDebugRequest
-	8,  // 14: ferret.wire.v1.PlanService.ReleasePlan:input_type -> ferret.wire.v1.ReleasePlanRequest
-	5,  // 15: ferret.wire.v1.PlanService.Compile:output_type -> ferret.wire.v1.CompileResponse
-	7,  // 16: ferret.wire.v1.PlanService.CompileDebug:output_type -> ferret.wire.v1.CompileDebugResponse
-	9,  // 17: ferret.wire.v1.PlanService.ReleasePlan:output_type -> ferret.wire.v1.ReleasePlanResponse
-	15, // [15:18] is the sub-list for method output_type
-	12, // [12:15] is the sub-list for method input_type
-	12, // [12:12] is the sub-list for extension type_name
-	12, // [12:12] is the sub-list for extension extendee
-	0,  // [0:12] is the sub-list for field type_name
+	12, // 12: ferret.wire.v1.ClosePlanRequest.connection_id:type_name -> ferret.wire.v1.ConnectionId
+	1,  // 13: ferret.wire.v1.ClosePlanRequest.plan_id:type_name -> ferret.wire.v1.PlanId
+	10, // 14: ferret.wire.v1.PlanService.ClosePlan:input_type -> ferret.wire.v1.ClosePlanRequest
+	4,  // 15: ferret.wire.v1.PlanService.Compile:input_type -> ferret.wire.v1.CompileRequest
+	6,  // 16: ferret.wire.v1.PlanService.CompileDebug:input_type -> ferret.wire.v1.CompileDebugRequest
+	8,  // 17: ferret.wire.v1.PlanService.ReleasePlan:input_type -> ferret.wire.v1.ReleasePlanRequest
+	11, // 18: ferret.wire.v1.PlanService.ClosePlan:output_type -> ferret.wire.v1.ClosePlanResponse
+	5,  // 19: ferret.wire.v1.PlanService.Compile:output_type -> ferret.wire.v1.CompileResponse
+	7,  // 20: ferret.wire.v1.PlanService.CompileDebug:output_type -> ferret.wire.v1.CompileDebugResponse
+	9,  // 21: ferret.wire.v1.PlanService.ReleasePlan:output_type -> ferret.wire.v1.ReleasePlanResponse
+	18, // [18:22] is the sub-list for method output_type
+	14, // [14:18] is the sub-list for method input_type
+	14, // [14:14] is the sub-list for extension type_name
+	14, // [14:14] is the sub-list for extension extendee
+	0,  // [0:14] is the sub-list for field type_name
 }
 
 func init() { file_ferret_wire_v1_plan_proto_init() }
@@ -627,7 +726,7 @@ func file_ferret_wire_v1_plan_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_ferret_wire_v1_plan_proto_rawDesc), len(file_ferret_wire_v1_plan_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   9,
+			NumMessages:   11,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

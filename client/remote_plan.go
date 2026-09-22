@@ -14,12 +14,12 @@ type remotePlan struct {
 
 var _ api.Plan = (*remotePlan)(nil)
 
-func (p *remotePlan) Params() []string {
+func (p *remotePlan) Params() ([]string, error) {
 	if p == nil || p.plan == nil {
-		return nil
+		return nil, ErrClosed
 	}
 
-	return p.plan.Parameters()
+	return p.plan.Parameters(), nil
 }
 
 func (p *remotePlan) NewSession(ctx context.Context, options ...api.SessionOption) (api.Session, error) {
@@ -27,7 +27,7 @@ func (p *remotePlan) NewSession(ctx context.Context, options ...api.SessionOptio
 		return nil, ErrClosed
 	}
 
-	if err := ctx.Err(); err != nil {
+	if err := runtimeContextError(ctx); err != nil {
 		return nil, err
 	}
 
@@ -65,7 +65,7 @@ func (p *remotePlan) NewDebugSession(
 		return nil, ErrClosed
 	}
 
-	if err := ctx.Err(); err != nil {
+	if err := runtimeContextError(ctx); err != nil {
 		return nil, err
 	}
 
@@ -100,5 +100,5 @@ func (p *remotePlan) Close() error {
 		return ErrClosed
 	}
 
-	return boundedCleanup(context.Background(), convenienceCleanupTimeout, p.plan.Close)
+	return boundedCleanup(context.Background(), convenienceCleanupTimeout, p.plan.closeAPI)
 }

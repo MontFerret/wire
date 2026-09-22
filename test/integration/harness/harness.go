@@ -5,6 +5,7 @@ package harness
 import (
 	"context"
 	"errors"
+	"io"
 	"net"
 	"sync"
 	"testing"
@@ -45,6 +46,7 @@ type (
 		serveResult     chan error
 		mu              sync.Mutex
 		runtimes        []api.Runtime
+		resources       []io.Closer
 		expected        []error
 		transportClosed bool
 		stopped         bool
@@ -224,7 +226,7 @@ func (h *Harness) expectedError(err error) bool {
 	defer h.mu.Unlock()
 
 	for _, expected := range h.expected {
-		if errors.Is(err, expected) {
+		if errors.Is(err, expected) || errors.Is(expected, err) {
 			return true
 		}
 	}
@@ -239,6 +241,12 @@ func (h *Harness) expectedError(err error) bool {
 func (h *Harness) cleanup() {
 	if h.faults != nil {
 		h.faults.reset()
+	}
+
+	for i := len(h.resources) - 1; i >= 0; i-- {
+		if err := h.resources[i].Close(); !h.expectedError(err) {
+			h.t.Errorf("close caller-owned resource: %v", err)
+		}
 	}
 
 	for i := len(h.runtimes) - 1; i >= 0; i-- {
@@ -279,4 +287,16 @@ func (h *Harness) cleanup() {
 	if h.spy != nil {
 		h.spy.Recorder().AssertClosed(h.t)
 	}
+}
+
+// Own registers caller-owned descendants for reverse-order fixture cleanup.
+// Tests still assert exact cleanup counts before fixture teardown when relevant.
+func (h *Harness) Own(resource io.Closer) {
+	if resource == nil {
+		return
+	}
+
+	h.mu.Lock()
+	h.resources = append(h.resources, resource)
+	h.mu.Unlock()
 }

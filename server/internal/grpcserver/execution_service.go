@@ -25,7 +25,7 @@ func (s *ExecutionService) Execute(ctx context.Context, request *wirev1.ExecuteR
 
 	defer cancel()
 
-	options, err := decodeSessionOptions(request.GetParameters(), request.GetOutputContentType())
+	options, err := decodeSessionOptions(request.GetParameters(), request.GetOutputContentType(), request.GetOutputContentTypeSet(), request.FsRoot)
 	if err != nil {
 		return nil, rpcError(err)
 	}

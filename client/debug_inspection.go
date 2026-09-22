@@ -17,21 +17,27 @@ func (d *debugSessionHandle) SetBreakpointAt(
 	location source.Location,
 	options debugger.BreakpointOptions,
 ) (debugger.Breakpoint, error) {
+	return d.setBreakpoint(ctx, location, &options)
+}
+
+func (d *debugSessionHandle) setBreakpoint(ctx context.Context, location source.Location, options *debugger.BreakpointOptions) (debugger.Breakpoint, error) {
 	if err := d.checkOpen(); err != nil {
 		return debugger.Breakpoint{}, err
-	}
-
-	if location.SourceName == "" {
-		return debugger.Breakpoint{}, errors.New("breakpoint source name is required")
 	}
 
 	if location.Line <= 0 || location.Column < 0 {
 		return debugger.Breakpoint{}, errors.New("breakpoint has an invalid line or column")
 	}
 
-	bindingMode, err := breakpointBindingModeToProto(options.BindingMode)
-	if err != nil {
-		return debugger.Breakpoint{}, err
+	var configured *wirev1.BreakpointOptions
+
+	if options != nil {
+		bindingMode, err := breakpointBindingModeToProto(options.BindingMode)
+		if err != nil {
+			return debugger.Breakpoint{}, err
+		}
+
+		configured = &wirev1.BreakpointOptions{BindingMode: bindingMode}
 	}
 
 	response, err := d.client.debugClient.SetBreakpoint(ctx, &wirev1.SetBreakpointRequest{
@@ -43,7 +49,7 @@ func (d *debugSessionHandle) SetBreakpointAt(
 				Line: int64(location.Line), Column: int64(location.Column),
 			},
 		},
-		Options: &wirev1.BreakpointOptions{BindingMode: bindingMode},
+		Options: configured,
 	})
 	if err != nil {
 		return debugger.Breakpoint{}, decodeError(err)
@@ -232,7 +238,7 @@ func convertBreakpoint(value *wirev1.Breakpoint) (debugger.Breakpoint, error) {
 		return debugger.Breakpoint{}, err
 	}
 
-	functionID, err := debuggerIDFromProto[debugger.FunctionID](value.GetFunctionId(), "breakpoint function ID", true)
+	functionID, err := convertFunctionID(value.GetFunctionId(), value.SignedFunctionId)
 	if err != nil {
 		return debugger.Breakpoint{}, err
 	}
@@ -269,7 +275,7 @@ func convertFrame(value *wirev1.Frame, index int) (debugger.Frame, error) {
 		return debugger.Frame{}, err
 	}
 
-	functionID, err := debuggerIDFromProto[debugger.FunctionID](value.GetFunctionId(), "frame function ID", true)
+	functionID, err := convertFunctionID(value.GetFunctionId(), value.SignedFunctionId)
 	if err != nil {
 		return debugger.Frame{}, err
 	}
@@ -325,4 +331,92 @@ func convertVariable(value *wirev1.Variable) (debugger.Variable, error) {
 		Mutable: value.GetMutable(),
 		Param:   value.GetParameter(),
 	}, nil
+}
+
+func convertFunctionID(legacy uint64, value *int64) (debugger.FunctionID, error) {
+	if value == nil {
+		return debuggerIDFromProto[debugger.FunctionID](legacy, "function ID", true)
+	}
+
+	if *value == int64(debugger.NoFunction) {
+		return debugger.NoFunction, nil
+	}
+
+	result, err := debuggerIntFromProto(*value, "function ID", true)
+
+	return debugger.FunctionID(result), err
+}
+
+func (d *debugSessionHandle) breakpoints(ctx context.Context) ([]debugger.Breakpoint, error) {
+	response, err := d.client.debugClient.Breakpoints(ctx, &wirev1.BreakpointsRequest{ConnectionId: d.client.connectionProto(), DebugSessionId: &wirev1.DebugSessionId{Value: d.id}})
+	if err != nil {
+		return nil, decodeError(err)
+	}
+
+	return convertBreakpoints(response.GetBreakpoints())
+}
+
+func (d *debugSessionHandle) replaceBreakpoints(ctx context.Context, sourceName string, requests []debugger.BreakpointRequest) ([]debugger.Breakpoint, error) {
+	converted := make([]*wirev1.BreakpointRequest, len(requests))
+	for i, request := range requests {
+		if request.Position.Line <= 0 || request.Position.Column < 0 {
+			return nil, errors.New("invalid breakpoint position")
+		}
+
+		mode, err := breakpointBindingModeToProto(request.Options.BindingMode)
+		if err != nil {
+			return nil, err
+		}
+
+		converted[i] = &wirev1.BreakpointRequest{Position: &wirev1.Position{Line: int64(request.Position.Line), Column: int64(request.Position.Column)}, Options: &wirev1.BreakpointOptions{BindingMode: mode}}
+	}
+
+	response, err := d.client.debugClient.ReplaceBreakpoints(ctx, &wirev1.ReplaceBreakpointsRequest{ConnectionId: d.client.connectionProto(), DebugSessionId: &wirev1.DebugSessionId{Value: d.id}, SourceName: sourceName, Requests: converted})
+	if err != nil {
+		return nil, decodeError(err)
+	}
+
+	return convertBreakpoints(response.GetBreakpoints())
+}
+
+func convertBreakpoints(values []*wirev1.Breakpoint) ([]debugger.Breakpoint, error) {
+	result := make([]debugger.Breakpoint, len(values))
+	for i, value := range values {
+		converted, err := convertBreakpoint(value)
+		if err != nil {
+			return nil, err
+		}
+
+		result[i] = converted
+	}
+
+	return result, nil
+}
+
+func (d *debugSessionHandle) locals(ctx context.Context) ([]debugger.Variable, error) {
+	response, err := d.client.debugClient.Locals(ctx, &wirev1.LocalsRequest{ConnectionId: d.client.connectionProto(), DebugSessionId: &wirev1.DebugSessionId{Value: d.id}})
+	if err != nil {
+		return nil, decodeError(err)
+	}
+
+	result := make([]debugger.Variable, len(response.GetVariables()))
+	for i, value := range response.GetVariables() {
+		converted, err := convertVariable(value)
+		if err != nil {
+			return nil, err
+		}
+
+		result[i] = converted
+	}
+
+	return result, nil
+}
+
+func (d *debugSessionHandle) evaluate(ctx context.Context, expression string) (debugger.Value, error) {
+	response, err := d.client.debugClient.Evaluate(ctx, &wirev1.EvaluateRequest{ConnectionId: d.client.connectionProto(), DebugSessionId: &wirev1.DebugSessionId{Value: d.id}, Expression: expression})
+	if err != nil {
+		return debugger.Value{}, decodeError(err)
+	}
+
+	return convertDebugValue(response.GetValue())
 }

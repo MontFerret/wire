@@ -9,8 +9,8 @@ import (
 
 func BenchmarkCancelExecution(b *testing.B) {
 	plan := &spyPlan{newSession: func(context.Context, sessionOptions) (api.Session, error) {
-		return &spySession{run: func(context.Context) (api.Output, error) {
-			return api.Output{}, nil
+		return &spySession{run: func(context.Context) (*api.Output, error) {
+			return &api.Output{}, nil
 		}}, nil
 	}}
 
@@ -64,8 +64,8 @@ func BenchmarkCancelExecution(b *testing.B) {
 
 func BenchmarkRunDurableSession(b *testing.B) {
 	plan := &spyPlan{newSession: func(context.Context, sessionOptions) (api.Session, error) {
-		return &spySession{run: func(context.Context) (api.Output, error) {
-			return api.Output{ContentType: "text/plain", Content: []byte("ok")}, nil
+		return &spySession{run: func(context.Context) (*api.Output, error) {
+			return &api.Output{ContentType: "text/plain", Content: []byte("ok")}, nil
 		}}, nil
 	}}
 

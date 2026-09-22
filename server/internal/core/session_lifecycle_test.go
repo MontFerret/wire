@@ -13,8 +13,8 @@ import (
 )
 
 func TestDurableSessionRunsSequentiallyOnOneHostedSession(t *testing.T) {
-	runtimeSession := &spySession{run: func(context.Context) (api.Output, error) {
-		return api.Output{ContentType: "application/json", Content: []byte(`{"ok":true}`)}, nil
+	runtimeSession := &spySession{run: func(context.Context) (*api.Output, error) {
+		return &api.Output{ContentType: "application/json", Content: []byte(`{"ok":true}`)}, nil
 	}}
 	plan := &spyPlan{
 		params: []string{"input"},
@@ -86,11 +86,11 @@ func TestDurableSessionRunsSequentiallyOnOneHostedSession(t *testing.T) {
 
 func TestDurableSessionRejectsOverlappingRunsUntilExecutionRelease(t *testing.T) {
 	started := make(chan struct{})
-	runtimeSession := &spySession{run: func(ctx context.Context) (api.Output, error) {
+	runtimeSession := &spySession{run: func(ctx context.Context) (*api.Output, error) {
 		close(started)
 		<-ctx.Done()
 
-		return api.Output{}, ctx.Err()
+		return nil, ctx.Err()
 	}}
 	connection, _, created := openTestSession(t, runtimeSession)
 
@@ -124,14 +124,14 @@ func TestDurableSessionReleaseCancelsRunBeforeExactlyOnceClose(t *testing.T) {
 	var orderMu sync.Mutex
 	var order []string
 	runtimeSession := &spySession{
-		run: func(ctx context.Context) (api.Output, error) {
+		run: func(ctx context.Context) (*api.Output, error) {
 			close(started)
 			<-ctx.Done()
 			orderMu.Lock()
 			order = append(order, "run")
 			orderMu.Unlock()
 
-			return api.Output{}, ctx.Err()
+			return nil, ctx.Err()
 		},
 		close: func() error {
 			orderMu.Lock()
@@ -309,7 +309,7 @@ func TestSessionCreationFailureDoesNotLeakLimit(t *testing.T) {
 }
 
 func TestDurableSessionIsNotReusedAfterRuntimePanic(t *testing.T) {
-	runtimeSession := &spySession{run: func(context.Context) (api.Output, error) {
+	runtimeSession := &spySession{run: func(context.Context) (*api.Output, error) {
 		panic("runtime defect")
 	}}
 	connection, _, created := openTestSession(t, runtimeSession)

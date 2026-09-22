@@ -52,12 +52,12 @@ func (s *Session) Execute(ctx context.Context) (*Execution, error) {
 	}
 
 	r := s.plan.store
-	if err := r.beginCreation(executionResource, s.plan); err != nil {
+	if err := r.beginCreation(executionResource, nil); err != nil {
 		return nil, err
 	}
 
 	committed := false
-	defer func() { r.finishCreation(executionResource, s.plan, committed) }()
+	defer func() { r.finishCreation(executionResource, nil, committed) }()
 
 	r.mu.Lock()
 	if r.sessions[s.id] != s || s.release.Started() {
@@ -99,8 +99,8 @@ func (s *Session) Execute(ctx context.Context) (*Execution, error) {
 	return created, nil
 }
 
-func (s *Session) run(ctx context.Context) (api.Output, error) {
-	output, err := panicboundary.Call(func() (api.Output, error) {
+func (s *Session) run(ctx context.Context) (*api.Output, error) {
+	output, err := panicboundary.Call(func() (*api.Output, error) {
 		return s.session.Run(ctx)
 	})
 

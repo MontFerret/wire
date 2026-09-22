@@ -10,13 +10,21 @@ import "ferret/wire/v1/value.proto";
 option go_package = "github.com/MontFerret/wire/gen/ferret/wire/v1;wirev1";
 
 // DebugService exposes connection-owned debugger sessions without changing
-// the DebugSession -> DebugController -> Unified API debugger ownership chain.
+// the direct DebugSession -> hosted Universal API debugger ownership chain.
 service DebugService {
+  // RunCommand carries caller cancellation through command completion. START
+  // keeps its stream open after the first result until the execution lifetime ends.
+  rpc RunCommand(RunCommandRequest) returns (stream RunCommandResponse);
+  // Replacement is one atomic hosted operation, including during execution.
+  rpc ReplaceBreakpoints(ReplaceBreakpointsRequest) returns (ReplaceBreakpointsResponse);
+  rpc Breakpoints(BreakpointsRequest) returns (BreakpointsResponse);
+  rpc Locals(LocalsRequest) returns (LocalsResponse);
+  rpc Evaluate(EvaluateRequest) returns (EvaluateResponse);
   // CreateDebugSession creates a CREATED resource from a reusable debug Plan.
   rpc CreateDebugSession(CreateDebugSessionRequest) returns (CreateDebugSessionResponse);
   // Start begins execution once; later resumes use Continue or a step command.
   rpc Start(StartRequest) returns (StartResponse);
-  // SetBreakpoint is valid only while the session is CREATED or STOPPED.
+  // SetBreakpoint is valid in CREATED, RUNNING, and STOPPED states.
   rpc SetBreakpoint(SetBreakpointRequest) returns (SetBreakpointResponse);
   rpc DeleteBreakpoint(DeleteBreakpointRequest) returns (DeleteBreakpointResponse);
   // Continue publishes RUNNING before invoking the hosted debugger.
@@ -99,13 +107,15 @@ message DebugSession {
   DebugStopReason stop_reason = 4;
   // hit_breakpoint_ids is populated only for a breakpoint stop.
   repeated uint64 hit_breakpoint_ids = 6;
-  // output is present only for COMPLETED sessions.
+  // output preserves any encoded result returned by the hosted command.
   Output output = 7;
   // failure is present for failed sessions and may accompany a runtime-error stop.
   Failure failure = 8;
   // location and depth describe the current stopped state.
   Range location = 9;
   int64 depth = 10;
+  // The canonical event and command error are independent results.
+  DebugCommandResult command_result = 11;
 }
 
 message Breakpoint {
@@ -121,6 +131,8 @@ message Breakpoint {
   uint64 function_id = 11;
   BreakpointBindingMode binding_mode = 12;
   bool bound = 13;
+  // Preferred signed representation; -1 means the top-level program body.
+  optional int64 signed_function_id = 14;
 }
 
 message DebugValue {
@@ -146,6 +158,7 @@ message Frame {
   string name = 2;
   uint64 function_id = 4;
   Location location = 5;
+  optional int64 signed_function_id = 6;
 }
 
 message CreateDebugSessionRequest {
@@ -153,6 +166,10 @@ message CreateDebugSessionRequest {
   PlanId plan_id = 2;
   Parameters parameters = 3;
   string output_content_type = 4;
+  // Presence distinguishes an omitted root from an explicitly empty root.
+  optional string fs_root = 5;
+  // Explicit empty content types are forwarded to the hosted runtime.
+  bool output_content_type_set = 6;
 }
 
 message CreateDebugSessionResponse {
@@ -329,4 +346,94 @@ message WatchDebugRequest {
   // Both IDs address a non-owning subscription; cancelling it does not terminate the session.
   ConnectionId connection_id = 1;
   DebugSessionId debug_session_id = 2;
+}
+
+// DebugCommand selects exactly one canonical hosted execution operation.
+enum DebugCommand {
+  DEBUG_COMMAND_UNSPECIFIED = 0;
+  DEBUG_COMMAND_START = 1;
+  DEBUG_COMMAND_CONTINUE = 2;
+  DEBUG_COMMAND_STEP_IN = 3;
+  DEBUG_COMMAND_STEP_OVER = 4;
+  DEBUG_COMMAND_STEP_OUT = 5;
+}
+
+// ContextFailure preserves portable cancellation identity independently of failure details.
+enum ContextFailure {
+  CONTEXT_FAILURE_UNSPECIFIED = 0;
+  CONTEXT_FAILURE_CANCELLED = 1;
+  CONTEXT_FAILURE_DEADLINE_EXCEEDED = 2;
+}
+
+// DebugResultEvent preserves the canonical event independently of command failure.
+message DebugResultEvent {
+  // reason is a canonical Universal API debugger reason, including completed/terminated.
+  string reason = 1;
+  Range location = 2;
+  int64 depth = 3;
+  repeated uint64 hit_breakpoint_ids = 4;
+  Output output = 5;
+  Failure error = 6;
+  ContextFailure context_failure = 7;
+}
+
+message DebugCommandResult {
+  DebugResultEvent event = 1;
+  Failure error = 2;
+  ContextFailure context_failure = 3;
+}
+
+message RunCommandRequest {
+  ConnectionId connection_id = 1;
+  DebugSessionId debug_session_id = 2;
+  DebugCommand command = 3;
+}
+
+message RunCommandResponse {
+  DebugCommandResult result = 1;
+}
+
+message BreakpointRequest {
+  Position position = 1;
+  BreakpointOptions options = 2;
+}
+
+message ReplaceBreakpointsRequest {
+  ConnectionId connection_id = 1;
+  DebugSessionId debug_session_id = 2;
+  // Empty selects the launched source; an empty requests list clears the set.
+  string source_name = 3;
+  repeated BreakpointRequest requests = 4;
+}
+
+message ReplaceBreakpointsResponse {
+  repeated Breakpoint breakpoints = 1;
+}
+
+message BreakpointsRequest {
+  ConnectionId connection_id = 1;
+  DebugSessionId debug_session_id = 2;
+}
+
+message BreakpointsResponse {
+  repeated Breakpoint breakpoints = 1;
+}
+
+message LocalsRequest {
+  ConnectionId connection_id = 1;
+  DebugSessionId debug_session_id = 2;
+}
+
+message LocalsResponse {
+  repeated Variable variables = 1;
+}
+
+message EvaluateRequest {
+  ConnectionId connection_id = 1;
+  DebugSessionId debug_session_id = 2;
+  string expression = 3;
+}
+
+message EvaluateResponse {
+  DebugValue value = 1;
 }

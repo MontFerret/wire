@@ -55,7 +55,7 @@ func TestDebugSessionContainsPanicsAtEveryHostedMethod(t *testing.T) {
 			case "set-breakpoint":
 				_, err = session.SetBreakpoint(ctx, source.Location{SourceName: "query", Position: source.Position{Line: 1}})
 			case "delete-breakpoint":
-				session.breakpoints.add(debugger.Breakpoint{ID: 1})
+				hosted.breakpoints = map[debugger.BreakpointID]debugger.Breakpoint{1: {ID: 1}}
 				err = session.DeleteBreakpoint(ctx, 1)
 			case "close":
 				err = session.Close(ctx)

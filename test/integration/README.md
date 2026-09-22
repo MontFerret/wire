@@ -8,7 +8,7 @@ api.Runtime caller → wire/client → protobuf and real gRPC over bufconn
 ```
 
 The suite depends on the API version pinned in the root `go.mod` (currently
-`v1.0.0-alpha.11`). It imports neither native Ferret nor Wire internal packages.
+`v1.0.0-alpha.19`). It imports neither native Ferret nor Wire internal packages.
 Existing component, conversion, low-level facade/protocol tests, and benchmarks
 remain beside their owning packages. The former server-package Universal API
 adapter, allocation, cancellation, and transport tests are consolidated here.
@@ -41,7 +41,7 @@ received protobuf payloads. Tests never call generated clients or handlers.
 
 `OpenRuntime` creates another logical client on the same physical connection.
 `Shutdown` and `CloseTransport` model distinct lifetime failures. Cleanup removes
-faults, closes logical clients, and asserts hosted resources finished closing
+faults, closes caller-owned resources registered with `h.Own`, closes logical clients, and asserts hosted resources finished closing
 exactly once before server shutdown could hide a leak. It then shuts down the
 server, closes owned transport and listener resources, and waits for serving to
 finish. Expected retained cleanup errors must be registered
@@ -62,9 +62,9 @@ names; each linked file contains the complete scenario and assertions.
 | `api.Plan` | `Params` | [TestCompileRoundTrip](plan_test.go) |
 | | `NewSession` | [TestReusablePlanAndDurableSessions](plan_test.go) |
 | | `NewDebugSession` | [TestDebuggerRoundTrip](debugger_test.go) |
-| | `Close` | [TestReusablePlanAndDurableSessions](plan_test.go), [TestRecursiveCloseReclaimsActiveDescendants](lifecycle_test.go) |
+| | `Close` | [TestReusablePlanAndDurableSessions](plan_test.go), [TestParentClosePreservesChildrenAndActiveWork](lifecycle_test.go) |
 | `api.Session` | `Run` | [TestReusablePlanAndDurableSessions](plan_test.go), [TestSessionRejectsOverlapAndReopensAfterRelease](session_test.go) |
-| | `Close` | [TestReusablePlanAndDurableSessions](plan_test.go), [TestRecursiveCloseReclaimsActiveDescendants](lifecycle_test.go) |
+| | `Close` | [TestReusablePlanAndDurableSessions](plan_test.go), [TestParentClosePreservesChildrenAndActiveWork](lifecycle_test.go) |
 | `debugger.Session` | `Start` | [TestDebuggerRoundTrip](debugger_test.go) |
 | | `Continue` | [TestDebuggerRoundTrip](debugger_test.go) |
 | | `StepOver` | [TestDebuggerRoundTrip](debugger_test.go) |
@@ -73,6 +73,7 @@ names; each linked file contains the complete scenario and assertions.
 | | `Pause` | [TestDebuggerRoundTrip](debugger_test.go) |
 | | `SetBreakpoint` | [TestDebuggerRoundTrip](debugger_test.go) |
 | | `SetBreakpointAt` | [TestDebuggerRoundTrip](debugger_test.go) |
+| | `ReplaceBreakpoints` | [TestDebuggerReplacementAndRetainedEnumeration](api_contract_test.go) |
 | | `DeleteBreakpoint` | [TestDebuggerRoundTrip](debugger_test.go) |
 | | `Breakpoints` | [TestDebuggerRoundTrip](debugger_test.go) |
 | | `Frames` | [TestDebuggerRoundTrip](debugger_test.go) |
@@ -81,13 +82,12 @@ names; each linked file contains the complete scenario and assertions.
 | | `Variables` | [TestDebuggerRoundTrip](debugger_test.go) |
 | | `Evaluate` | [TestDebuggerRoundTrip](debugger_test.go) |
 | | `EvaluateFrame` | [TestDebuggerRoundTrip](debugger_test.go) |
-| | `Close` | [TestDebuggerRoundTrip](debugger_test.go), [TestRecursiveCloseReclaimsActiveDescendants](lifecycle_test.go) |
+| | `Close` | [TestDebuggerRoundTrip](debugger_test.go), [TestParentClosePreservesChildrenAndActiveWork](lifecycle_test.go) |
 
 Output has content and content type, without structured metadata. Diagnostics
 have an open `Kind`, source, annotations, hint, and note, without a separate
-severity field. Debugger frames use indices and function IDs. Convenience
-operations may delegate to their indexed/default-binding equivalents; assertions
-cover those documented semantic calls. Successful stopped events have nil
+severity field. Debugger frames use indices and function IDs. Default and indexed inspection/evaluation operations, and default and explicit
+breakpoint binding operations, invoke their corresponding hosted methods. Successful stopped events have nil
 `Event.Error`; runtime-error stops preserve a public `failure.Failure`.
 
 ## Lifecycle and failure coverage
@@ -128,7 +128,8 @@ public `ConnectionNotFound` or `ExecutionNotFound` category, and checks each joi
 operation and cleanup error independently. Cancellation and exactly-once hosted
 cleanup remain required. Premature watch closure must not look like successful
 execution. Explicit debugger Close still owns cleanup after a watch-only failure.
-No automatic reconnection or protocol changes are introduced.
+No automatic reconnection is introduced. Additive protocol changes are documented
+in [Wire Protocol](../../docs/protocol.md#alpha19-additive-contract).
 
 ## Running
 
@@ -140,3 +141,21 @@ go test -race ./test/integration -count=20 -shuffle=on
 
 The root `make test` and `make test-race` include this suite on existing CI jobs.
 Tests need no native runtime, external server, TCP port, or additional dependency.
+
+## Alpha.19 retained surface
+
+The [complete audit](../../docs/uapi-audit.md) includes `api.Runtime`, `api.Plan`,
+`api.Session`, `debugger.Session`, `api.PlanOptions`, and `api.SessionOptions`,
+with each method/setter, projection, and owning test. All six retain production
+compile-time assertions. [api_contract_test.go](api_contract_test.go) covers output
+presence and cleanup errors, fallible metadata, FSRoot/content-type presence,
+anonymous sources, signed function IDs, atomic replacement, final enumeration,
+command event-plus-error results, Start lifetime, all debugger context signatures,
+and deferred runtime teardown. Temporary Execute options remain covered in the
+server protocol integration layer because the public API has no Execute method.
+
+Ordinary parent Close no longer cascades. Every returned child must be registered
+with `h.Own` or closed explicitly; teardown asserts exact hosted cleanup before
+server shutdown. Explicit transport shutdown and lost-allocation recovery still
+cascade. Fault injection distinguishes non-owning watches from command-result
+streams: ending RunCommand before its result cancels that command, not the handle.

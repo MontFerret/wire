@@ -70,9 +70,13 @@ func (s *RuntimeService) Run(
 
 	defer cancel()
 
-	options, err := decodeSessionOptions(request.GetParameters(), request.GetOutputContentType())
+	options, err := decodeSessionOptions(request.GetParameters(), request.GetOutputContentType(), request.GetOutputContentTypeSet(), request.FsRoot)
 	if err != nil {
 		return nil, rpcError(err)
+	}
+
+	if request.GetSource() == nil {
+		return nil, rpcError(&core.DomainError{Kind: core.ErrorKindInvalidRequest, Message: "source is required"})
 	}
 
 	created, err := core.Run(operation, s.runtime, resources, decodeSource(request.GetSource()), options...)

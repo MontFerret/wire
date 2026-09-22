@@ -19,6 +19,11 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
+	DebugService_RunCommand_FullMethodName          = "/ferret.wire.v1.DebugService/RunCommand"
+	DebugService_ReplaceBreakpoints_FullMethodName  = "/ferret.wire.v1.DebugService/ReplaceBreakpoints"
+	DebugService_Breakpoints_FullMethodName         = "/ferret.wire.v1.DebugService/Breakpoints"
+	DebugService_Locals_FullMethodName              = "/ferret.wire.v1.DebugService/Locals"
+	DebugService_Evaluate_FullMethodName            = "/ferret.wire.v1.DebugService/Evaluate"
 	DebugService_CreateDebugSession_FullMethodName  = "/ferret.wire.v1.DebugService/CreateDebugSession"
 	DebugService_Start_FullMethodName               = "/ferret.wire.v1.DebugService/Start"
 	DebugService_SetBreakpoint_FullMethodName       = "/ferret.wire.v1.DebugService/SetBreakpoint"
@@ -42,13 +47,21 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
 // DebugService exposes connection-owned debugger sessions without changing
-// the DebugSession -> DebugController -> Unified API debugger ownership chain.
+// the direct DebugSession -> hosted Universal API debugger ownership chain.
 type DebugServiceClient interface {
+	// RunCommand carries caller cancellation through command completion. START
+	// keeps its stream open after the first result until the execution lifetime ends.
+	RunCommand(ctx context.Context, in *RunCommandRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[RunCommandResponse], error)
+	// Replacement is one atomic hosted operation, including during execution.
+	ReplaceBreakpoints(ctx context.Context, in *ReplaceBreakpointsRequest, opts ...grpc.CallOption) (*ReplaceBreakpointsResponse, error)
+	Breakpoints(ctx context.Context, in *BreakpointsRequest, opts ...grpc.CallOption) (*BreakpointsResponse, error)
+	Locals(ctx context.Context, in *LocalsRequest, opts ...grpc.CallOption) (*LocalsResponse, error)
+	Evaluate(ctx context.Context, in *EvaluateRequest, opts ...grpc.CallOption) (*EvaluateResponse, error)
 	// CreateDebugSession creates a CREATED resource from a reusable debug Plan.
 	CreateDebugSession(ctx context.Context, in *CreateDebugSessionRequest, opts ...grpc.CallOption) (*CreateDebugSessionResponse, error)
 	// Start begins execution once; later resumes use Continue or a step command.
 	Start(ctx context.Context, in *StartRequest, opts ...grpc.CallOption) (*StartResponse, error)
-	// SetBreakpoint is valid only while the session is CREATED or STOPPED.
+	// SetBreakpoint is valid in CREATED, RUNNING, and STOPPED states.
 	SetBreakpoint(ctx context.Context, in *SetBreakpointRequest, opts ...grpc.CallOption) (*SetBreakpointResponse, error)
 	DeleteBreakpoint(ctx context.Context, in *DeleteBreakpointRequest, opts ...grpc.CallOption) (*DeleteBreakpointResponse, error)
 	// Continue publishes RUNNING before invoking the hosted debugger.
@@ -81,6 +94,65 @@ type debugServiceClient struct {
 
 func NewDebugServiceClient(cc grpc.ClientConnInterface) DebugServiceClient {
 	return &debugServiceClient{cc}
+}
+
+func (c *debugServiceClient) RunCommand(ctx context.Context, in *RunCommandRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[RunCommandResponse], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &DebugService_ServiceDesc.Streams[0], DebugService_RunCommand_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[RunCommandRequest, RunCommandResponse]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type DebugService_RunCommandClient = grpc.ServerStreamingClient[RunCommandResponse]
+
+func (c *debugServiceClient) ReplaceBreakpoints(ctx context.Context, in *ReplaceBreakpointsRequest, opts ...grpc.CallOption) (*ReplaceBreakpointsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ReplaceBreakpointsResponse)
+	err := c.cc.Invoke(ctx, DebugService_ReplaceBreakpoints_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *debugServiceClient) Breakpoints(ctx context.Context, in *BreakpointsRequest, opts ...grpc.CallOption) (*BreakpointsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(BreakpointsResponse)
+	err := c.cc.Invoke(ctx, DebugService_Breakpoints_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *debugServiceClient) Locals(ctx context.Context, in *LocalsRequest, opts ...grpc.CallOption) (*LocalsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(LocalsResponse)
+	err := c.cc.Invoke(ctx, DebugService_Locals_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *debugServiceClient) Evaluate(ctx context.Context, in *EvaluateRequest, opts ...grpc.CallOption) (*EvaluateResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(EvaluateResponse)
+	err := c.cc.Invoke(ctx, DebugService_Evaluate_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *debugServiceClient) CreateDebugSession(ctx context.Context, in *CreateDebugSessionRequest, opts ...grpc.CallOption) (*CreateDebugSessionResponse, error) {
@@ -235,7 +307,7 @@ func (c *debugServiceClient) ReleaseDebugSession(ctx context.Context, in *Releas
 
 func (c *debugServiceClient) WatchDebug(ctx context.Context, in *WatchDebugRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[WatchDebugResponse], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &DebugService_ServiceDesc.Streams[0], DebugService_WatchDebug_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &DebugService_ServiceDesc.Streams[1], DebugService_WatchDebug_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -257,13 +329,21 @@ type DebugService_WatchDebugClient = grpc.ServerStreamingClient[WatchDebugRespon
 // for forward compatibility.
 //
 // DebugService exposes connection-owned debugger sessions without changing
-// the DebugSession -> DebugController -> Unified API debugger ownership chain.
+// the direct DebugSession -> hosted Universal API debugger ownership chain.
 type DebugServiceServer interface {
+	// RunCommand carries caller cancellation through command completion. START
+	// keeps its stream open after the first result until the execution lifetime ends.
+	RunCommand(*RunCommandRequest, grpc.ServerStreamingServer[RunCommandResponse]) error
+	// Replacement is one atomic hosted operation, including during execution.
+	ReplaceBreakpoints(context.Context, *ReplaceBreakpointsRequest) (*ReplaceBreakpointsResponse, error)
+	Breakpoints(context.Context, *BreakpointsRequest) (*BreakpointsResponse, error)
+	Locals(context.Context, *LocalsRequest) (*LocalsResponse, error)
+	Evaluate(context.Context, *EvaluateRequest) (*EvaluateResponse, error)
 	// CreateDebugSession creates a CREATED resource from a reusable debug Plan.
 	CreateDebugSession(context.Context, *CreateDebugSessionRequest) (*CreateDebugSessionResponse, error)
 	// Start begins execution once; later resumes use Continue or a step command.
 	Start(context.Context, *StartRequest) (*StartResponse, error)
-	// SetBreakpoint is valid only while the session is CREATED or STOPPED.
+	// SetBreakpoint is valid in CREATED, RUNNING, and STOPPED states.
 	SetBreakpoint(context.Context, *SetBreakpointRequest) (*SetBreakpointResponse, error)
 	DeleteBreakpoint(context.Context, *DeleteBreakpointRequest) (*DeleteBreakpointResponse, error)
 	// Continue publishes RUNNING before invoking the hosted debugger.
@@ -298,6 +378,21 @@ type DebugServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedDebugServiceServer struct{}
 
+func (UnimplementedDebugServiceServer) RunCommand(*RunCommandRequest, grpc.ServerStreamingServer[RunCommandResponse]) error {
+	return status.Error(codes.Unimplemented, "method RunCommand not implemented")
+}
+func (UnimplementedDebugServiceServer) ReplaceBreakpoints(context.Context, *ReplaceBreakpointsRequest) (*ReplaceBreakpointsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ReplaceBreakpoints not implemented")
+}
+func (UnimplementedDebugServiceServer) Breakpoints(context.Context, *BreakpointsRequest) (*BreakpointsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Breakpoints not implemented")
+}
+func (UnimplementedDebugServiceServer) Locals(context.Context, *LocalsRequest) (*LocalsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Locals not implemented")
+}
+func (UnimplementedDebugServiceServer) Evaluate(context.Context, *EvaluateRequest) (*EvaluateResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Evaluate not implemented")
+}
 func (UnimplementedDebugServiceServer) CreateDebugSession(context.Context, *CreateDebugSessionRequest) (*CreateDebugSessionResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CreateDebugSession not implemented")
 }
@@ -365,6 +460,89 @@ func RegisterDebugServiceServer(s grpc.ServiceRegistrar, srv DebugServiceServer)
 		t.testEmbeddedByValue()
 	}
 	s.RegisterService(&DebugService_ServiceDesc, srv)
+}
+
+func _DebugService_RunCommand_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(RunCommandRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(DebugServiceServer).RunCommand(m, &grpc.GenericServerStream[RunCommandRequest, RunCommandResponse]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type DebugService_RunCommandServer = grpc.ServerStreamingServer[RunCommandResponse]
+
+func _DebugService_ReplaceBreakpoints_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReplaceBreakpointsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DebugServiceServer).ReplaceBreakpoints(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DebugService_ReplaceBreakpoints_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DebugServiceServer).ReplaceBreakpoints(ctx, req.(*ReplaceBreakpointsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DebugService_Breakpoints_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(BreakpointsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DebugServiceServer).Breakpoints(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DebugService_Breakpoints_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DebugServiceServer).Breakpoints(ctx, req.(*BreakpointsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DebugService_Locals_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(LocalsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DebugServiceServer).Locals(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DebugService_Locals_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DebugServiceServer).Locals(ctx, req.(*LocalsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DebugService_Evaluate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(EvaluateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DebugServiceServer).Evaluate(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DebugService_Evaluate_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DebugServiceServer).Evaluate(ctx, req.(*EvaluateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
 }
 
 func _DebugService_CreateDebugSession_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -656,6 +834,22 @@ var DebugService_ServiceDesc = grpc.ServiceDesc{
 	HandlerType: (*DebugServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
+			MethodName: "ReplaceBreakpoints",
+			Handler:    _DebugService_ReplaceBreakpoints_Handler,
+		},
+		{
+			MethodName: "Breakpoints",
+			Handler:    _DebugService_Breakpoints_Handler,
+		},
+		{
+			MethodName: "Locals",
+			Handler:    _DebugService_Locals_Handler,
+		},
+		{
+			MethodName: "Evaluate",
+			Handler:    _DebugService_Evaluate_Handler,
+		},
+		{
 			MethodName: "CreateDebugSession",
 			Handler:    _DebugService_CreateDebugSession_Handler,
 		},
@@ -717,6 +911,11 @@ var DebugService_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "RunCommand",
+			Handler:       _DebugService_RunCommand_Handler,
+			ServerStreams: true,
+		},
 		{
 			StreamName:    "WatchDebug",
 			Handler:       _DebugService_WatchDebug_Handler,

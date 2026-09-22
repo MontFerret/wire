@@ -180,11 +180,11 @@ func TestPlanReleaseWaitsForChildrenAlreadyClosing(t *testing.T) {
 			orderMu.Unlock()
 		}
 		session := &spySession{
-			run: func(ctx context.Context) (api.Output, error) {
+			run: func(ctx context.Context) (*api.Output, error) {
 				close(runStarted)
 				<-ctx.Done()
 
-				return api.Output{}, ctx.Err()
+				return nil, ctx.Err()
 			},
 			close: func() error {
 				close(childCloseStarted)
@@ -348,11 +348,11 @@ func TestConcurrentChildReleaseSharesCleanup(t *testing.T) {
 		finishClose := make(chan struct{})
 		runStarted := make(chan struct{})
 		session := &spySession{
-			run: func(ctx context.Context) (api.Output, error) {
+			run: func(ctx context.Context) (*api.Output, error) {
 				close(runStarted)
 				<-ctx.Done()
 
-				return api.Output{}, ctx.Err()
+				return nil, ctx.Err()
 			},
 			close: func() error {
 				close(closeStarted)
@@ -445,11 +445,11 @@ func TestExecutionTerminalStateSurvivesCancellationOrdering(t *testing.T) {
 		runStarted := make(chan struct{})
 		finishRun := make(chan struct{})
 		plan := &spyPlan{newSession: func(context.Context, sessionOptions) (api.Session, error) {
-			return &spySession{run: func(context.Context) (api.Output, error) {
+			return &spySession{run: func(context.Context) (*api.Output, error) {
 				close(runStarted)
 				<-finishRun
 
-				return api.Output{}, nil
+				return &api.Output{}, nil
 			}}, nil
 		}}
 		connection := newTestConnection(t, &spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
@@ -482,8 +482,8 @@ func TestExecutionTerminalStateSurvivesCancellationOrdering(t *testing.T) {
 
 	t.Run("completion remains terminal after cancellation", func(t *testing.T) {
 		plan := &spyPlan{newSession: func(context.Context, sessionOptions) (api.Session, error) {
-			return &spySession{run: func(context.Context) (api.Output, error) {
-				return api.Output{}, nil
+			return &spySession{run: func(context.Context) (*api.Output, error) {
+				return &api.Output{}, nil
 			}}, nil
 		}}
 		connection := newTestConnection(t, &spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {

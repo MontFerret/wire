@@ -17,11 +17,11 @@ type apiPlanSpy struct {
 	closeCalls     int
 }
 
-func (p *apiPlanSpy) Params() []string {
+func (p *apiPlanSpy) Params() ([]string, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	return append([]string(nil), p.params...)
+	return append([]string(nil), p.params...), nil
 }
 
 func (p *apiPlanSpy) NewSession(ctx context.Context, options ...api.SessionOption) (api.Session, error) {

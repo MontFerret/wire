@@ -26,3 +26,11 @@ func cloneExecutionSnapshot(snapshot execution.Snapshot) execution.Snapshot {
 
 	return result
 }
+
+func cloneOutput(output *api.Output) *api.Output {
+	if output == nil {
+		return nil
+	}
+
+	return &api.Output{ContentType: output.ContentType, Content: append([]byte(nil), output.Content...)}
+}

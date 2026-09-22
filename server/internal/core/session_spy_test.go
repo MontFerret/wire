@@ -9,20 +9,20 @@ import (
 
 type spySession struct {
 	mu         sync.Mutex
-	run        func(context.Context) (api.Output, error)
+	run        func(context.Context) (*api.Output, error)
 	close      func() error
 	runCalls   int
 	closeCalls int
 }
 
-func (s *spySession) Run(ctx context.Context) (api.Output, error) {
+func (s *spySession) Run(ctx context.Context) (*api.Output, error) {
 	s.mu.Lock()
 	s.runCalls++
 	run := s.run
 	s.mu.Unlock()
 
 	if run == nil {
-		return api.Output{}, nil
+		return &api.Output{}, nil
 	}
 
 	return run(ctx)

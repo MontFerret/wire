@@ -64,8 +64,12 @@ message ExecuteRequest {
   ConnectionId connection_id = 1;
   PlanId plan_id = 2;
   Parameters parameters = 3;
-  // output_content_type requests a runtime-supported encoded output codec; empty preserves the runtime default.
+  // output_content_type requests a runtime-supported encoded output codec; empty preserves the runtime default only when output_content_type_set is false.
   string output_content_type = 4;
+  // Presence distinguishes an omitted root from an explicitly empty root.
+  optional string fs_root = 5;
+  // Explicit empty content types are forwarded to the hosted runtime.
+  bool output_content_type_set = 6;
 }
 
 message ExecuteResponse {
