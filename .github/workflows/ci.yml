@@ -23,10 +23,15 @@ jobs:
         with:
           go-version: 1.25.x
           cache: true
+          cache-dependency-path: |
+            go.sum
+            test/ferret/go.sum
       - run: make check-fmt
       - run: make check-tidy
+      - run: make check-ferret-tidy
       - run: make vet
       - run: make test
+      - run: make test-ferret
       - run: make build
 
   race-and-proto:
@@ -40,8 +45,12 @@ jobs:
         with:
           go-version: 1.25.x
           cache: true
+          cache-dependency-path: |
+            go.sum
+            test/ferret/go.sum
       - run: make lint
       - run: make test-race
+      - run: make test-ferret-race
       - run: make proto-lint
       - run: make check-generate
       # PR #5 reestablishes the unreleased v1 protocol baseline. Every later PR
