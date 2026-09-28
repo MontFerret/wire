@@ -7,7 +7,7 @@ native engine.New → ferret/uapi.Wrap → api.Runtime → wire/server
 → protobuf and real gRPC over bufconn → wire/client.New → api.Runtime consumer
 ```
 
-The nested module pins Ferret `v2.0.0-alpha.55` and Universal API
+The nested module pins Ferret `v2.0.0-alpha.56` and Universal API
 `v1.0.0-alpha.19`, matching Wire's UAPI dependency. It replaces only Wire with
 the local checkout. Native Ferret is not a root-module dependency and is never
 imported by Wire production packages. No workspace file or local Ferret checkout
@@ -27,7 +27,7 @@ Wire's projection compose correctly. Both layers cross real serialization.
 | `TestPlanClosePreservesSession` | Existing session executes after plan Close; new constructors fail while detached metadata survives |
 | `TestRuntimeCloseDefersConnectionRelease` | Closed root rejects work; descendants still create/execute; the last child releases the logical connection slot |
 | `TestWireShutdownBorrowsNativeRuntime` | Direct hosted execution still works after Wire and transport shutdown |
-| `TestCompilerDiagnostics` | Actual portable compiler diagnostics, source, annotations, and ranges survive the Wire hop |
+| `TestCompilerDiagnostics` | Invalid-token and EOF compiler diagnostics preserve their compilation classification, source, annotations, and ranges through Wire |
 | `TestDebuggerRoundTrip` | Explicit unoptimized compilation, breakpoint replacement/binding/enumeration, entry and breakpoint stops, three-frame locals/evaluation, completion and output |
 
 ## Ownership and determinism
@@ -53,22 +53,14 @@ Tests need no Chrome, external services, fixed ports, CLI binaries, or installed
 ferretd. Dependency installation needs the usual Go module downloads; execution
 uses only temporary directories and in-process gRPC.
 
-## Known upstream diagnostic limitation
+## Compiler diagnostics
 
-Ferret `v2.0.0-alpha.55` produces an invalid portable annotation for bare
-`RETURN`: direct `uapi.Wrap(native).Compile(ctx, api.NewSource("invalid.fql",
-"RETURN"))` returns `SyntaxError`, message `Expected expression after 'RETURN'`,
-and a primary annotation with line `0`, column `0`, and span `[6,7)` for a
-six-byte source. The annotation message is `missing return value`.
-
-Wire requires a positive source line and therefore returns a sanitized internal
-runtime failure for that malformed diagnostic. The native compiler/UAPI path
-must produce a valid EOF location and span; Wire must not invent or clamp them.
-The round-trip test uses `RETURN )`, whose invalid token is inside the source,
-and compares its complete portable diagnostic with direct native UAPI output.
-This upstream EOF defect remains a follow-up before relying on complete remote
-compiler diagnostics in ferretd. No Wire workaround or dependency override is
-included.
+The diagnostic test compares complete portable diagnostics from direct hosted
+compilation with those returned through Wire for both `RETURN )` and bare
+`RETURN`. Both must retain the compilation-error category and gRPC
+`InvalidArgument` status. The EOF case explicitly verifies line `1`, column `7`,
+and the zero-width insertion span `[6,6)` supplied by Ferret alpha.56. Wire
+preserves those coordinates without repairing or normalizing hosted ranges.
 
 ## Running
 

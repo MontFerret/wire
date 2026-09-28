@@ -7,9 +7,13 @@ import (
 	"reflect"
 	"testing"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	"github.com/MontFerret/api"
 	"github.com/MontFerret/api/diagnostics"
 	"github.com/MontFerret/wire/client"
+	"github.com/MontFerret/wire/pkg/failure"
 )
 
 func TestRuntimeRun(t *testing.T) {
@@ -89,46 +93,65 @@ func TestReusablePlanAndDurableSessions(t *testing.T) {
 }
 
 func TestCompilerDiagnostics(t *testing.T) {
-	h := newHarness(t)
-	// Use an in-source error: alpha.55's bare RETURN EOF diagnostic has an
-	// invalid location/span. See the native suite README for the upstream defect.
-	src := api.NewSource("invalid.fql", "RETURN )")
+	for _, test := range []struct {
+		name    string
+		content string
+		eof     bool
+	}{
+		{name: "invalid token", content: "RETURN )"},
+		{name: "EOF", content: "RETURN", eof: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			h := newHarness(t)
+			src := api.NewSource("invalid.fql", test.content)
 
-	directPlan, directErr := h.hosted.Compile(h.ctx, src)
-	if directPlan != nil {
-		h.own(directPlan)
-		t.Fatal("invalid source produced a hosted plan")
-	}
+			directPlan, directErr := h.hosted.Compile(h.ctx, src)
+			if directPlan != nil {
+				h.own(directPlan)
+				t.Fatal("invalid source produced a hosted plan")
+			}
 
-	var expected diagnostics.Diagnostics
-	if !errors.As(directErr, &expected) || len(expected) == 0 {
-		t.Fatalf("hosted compile lacks portable diagnostics: %v", directErr)
-	}
+			var expected diagnostics.Diagnostics
+			if !errors.As(directErr, &expected) || len(expected) == 0 {
+				t.Fatalf("hosted compile lacks portable diagnostics: %v", directErr)
+			}
 
-	plan, err := h.runtime.Compile(h.ctx, src)
-	if plan != nil {
-		h.own(plan)
-		t.Fatal("invalid source produced a remote plan")
-	}
+			plan, err := h.runtime.Compile(h.ctx, src)
+			if plan != nil {
+				h.own(plan)
+				t.Fatal("invalid source produced a remote plan")
+			}
 
-	var remote *client.Error
-	if !errors.As(err, &remote) || len(remote.Diagnostics) == 0 {
-		t.Fatalf("remote compile lacks portable diagnostics: %v; hosted diagnostics: %#v", err, expected)
-	}
+			var remote *client.Error
+			if !errors.As(err, &remote) || len(remote.Diagnostics) == 0 {
+				t.Fatalf("remote compile lacks portable diagnostics: %v; hosted diagnostics: %#v", err, expected)
+			}
 
-	if !reflect.DeepEqual(remote.Diagnostics, expected) {
-		t.Fatalf("diagnostics changed across Wire: got %+v, want %+v", remote.Diagnostics, expected)
-	}
+			if remote.Category != failure.CategoryCompilation || status.Code(err) != codes.InvalidArgument {
+				t.Fatalf("compile classification = category %v, code %v; want compilation/InvalidArgument", remote.Category, status.Code(err))
+			}
 
-	diagnostic := remote.Diagnostics[0]
-	if diagnostic.Source != src || diagnostic.Message == "" || len(diagnostic.Annotations) == 0 {
-		t.Fatalf("incomplete compiler diagnostic: %+v", diagnostic)
-	}
+			if !reflect.DeepEqual(remote.Diagnostics, expected) {
+				t.Fatalf("diagnostics changed across Wire: got %#v, want %#v", remote.Diagnostics, expected)
+			}
 
-	location := diagnostic.Annotations[0].Range
-	if location.SourceName != src.Name || location.Line < 1 || location.Column < 0 ||
-		location.Span.Start < 0 || location.Span.End < location.Span.Start || location.Span.End > len(src.Content) {
-		t.Fatalf("invalid diagnostic source range: %+v", location)
+			diagnostic := remote.Diagnostics[0]
+			if diagnostic.Source != src || diagnostic.Message == "" || len(diagnostic.Annotations) == 0 {
+				t.Fatalf("incomplete compiler diagnostic: %+v", diagnostic)
+			}
+
+			location := diagnostic.Annotations[0].Range
+			if location.SourceName != src.Name || location.Line < 1 || location.Column < 0 ||
+				location.Span.Start < 0 || location.Span.End < location.Span.Start || location.Span.End > len(src.Content) {
+				t.Fatalf("invalid diagnostic source range: %+v", location)
+			}
+
+			// Missing syntax at EOF is a zero-width insertion point. Wire must
+			// preserve it without extending the span or normalizing the location.
+			if test.eof && (location.Line != 1 || location.Column != 7 || location.Span.Start != 6 || location.Span.End != 6) {
+				t.Fatalf("EOF diagnostic range = %+v; want 1:7 / [6,6)", location)
+			}
+		})
 	}
 }
 
