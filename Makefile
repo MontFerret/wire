@@ -6,7 +6,7 @@ GOLANGCI_LINT_DIR = $(DIR_BIN)/tools/golangci-lint/$(GOLANGCI_LINT_VERSION)
 GOLANGCI_LINT_SUFFIX := $(if $(filter windows,$(shell go env GOHOSTOS)),.exe)
 GOLANGCI_LINT = $(GOLANGCI_LINT_DIR)/golangci-lint$(GOLANGCI_LINT_SUFFIX)
 
-.PHONY: build check-fmt check-generate check-tidy fmt generate install-lint lint proto-breaking proto-lint test test-race vet
+.PHONY: build check-ferret-tidy check-fmt check-generate check-tidy fmt generate install-lint lint proto-breaking proto-lint test test-ferret test-ferret-race test-race vet
 
 build:
 	go build ./...
@@ -24,13 +24,16 @@ $(GOLANGCI_LINT):
 
 fmt: $(GOLANGCI_LINT)
 	$(GOLANGCI_LINT) fmt ./...
+	cd test/ferret && GOWORK=off "$(abspath $(GOLANGCI_LINT))" fmt --config ../../.golangci.yml ./...
 
 check-fmt: $(GOLANGCI_LINT)
 	$(GOLANGCI_LINT) fmt --diff ./...
+	cd test/ferret && GOWORK=off "$(abspath $(GOLANGCI_LINT))" fmt --config ../../.golangci.yml --diff ./...
 
 lint: $(GOLANGCI_LINT)
 	$(GOLANGCI_LINT) config verify && \
 	$(GOLANGCI_LINT) run ./...
+	cd test/ferret && GOWORK=off "$(abspath $(GOLANGCI_LINT))" run --config ../../.golangci.yml ./...
 
 generate:
 	$(BUF) generate
@@ -52,11 +55,21 @@ proto-breaking:
 check-tidy:
 	go mod tidy -diff
 
+check-ferret-tidy:
+	cd test/ferret && GOWORK=off go mod tidy -diff
+
 test:
 	go test ./...
 
 test-race:
 	go test -race ./...
 
+test-ferret:
+	cd test/ferret && GOWORK=off go test -timeout=2m ./...
+
+test-ferret-race:
+	cd test/ferret && GOWORK=off go test -race -timeout=2m ./...
+
 vet:
 	go vet ./...
+	cd test/ferret && GOWORK=off go vet ./...

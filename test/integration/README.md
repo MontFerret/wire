@@ -13,6 +13,11 @@ Existing component, conversion, low-level facade/protocol tests, and benchmarks
 remain beside their owning packages. The former server-package Universal API
 adapter, allocation, cancellation, and transport tests are consolidated here.
 
+The separate [native Ferret compatibility suite](../ferret/README.md) hosts the
+real native engine through Ferret's UAPI adapter over the same public Wire/gRPC
+boundary. It covers focused ecosystem round trips in its own pinned module;
+this spy suite remains responsible for exhaustive Wire contracts and faults.
+
 ## Harness
 
 `harness.New(t)` starts the public Wire server, opens a real gRPC connection, and

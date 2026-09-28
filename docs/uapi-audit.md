@@ -2,13 +2,26 @@
 
 The module pins `github.com/MontFerret/api v1.0.0-alpha.19`. The published tag and
 matching API checkout resolve to `fa6c2057aef6be7f9980dcd3d8e498b66d14ecd6`.
-This matches the sibling Ferret dependency. Wire remains runtime independent;
-native Ferret round-trip validation is a separate task.
+This matches Ferret `v2.0.0-alpha.56`, pinned in the separate
+[native compatibility module](../test/ferret/README.md). That suite validates
+the native engine through Ferret's UAPI adapter, the public Wire server, real
+gRPC, and the public Wire client. Wire's root module remains runtime independent.
 
 The six interfaces below are audited against that checkout. Production
 compile-time assertions cover all six. The client returns `api.Runtime` and
 borrows caller transport; the server borrows the hosted runtime. Public spy
 integration tests use real gRPC and no native runtime dependency.
+
+The native suite complements this method-level audit with real execution,
+parameter/content-type/filesystem options, reusable plans and durable sessions,
+independent parent/child lifetimes and deferred connection release, portable
+compiler diagnostics, and a breakpoint/stack/locals/evaluation debugger round
+trip through completion. It also verifies hosted native usability after Wire
+shutdown. Existing spies retain exhaustive failure and no-hosted-Close coverage.
+The [compiler diagnostic coverage](../test/ferret/README.md#compiler-diagnostics)
+includes invalid-token and EOF errors, preserving their compilation classification
+and complete portable diagnostics. Bare `RETURN` retains Ferret's insertion point
+at line 1, column 7, span `[6,6)` without Wire-side range normalization.
 
 | Interface | Method/setter | Projection and retained behavior | Coverage |
 | --- | --- | --- | --- |

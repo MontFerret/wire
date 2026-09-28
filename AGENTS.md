@@ -232,6 +232,7 @@ contract crosses layers:
 | Server request semantics | `server/internal/grpcserver` tests |
 | Logical ownership and limits | `server/internal/core` lifecycle tests |
 | Public Universal API round trips | `test/integration` using the public client/server and hosted API spies |
+| Native Ferret ecosystem compatibility | `test/ferret` nested module using the native engine, Ferret UAPI adapter, and public Wire APIs over real gRPC |
 | Low-level facade and protocol integration | `server` integration tests |
 | Cancellation and cleanup | Lifecycle and integration tests |
 | Debugger commands and inspection | Core and integration debugger tests |
@@ -256,9 +257,12 @@ make check-generate
 make proto-lint
 make proto-breaking BUF_BREAKING_AGAINST=.git#branch=main
 make check-tidy
+make check-ferret-tidy
 make vet
 make test
+make test-ferret
 make test-race
+make test-ferret-race
 make build
 ```
 
@@ -274,6 +278,12 @@ suppression guidance.
 
 Use the relevant subset for narrow iteration, then broaden according to risk.
 `make generate` is required when generator inputs change.
+
+The native suite complements the exhaustive spy contracts; neither replaces the
+other. Root `./...` commands exclude the nested module. Its explicit test/tidy
+targets use `GOWORK=off`; formatting, lint, and vet cover both modules. Keep
+released native Ferret dependencies inside that module. See the
+[native suite guide](test/ferret/README.md) for pins, ownership, and coverage.
 
 ## Performance
 

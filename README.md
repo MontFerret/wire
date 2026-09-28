@@ -203,9 +203,12 @@ make check-generate   # fail when generation changes the checkout
 make proto-lint       # Buf STANDARD lint
 make proto-breaking BUF_BREAKING_AGAINST=.git#branch=main
 make check-tidy       # verify go.mod/go.sum without changing files
+make check-ferret-tidy # verify the native compatibility module's dependencies
 make vet
-make test
+make test             # root module, including hosted-spy integration contracts
+make test-ferret      # nested module, including native Ferret round trips
 make test-race
+make test-ferret-race
 make build
 ```
 
@@ -216,7 +219,9 @@ version's executable is absent and reuse it afterward. Explicit installation
 with `make install-lint` is optional. First use requires download access, `curl`,
 and a POSIX shell (such as Git Bash on Windows). Tool selection uses the host
 platform even when Go cross-compilation variables are set. `make build` remains
-a compilation-only target.
+a compilation-only target. Formatting, formatting checks, lint, and vet cover
+both the root module and the nested native-Ferret test module using the same
+tool configuration.
 
 [The lint configuration](.golangci.yml) enables correctness, error handling,
 resource cleanup, spelling, API documentation and naming, grouped type
@@ -237,13 +242,24 @@ exception covers only capitalization warnings for error literals beginning
 with the proper name "Wire"; other Staticcheck checks remain enabled.
 Architectural and ownership rules still require review.
 
-The [Universal API integration suite](test/integration/README.md) exercises the
-public client/server boundary over real gRPC using an in-memory `bufconn`
-transport and hosted API spies. Run it independently with
-`go test ./test/integration/...` or `go test -race ./test/integration/...`.
+There are two complementary integration layers, both using real gRPC over
+`bufconn` without external services:
+
+| Suite | Hosted implementation | Responsibility |
+| --- | --- | --- |
+| [Wire contracts](test/integration/README.md) | UAPI spies | Exhaustive Wire semantics, faults, cancellation, ownership, and limits |
+| [Native Ferret compatibility](test/ferret/README.md) | Native engine through `ferret/uapi` | Focused execution, session, lifecycle, diagnostic, and debugger round trips |
+
+Run the contract suite independently with `go test ./test/integration/...` or
+`go test -race ./test/integration/...`. The native suite is a separate module,
+so root `go test ./...` intentionally excludes it; use `make test-ferret` and
+`make test-ferret-race`. It pins released Ferret and UAPI versions and replaces
+only Wire with the local checkout. Native Ferret remains absent from Wire's
+root module and production imports; no repository-wide `go.work` is needed.
 Package-local tests retain component, conversion, and low-level protocol coverage.
 
 CI invokes these Make targets on Linux, macOS, and Windows; Linux additionally
 runs Go lint, the race detector, Buf lint, checked generation, and pull-request
-breaking checks against the fetched base branch. The integration suite is included
-in the existing `./...` targets without build tags or extra services.
+breaking checks against the fetched base branch. Both integration layers run on
+the OS matrix and under the Linux race detector. CI explicitly invokes the
+nested-module targets and caches dependencies using both modules' checksum files.
