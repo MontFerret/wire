@@ -6,7 +6,7 @@ require (
 	github.com/MontFerret/api v1.0.0-alpha.20
 	github.com/MontFerret/ferret/v2 v2.0.0-alpha.57
 	github.com/MontFerret/wire v0.0.0
-	google.golang.org/grpc v1.83.0
+	google.golang.org/grpc v1.84.0
 )
 
 require (
@@ -21,9 +21,9 @@ require (
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	github.com/ziflex/go-options v1.6.1 // indirect
 	golang.org/x/exp v0.0.0-20240506185415-9bf2ced13842 // indirect
-	golang.org/x/net v0.55.0 // indirect
-	golang.org/x/sys v0.45.0 // indirect
-	golang.org/x/text v0.37.0 // indirect
+	golang.org/x/net v0.57.0 // indirect
+	golang.org/x/sys v0.47.0 // indirect
+	golang.org/x/text v0.40.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260810153831-ec0a7760b754 // indirect
 	google.golang.org/protobuf v1.36.12 // indirect
 )
