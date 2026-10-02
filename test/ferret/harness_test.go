@@ -56,7 +56,7 @@ func newHarness(t *testing.T, options ...server.Option) *harness {
 			t.Errorf("close native engine: %v", err)
 		}
 	})
-	h.hosted = ferretuapi.Wrap(h.native)
+	h.hosted = ferretuapi.Wrap(h.native, api.Version("native-compatibility-test"))
 	t.Cleanup(func() {
 		if err := h.hosted.Close(); err != nil {
 			t.Errorf("close hosted adapter: %v", err)

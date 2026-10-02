@@ -19,6 +19,10 @@ type spyRuntime struct {
 	closeCalls          int
 }
 
+func (r *spyRuntime) Version(ctx context.Context) (api.Version, error) {
+	return api.Version("runtime-test"), ctx.Err()
+}
+
 func (r *spyRuntime) Run(ctx context.Context, src api.Source, options ...api.SessionOption) (*api.Output, error) {
 	configured, err := applySessionOptions(options)
 	if err != nil {

@@ -268,8 +268,12 @@ type ConnectResponse struct {
 	ConnectionId    *ConnectionId          `protobuf:"bytes,3,opt,name=connection_id,json=connectionId,proto3" json:"connection_id,omitempty"`
 	Protocol        *ProtocolInfo          `protobuf:"bytes,4,opt,name=protocol,proto3" json:"protocol,omitempty"`
 	RuntimeIdentity *RuntimeIdentity       `protobuf:"bytes,5,opt,name=runtime_identity,json=runtimeIdentity,proto3" json:"runtime_identity,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// runtime_version projects api.Runtime.Version verbatim, independently of host identity.
+	// Bytes preserve opaque values without requiring valid UTF-8.
+	// Presence is required by alpha.20 peers; an empty but present value is valid.
+	RuntimeVersion []byte `protobuf:"bytes,6,opt,name=runtime_version,json=runtimeVersion,proto3,oneof" json:"runtime_version,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *ConnectResponse) Reset() {
@@ -319,6 +323,13 @@ func (x *ConnectResponse) GetProtocol() *ProtocolInfo {
 func (x *ConnectResponse) GetRuntimeIdentity() *RuntimeIdentity {
 	if x != nil {
 		return x.RuntimeIdentity
+	}
+	return nil
+}
+
+func (x *ConnectResponse) GetRuntimeVersion() []byte {
+	if x != nil {
+		return x.RuntimeVersion
 	}
 	return nil
 }
@@ -814,11 +825,13 @@ const file_ferret_wire_v1_runtime_proto_rawDesc = "" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\tR\aversion\x12\x1f\n" +
 	"\vinstance_id\x18\x03 \x01(\tR\n" +
-	"instanceId\"\xf7\x01\n" +
+	"instanceId\"\xb9\x02\n" +
 	"\x0fConnectResponse\x12A\n" +
 	"\rconnection_id\x18\x03 \x01(\v2\x1c.ferret.wire.v1.ConnectionIdR\fconnectionId\x128\n" +
 	"\bprotocol\x18\x04 \x01(\v2\x1c.ferret.wire.v1.ProtocolInfoR\bprotocol\x12J\n" +
-	"\x10runtime_identity\x18\x05 \x01(\v2\x1f.ferret.wire.v1.RuntimeIdentityR\x0fruntimeIdentityJ\x04\b\x01\x10\x02J\x04\b\x02\x10\x03R\x06openedR\aclosing\"'\n" +
+	"\x10runtime_identity\x18\x05 \x01(\v2\x1f.ferret.wire.v1.RuntimeIdentityR\x0fruntimeIdentity\x12,\n" +
+	"\x0fruntime_version\x18\x06 \x01(\fH\x00R\x0eruntimeVersion\x88\x01\x01B\x12\n" +
+	"\x10_runtime_versionJ\x04\b\x01\x10\x02J\x04\b\x02\x10\x03R\x06openedR\aclosing\"'\n" +
 	"\x0eConnectRequestJ\x04\b\x01\x10\x02R\x0fclient_identity\"[\n" +
 	"\x16CloseConnectionRequest\x12A\n" +
 	"\rconnection_id\x18\x01 \x01(\v2\x1c.ferret.wire.v1.ConnectionIdR\fconnectionId\"\x19\n" +
@@ -918,6 +931,7 @@ func file_ferret_wire_v1_runtime_proto_init() {
 		return
 	}
 	file_ferret_wire_v1_source_proto_init()
+	file_ferret_wire_v1_runtime_proto_msgTypes[3].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

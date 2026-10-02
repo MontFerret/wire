@@ -8,6 +8,7 @@ import (
 
 	"google.golang.org/grpc"
 
+	"github.com/MontFerret/api"
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
 	"github.com/MontFerret/wire/pkg/failure"
 )
@@ -22,6 +23,7 @@ type (
 		debugClient     wirev1.DebugServiceClient
 
 		connectionID    string
+		runtimeVersion  api.Version
 		stream          wirev1.RuntimeService_ConnectClient
 		streamCancel    context.CancelFunc
 		streamDone      chan struct{}
@@ -85,7 +87,7 @@ func newConnection(ctx context.Context, connection grpc.ClientConnInterface) (*c
 	}
 
 	if response.GetConnectionId().GetValue() == "" || response.GetProtocol() == nil ||
-		response.GetProtocol().GetName() == "" || response.GetProtocol().GetVersion() == "" {
+		response.GetProtocol().GetName() == "" || response.GetProtocol().GetVersion() == "" || response.RuntimeVersion == nil {
 		streamCancel()
 
 		return nil, errors.New("Wire server returned an invalid Connect handshake")
@@ -99,6 +101,7 @@ func newConnection(ctx context.Context, connection grpc.ClientConnInterface) (*c
 		executionClient: wirev1.NewExecutionServiceClient(connection),
 		debugClient:     wirev1.NewDebugServiceClient(connection),
 		connectionID:    response.GetConnectionId().GetValue(),
+		runtimeVersion:  api.Version(response.GetRuntimeVersion()),
 		stream:          stream,
 		streamCancel:    streamCancel,
 		streamDone:      make(chan struct{}),

@@ -23,9 +23,10 @@ type remoteRuntime struct {
 var _ api.Runtime = (*remoteRuntime)(nil)
 
 // New opens a logical Wire connection and exposes it through the
-// canonical api.Runtime interface. The context bounds the handshake; cancelling
-// it after construction does not close the runtime. Close releases the logical
-// connection and its resources with bounded detached cleanup, leaving the
+// canonical api.Runtime interface. Connect must include the hosted runtime version,
+// including presence for an empty value. The context bounds the handshake;
+// cancelling it after construction does not close the runtime. Close releases the
+// logical connection and its resources with bounded detached cleanup, leaving the
 // caller-owned transport open. On failure, New returns a nil interface.
 func New(ctx context.Context, connection grpc.ClientConnInterface) (api.Runtime, error) {
 	wireClient, err := newConnection(ctx, connection)
@@ -34,6 +35,20 @@ func New(ctx context.Context, connection grpc.ClientConnInterface) (api.Runtime,
 	}
 
 	return &remoteRuntime{client: wireClient}, nil
+}
+
+// Version returns the immutable hosted version captured during Connect, including
+// after Close or transport loss. Reading it does not retain the connection.
+func (r *remoteRuntime) Version(ctx context.Context) (api.Version, error) {
+	if r == nil || r.client == nil {
+		return "", ErrClosed
+	}
+
+	if err := runtimeContextError(ctx); err != nil {
+		return "", err
+	}
+
+	return r.client.runtimeVersion, nil
 }
 
 // Run invokes the hosted api.Runtime.Run operation once and releases the temporary

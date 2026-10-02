@@ -166,14 +166,14 @@ func requireJSONOutput(t *testing.T, output *api.Output, want string) {
 func requireDetachedParams(t *testing.T, plan api.Plan) {
 	t.Helper()
 
-	params, err := plan.Params()
+	params, err := plan.Params(t.Context())
 	if err != nil || !reflect.DeepEqual(params, []string{"value"}) {
 		t.Fatalf("Params = %v, %v; want [value]", params, err)
 	}
 
 	params[0] = "changed"
 
-	again, err := plan.Params()
+	again, err := plan.Params(t.Context())
 	if err != nil || !reflect.DeepEqual(again, []string{"value"}) {
 		t.Fatalf("Params after caller mutation = %v, %v; want [value]", again, err)
 	}

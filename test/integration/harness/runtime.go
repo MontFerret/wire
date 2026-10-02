@@ -9,6 +9,7 @@ import (
 type (
 	// RuntimeBehavior is configured before the server starts. Hooks run outside locks.
 	RuntimeBehavior struct {
+		Version func(context.Context) (api.Version, error)
 		Run     func(context.Context, api.Source, SessionOptions) (*api.Output, error)
 		Compile func(context.Context, api.Source, bool, CompileOptions) error
 		Plan    PlanBehavior
@@ -39,6 +40,18 @@ func (r *RuntimeSpy) Recorder() *Recorder {
 // ID is the recorder's hosted-resource identity, independent of Wire protocol handles.
 func (r *RuntimeSpy) ID() int {
 	return r.id
+}
+
+// Version records handshake metadata retrieval and invokes the configured hook.
+func (r *RuntimeSpy) Version(ctx context.Context) (api.Version, error) {
+	r.recorder.record(Call{Resource: r.id, Method: "Version"})
+	defer r.recorder.record(Call{Resource: r.id, Method: "VersionFinished"})
+
+	if r.behavior.Version != nil {
+		return r.behavior.Version(ctx)
+	}
+
+	return api.Version("runtime-test"), ctx.Err()
 }
 
 // Run records source and applied options before invoking the configured direct-run hook.

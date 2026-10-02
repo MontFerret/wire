@@ -14,9 +14,15 @@ type remotePlan struct {
 
 var _ api.Plan = (*remotePlan)(nil)
 
-func (p *remotePlan) Params() ([]string, error) {
+// Params returns a caller-owned copy of the compile snapshot, including after
+// plan or transport cleanup. Context validation requires no lifecycle admission.
+func (p *remotePlan) Params(ctx context.Context) ([]string, error) {
 	if p == nil || p.plan == nil {
 		return nil, ErrClosed
+	}
+
+	if err := runtimeContextError(ctx); err != nil {
+		return nil, err
 	}
 
 	return p.plan.Parameters(), nil

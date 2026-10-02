@@ -65,9 +65,10 @@ callback. There is no dependency-carrying operation context.
 
 Services convert protobuf sources and options to canonical API types before
 calling core. Source/diagnostic, option/value, output, execution, debugger, and
-failure conversions are grouped at the transport boundary. Handshake metadata
-belongs to transport configuration, not resource management. Domain errors
-supply shared Wire categories; gRPC owns status mapping and uses the same
+failure conversions are grouped at the transport boundary. Protocol and optional
+host identity come from transport configuration; runtime version comes exclusively
+from the borrowed `api.Runtime.Version(ctx)`. These values do not belong to resource
+management. Domain errors supply shared Wire categories; gRPC owns status mapping and uses the same
 category serialization as terminal failures. Canonical diagnostic extraction
 is shared within server error handling.
 
@@ -103,10 +104,15 @@ listener, or reconstruct the application's modules, functions, policies,
 resources, or configuration. Importing Wire has no side effects, and
 `NewServer` does not listen, bind, dial, or inspect the environment.
 
-The Connect handshake identifies the Wire protocol and may include a
-host-supplied runtime identity. It does not claim a Ferret version, runtime
-capability set, module inventory, or runtime implementation metadata that the
-Unified API cannot provide portably. The API's portable
+The Connect handshake contains the logical connection ID, Wire protocol identity,
+the exact portable runtime version, and optional host-supplied identity. Runtime
+version is independent of `RuntimeIdentity.version`: the latter describes the
+host application or instance. Version retrieval uses the stream context joined
+with logical connection cancellation, inside the external implementation panic
+boundary. Failure reclaims the connection and follows existing sanitized error
+and context-status conventions. Presence distinguishes an empty successful
+version from an unsupported older handshake. Wire does not expose Ferret-specific
+build/Git metadata, runtime capabilities, or module inventories. The API's portable
 `diagnostics.Diagnostics` collection is preserved, but it has no severity or
 general structured runtime-error taxonomy. Wire keeps only categories needed
 to operate the remote lifecycle and sanitizes implementation failures.
@@ -403,11 +409,12 @@ architectural reason and an explicit contract.
 
 ## Universal API contract
 
-Wire targets `v1.0.0-alpha.19`; the complete retained method/setter audit is in
-[Universal API projection](uapi-audit.md). Output is optional and independent of
-execution or cleanup failure. `(nil, nil)` is an invalid hosted execution result.
-Compile retrieves fallible parameter metadata and copies it before publication;
-metadata error or panic closes the unpublished plan once and joins cleanup errors.
+Wire targets `v1.0.0-alpha.20`; the retained methods and owning tests are listed in
+[Universal API integration coverage](../test/integration/README.md#interface-coverage).
+Output is optional and independent of execution or cleanup failure. `(nil, nil)`
+is an invalid hosted execution result.
+Compile calls `api.Plan.Params(ctx)` with its allocation context and copies the
+fallible parameter metadata before publication; metadata error or panic closes the unpublished plan once and joins cleanup errors.
 Anonymous sources and explicitly empty filesystem roots/content types pass through
 unchanged. Wire owns structural protocol checks; hosted implementations own source
 validity, filesystem interpretation, and codec validation.

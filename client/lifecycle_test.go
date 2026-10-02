@@ -71,8 +71,9 @@ type lifecycleServer struct {
 
 func (s *lifecycleServer) Connect(_ *wirev1.ConnectRequest, stream wirev1.RuntimeService_ConnectServer) error {
 	err := stream.Send(&wirev1.ConnectResponse{
-		ConnectionId: &wirev1.ConnectionId{Value: "connection"},
-		Protocol:     &wirev1.ProtocolInfo{Name: "ferret.wire", Version: "v1"},
+		ConnectionId:   &wirev1.ConnectionId{Value: "connection"},
+		Protocol:       &wirev1.ProtocolInfo{Name: "ferret.wire", Version: "v1"},
+		RuntimeVersion: []byte{},
 	})
 	if err != nil || s.disconnect {
 		return err

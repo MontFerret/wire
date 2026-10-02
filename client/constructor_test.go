@@ -20,10 +20,11 @@ func TestNewFailureReturnsNilRuntimeAndClosesHandshake(t *testing.T) {
 	}{
 		{name: "RPC failure", err: status.Error(codes.Unavailable, "handshake unavailable")},
 		{name: "empty handshake", handshake: &wirev1.ConnectResponse{}},
-		{name: "missing ID", handshake: &wirev1.ConnectResponse{Protocol: &wirev1.ProtocolInfo{Name: "ferret.wire", Version: "v1"}}},
-		{name: "missing protocol", handshake: &wirev1.ConnectResponse{ConnectionId: &wirev1.ConnectionId{Value: "connection"}}},
-		{name: "missing name", handshake: &wirev1.ConnectResponse{ConnectionId: &wirev1.ConnectionId{Value: "connection"}, Protocol: &wirev1.ProtocolInfo{Version: "v1"}}},
-		{name: "missing version", handshake: &wirev1.ConnectResponse{ConnectionId: &wirev1.ConnectionId{Value: "connection"}, Protocol: &wirev1.ProtocolInfo{Name: "ferret.wire"}}},
+		{name: "missing ID", handshake: &wirev1.ConnectResponse{RuntimeVersion: []byte{}, Protocol: &wirev1.ProtocolInfo{Name: "ferret.wire", Version: "v1"}}},
+		{name: "missing protocol", handshake: &wirev1.ConnectResponse{RuntimeVersion: []byte{}, ConnectionId: &wirev1.ConnectionId{Value: "connection"}}},
+		{name: "missing name", handshake: &wirev1.ConnectResponse{RuntimeVersion: []byte{}, ConnectionId: &wirev1.ConnectionId{Value: "connection"}, Protocol: &wirev1.ProtocolInfo{Version: "v1"}}},
+		{name: "missing protocol version", handshake: &wirev1.ConnectResponse{RuntimeVersion: []byte{}, ConnectionId: &wirev1.ConnectionId{Value: "connection"}, Protocol: &wirev1.ProtocolInfo{Name: "ferret.wire"}}},
+		{name: "missing runtime version", handshake: &wirev1.ConnectResponse{ConnectionId: &wirev1.ConnectionId{Value: "connection"}, Protocol: &wirev1.ProtocolInfo{Name: "ferret.wire", Version: "v1"}, RuntimeIdentity: &wirev1.RuntimeIdentity{Name: "host", Version: "host-7.1"}}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			ended := make(chan struct{})
@@ -34,6 +35,10 @@ func TestNewFailureReturnsNilRuntimeAndClosesHandshake(t *testing.T) {
 			remote, err := New(ctx, connection)
 			if err == nil || remote != nil {
 				t.Fatalf("New returned %v, %v; want nil runtime and an error", remote, err)
+			}
+
+			if test.err == nil && err.Error() != "Wire server returned an invalid Connect handshake" {
+				t.Fatalf("malformed handshake used a different failure path: %v", err)
 			}
 
 			if test.err != nil {

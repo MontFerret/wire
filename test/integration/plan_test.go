@@ -255,7 +255,7 @@ func TestReusablePlanAndDurableSessions(t *testing.T) {
 func requirePlanParams(t *testing.T, plan api.Plan) []string {
 	t.Helper()
 
-	values, err := plan.Params()
+	values, err := plan.Params(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}

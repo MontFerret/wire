@@ -2,11 +2,13 @@ package grpcserver
 
 import (
 	"context"
+	"errors"
 
 	"github.com/MontFerret/api"
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
 	wireexecution "github.com/MontFerret/wire/pkg/execution"
 	"github.com/MontFerret/wire/server/internal/core"
+	"github.com/MontFerret/wire/server/internal/panicboundary"
 )
 
 // RuntimeService adapts the runtime RPC contract to its core owners.
@@ -30,10 +32,29 @@ func (s *RuntimeService) Connect(_ *wirev1.ConnectRequest, stream wirev1.Runtime
 		_ = s.connections.CloseConnection(context.Background(), connection.ID())
 	}()
 
+	ctx, cancel := core.OperationContext(stream.Context(), connection.Context())
+	defer cancel()
+
+	if err := ctx.Err(); err != nil {
+		return rpcError(err)
+	}
+
+	version, err := panicboundary.Call(func() (api.Version, error) {
+		return s.runtime.Version(ctx)
+	})
+	if err != nil {
+		return rpcError(errors.Join(ctx.Err(), err))
+	}
+
+	if err := ctx.Err(); err != nil {
+		return rpcError(err)
+	}
+
 	response := &wirev1.ConnectResponse{
 		ConnectionId:    &wirev1.ConnectionId{Value: string(connection.ID())},
 		Protocol:        protocolInfo(s.info),
 		RuntimeIdentity: runtimeIdentity(s.info),
+		RuntimeVersion:  []byte(version),
 	}
 
 	if err := stream.Send(response); err != nil {

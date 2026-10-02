@@ -56,7 +56,7 @@ func CompilePlan(ctx context.Context, runtime api.Runtime, store *ResourceStore,
 		return nil, errors.Join(err, closeAPIPlan(compiled))
 	}
 
-	parameters, err := apiPlanParameters(compiled)
+	parameters, err := apiPlanParameters(ctx, compiled)
 	if err != nil {
 		return nil, errors.Join(err, closeAPIPlan(compiled))
 	}

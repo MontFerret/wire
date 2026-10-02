@@ -2,7 +2,8 @@ package grpcserver
 
 import wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
 
-// Handshake is immutable transport metadata supplied by the server composition root.
+// Handshake is immutable protocol and host-identity metadata supplied by the
+// server composition root. RuntimeVersion belongs to host identity, not UAPI Version.
 type Handshake struct {
 	ProtocolName      string
 	ProtocolVersion   string

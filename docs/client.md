@@ -21,8 +21,8 @@ their canonical Universal API types directly. `client` exports only `New`,
 
 `Runtime.Run` invokes the hosted `api.Runtime.Run` directly, once per call.
 `Compile` and `CompileDebug` create reusable plans through the corresponding
-hosted methods. `Plan.Params() ([]string, error)` returns a defensive copy of metadata captured
-before the compiled plan was published. A hosted metadata error or panic closes
+hosted methods. `Plan.Params(ctx) ([]string, error)` returns a defensive copy of
+metadata captured before the compiled plan was published. A hosted metadata error or panic closes
 the unpublished plan once and preserves its cleanup error. Each `NewSession`
 creates one durable hosted session with the supplied semantic options;
 sequential `Session.Run` calls reuse it. A concurrent run on that session is
@@ -33,8 +33,17 @@ Each runtime/session invocation privately acquires, watches, and releases an
 execution. Output is `*api.Output`: its content type and encoded bytes are
 copied without interpretation. Nil output differs from present empty output,
 and available output survives execution or cleanup errors. A hosted `(nil, nil)`
-result is invalid. No IDs, RPC handles, execution snapshots, or
-connection metadata are exposed by the returned API interfaces.
+result is invalid. No IDs, RPC handles, Wire execution snapshots, or protocol/host
+identity metadata are exposed by the returned API interfaces. `Runtime.Version(ctx)` exposes only
+the portable UAPI runtime version captured during Connect.
+
+The Connect snapshot requires a present `runtime_version`, including when empty.
+Its bytes are converted to `api.Version` unchanged, including invalid UTF-8.
+Absent version metadata follows the invalid-Connect handshake path; host identity
+is never substituted. `Runtime.Version(ctx)` and `Plan.Params(ctx)` reject nil
+contexts and preserve `context.Canceled` and `context.DeadlineExceeded`. Both read
+immutable snapshots without another RPC or lifecycle admission and remain available
+after resource or transport cleanup. Parameter slices are caller-owned.
 
 ## Options and parameters
 
@@ -224,5 +233,6 @@ compatibility shims.
 
 Use canonical runtime/plan/session operations, cancellation contexts, and
 debugger events. The versioned protobuf services and shared domain packages
-are extended additively for alpha.19; callers implementing protocol tooling may
-still use the generated bindings directly. See the [contract audit](uapi-audit.md).
+are extended additively for alpha.19 and alpha.20; callers implementing protocol
+tooling may still use the generated bindings directly. See the
+[alpha.20 protocol contract](protocol.md#alpha20-metadata-adoption).

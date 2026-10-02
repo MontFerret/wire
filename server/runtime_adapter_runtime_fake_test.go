@@ -19,6 +19,10 @@ type contractRuntime struct {
 	closeCalls     int
 }
 
+func (r *contractRuntime) Version(ctx context.Context) (api.Version, error) {
+	return api.Version("runtime-test"), ctx.Err()
+}
+
 func (r *contractRuntime) Run(ctx context.Context, src api.Source, options ...api.SessionOption) (*api.Output, error) {
 	configured, err := applyAPIOptions(options)
 	if err != nil {

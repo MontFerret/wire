@@ -284,7 +284,7 @@ func TestCompilePanicsAreSanitizedAndCloseReturnedPlansOnce(t *testing.T) {
 	})
 
 	t.Run("metadata", func(t *testing.T) {
-		plan := &spyPlan{paramsCall: func() []string { panic("metadata secret") }}
+		plan := &spyPlan{paramsCall: func(context.Context) ([]string, error) { panic("metadata secret") }}
 		connection := newTestConnection(t, &spyRuntime{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
 			return plan, nil
 		}})
