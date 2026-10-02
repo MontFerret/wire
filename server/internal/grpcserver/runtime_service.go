@@ -50,12 +50,11 @@ func (s *RuntimeService) Connect(_ *wirev1.ConnectRequest, stream wirev1.Runtime
 		return rpcError(err)
 	}
 
-	versionString := string(version)
 	response := &wirev1.ConnectResponse{
 		ConnectionId:    &wirev1.ConnectionId{Value: string(connection.ID())},
 		Protocol:        protocolInfo(s.info),
 		RuntimeIdentity: runtimeIdentity(s.info),
-		RuntimeVersion:  &versionString,
+		RuntimeVersion:  []byte(version),
 	}
 
 	if err := stream.Send(response); err != nil {

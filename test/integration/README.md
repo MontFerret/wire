@@ -56,9 +56,10 @@ transport/closed-handle errors. Wire must never close the hosted runtime.
 ## Interface coverage
 
 Every current interface method has end-to-end coverage. The alpha.20 metadata
-suite covers opaque/empty runtime versions, one hosted call per connection,
-handshake failure and capacity reclamation, constructor cancellation, cached
-metadata context errors, detached normal/debug parameter snapshots, and reads
+suite covers opaque/empty runtime versions (including invalid UTF-8 and NUL bytes),
+one hosted call per connection, handshake failure and capacity reclamation,
+constructor cancellation, cached metadata context errors, detached normal/debug
+parameter snapshots, and reads
 after cleanup. Hosted metadata hooks receive their operation context. Core/raw
 protocol tests additionally prove cancellation during hosted parameter retrieval
 without changing the client's detached allocation contract. Names below are Go test
@@ -154,12 +155,12 @@ go test -race ./test/integration -count=20 -shuffle=on
 The root `make test` and `make test-race` include this suite on existing CI jobs.
 Tests need no native runtime, external server, TCP port, or additional dependency.
 
-## Alpha.19 retained surface
+## Retained API contracts
 
-The [complete audit](../../docs/uapi-audit.md) includes `api.Runtime`, `api.Plan`,
-`api.Session`, `debugger.Session`, `api.PlanOptions`, and `api.SessionOptions`,
-with each method/setter, projection, and owning test. All six retain production
-compile-time assertions. [api_contract_test.go](api_contract_test.go) covers output
+The [interface coverage](#interface-coverage) lists retained runtime, plan,
+session, and debugger methods and their owning tests. Those four interfaces and
+`api.PlanOptions` and `api.SessionOptions` retain production compile-time assertions.
+[api_contract_test.go](api_contract_test.go) covers output
 presence and cleanup errors, fallible metadata, FSRoot/content-type presence,
 anonymous sources, signed function IDs, atomic replacement, final enumeration,
 command event-plus-error results, Start lifetime, all debugger context signatures,

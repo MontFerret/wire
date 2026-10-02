@@ -48,7 +48,8 @@ is the exact opaque value from the hosted `api.Runtime.Version(ctx)`; and option
 `runtime_identity` is host-supplied application or instance identity configured
 through `WithRuntimeIdentity`. `runtime_version` and `runtime_identity.version`
 have different owners and semantics, even when their strings happen to match.
-An empty runtime version is valid when present; alpha.20 clients reject handshakes
+Runtime version bytes are preserved exactly, including invalid UTF-8. An empty
+runtime version is valid when present; alpha.20 clients reject handshakes
 without the field. Wire exposes no capability negotiation, Ferret-specific build
 metadata, Git metadata, or module inventories.
 
@@ -166,8 +167,8 @@ another RPC.
 Debugger methods take caller contexts. `RunCommand` streams preserve Start's
 execution lifetime and each resume's request context; cancellation does not
 release the debugger. Atomic breakpoint replacement works while running, and
-breakpoint enumeration remains available after explicit Close. See the complete
-[alpha.20 method and setter audit](docs/uapi-audit.md).
+breakpoint enumeration remains available after explicit Close. See the
+[alpha.20 interface coverage](test/integration/README.md#interface-coverage).
 
 The public client exports only `New`, `Error`, `ErrClosed`, and
 `ErrExecutionCancelled`. Existing users of `NewRuntime` should call `New`;

@@ -20,7 +20,7 @@ import (
 )
 
 func TestRuntimeVersionSnapshot(t *testing.T) {
-	for _, value := range []api.Version{"v2.0.0-alpha.test", " runtime-2.0+opaque \n", ""} {
+	for _, value := range []api.Version{"v2.0.0-alpha.test", " runtime-2.0+opaque \n", "版本-α", "\xff", "runtime\x00\xff\xc3", ""} {
 		t.Run(string(value), func(t *testing.T) {
 			h := harness.New(t, harness.WithBehavior(harness.RuntimeBehavior{Version: func(context.Context) (api.Version, error) { return value, nil }}),
 				harness.WithServerOptions(server.WithRuntimeIdentity(server.RuntimeIdentity{Name: "host", Version: "host-7.1"})))

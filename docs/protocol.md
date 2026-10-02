@@ -149,7 +149,7 @@ and field. Rows that list several fields classify each listed field.
 | `ProtocolInfo` | C | `name=1`, `version=2`; identifies Wire, not the runtime. |
 | `RuntimeIdentity` | C | Host-supplied `name=1`, optional `version=2`, optional `instance_id=3`. |
 | `ConnectRequest` | C | Empty request. |
-| `ConnectResponse` | A/B/C | `connection_id=3` (B), `protocol=4` (C), optional `runtime_identity=5` (C), optional opaque `runtime_version=6` (A/C); sent once. Runtime version presence is required by alpha.20 clients. |
+| `ConnectResponse` | A/B/C | `connection_id=3` (B), `protocol=4` (C), optional `runtime_identity=5` (C), optional opaque bytes `runtime_version=6` (A/C); sent once. Runtime version presence is required by alpha.20 clients. |
 | `CloseConnectionRequest` | B/C | `connection_id=1`. |
 | `CloseConnectionResponse` | C | Empty acknowledgement. |
 | enum `ErrorCategory` | A/B/C | `UNSPECIFIED=0`; compilation `2`, execution `3`; Plan `4`, Execution `5`, DebugSession `6`, Connection `7`, Session `16` not found; invalid state `8`; internal runtime boundary `10`; watcher lag `11`; breakpoint not found `15`. |
@@ -403,8 +403,9 @@ Connect contains four independently owned concepts:
 | `runtime_version` | Exact opaque version of the hosted `api.Runtime` implementation |
 | `runtime_identity` | Optional host-supplied application/instance identity |
 
-`runtime_version` is a UAPI projection (class A), encoded as optional string field
-6. The server invokes hosted `Runtime.Version(ctx)` once per handshake and always
+`runtime_version` is a UAPI projection (class A), encoded as optional bytes field
+6. Bytes preserve the opaque UAPI value exactly without requiring valid UTF-8.
+The server invokes hosted `Runtime.Version(ctx)` once per handshake and always
 sets presence, including for an empty result. Failure or panic prevents a
 successful handshake and reclaims the logical connection; existing context status
 mapping and runtime-error sanitization apply. `runtime_version` is independent of
@@ -413,6 +414,8 @@ mapping and runtime-error sanitization apply. `runtime_version` is independent o
 Alpha.20 clients reject absent runtime version as an invalid Connect handshake.
 Older protobuf readers can ignore the additive field. The client retains the value
 as `api.Version` and serves `Version(ctx)` locally, including after cleanup.
+Field 6 is introduced by the alpha.20 adoption; its generated Go field and
+getter use `[]byte`. ProtoJSON represents its value as base64.
 
 Normal and debug compilation call hosted `Plan.Params(ctx)` with the existing
 allocation context. Ordered parameter names still cross through `Plan.parameters=2`

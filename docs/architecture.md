@@ -409,9 +409,10 @@ architectural reason and an explicit contract.
 
 ## Universal API contract
 
-Wire targets `v1.0.0-alpha.20`; the complete retained method/setter audit is in
-[Universal API projection](uapi-audit.md). Output is optional and independent of
-execution or cleanup failure. `(nil, nil)` is an invalid hosted execution result.
+Wire targets `v1.0.0-alpha.20`; the retained methods and owning tests are listed in
+[Universal API integration coverage](../test/integration/README.md#interface-coverage).
+Output is optional and independent of execution or cleanup failure. `(nil, nil)`
+is an invalid hosted execution result.
 Compile calls `api.Plan.Params(ctx)` with its allocation context and copies the
 fallible parameter metadata before publication; metadata error or panic closes the unpublished plan once and joins cleanup errors.
 Anonymous sources and explicitly empty filesystem roots/content types pass through

@@ -269,8 +269,9 @@ type ConnectResponse struct {
 	Protocol        *ProtocolInfo          `protobuf:"bytes,4,opt,name=protocol,proto3" json:"protocol,omitempty"`
 	RuntimeIdentity *RuntimeIdentity       `protobuf:"bytes,5,opt,name=runtime_identity,json=runtimeIdentity,proto3" json:"runtime_identity,omitempty"`
 	// runtime_version projects api.Runtime.Version verbatim, independently of host identity.
+	// Bytes preserve opaque values without requiring valid UTF-8.
 	// Presence is required by alpha.20 peers; an empty but present value is valid.
-	RuntimeVersion *string `protobuf:"bytes,6,opt,name=runtime_version,json=runtimeVersion,proto3,oneof" json:"runtime_version,omitempty"`
+	RuntimeVersion []byte `protobuf:"bytes,6,opt,name=runtime_version,json=runtimeVersion,proto3,oneof" json:"runtime_version,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -326,11 +327,11 @@ func (x *ConnectResponse) GetRuntimeIdentity() *RuntimeIdentity {
 	return nil
 }
 
-func (x *ConnectResponse) GetRuntimeVersion() string {
-	if x != nil && x.RuntimeVersion != nil {
-		return *x.RuntimeVersion
+func (x *ConnectResponse) GetRuntimeVersion() []byte {
+	if x != nil {
+		return x.RuntimeVersion
 	}
-	return ""
+	return nil
 }
 
 // ConnectRequest has no transport- or client-identity fields.
@@ -829,7 +830,7 @@ const file_ferret_wire_v1_runtime_proto_rawDesc = "" +
 	"\rconnection_id\x18\x03 \x01(\v2\x1c.ferret.wire.v1.ConnectionIdR\fconnectionId\x128\n" +
 	"\bprotocol\x18\x04 \x01(\v2\x1c.ferret.wire.v1.ProtocolInfoR\bprotocol\x12J\n" +
 	"\x10runtime_identity\x18\x05 \x01(\v2\x1f.ferret.wire.v1.RuntimeIdentityR\x0fruntimeIdentity\x12,\n" +
-	"\x0fruntime_version\x18\x06 \x01(\tH\x00R\x0eruntimeVersion\x88\x01\x01B\x12\n" +
+	"\x0fruntime_version\x18\x06 \x01(\fH\x00R\x0eruntimeVersion\x88\x01\x01B\x12\n" +
 	"\x10_runtime_versionJ\x04\b\x01\x10\x02J\x04\b\x02\x10\x03R\x06openedR\aclosing\"'\n" +
 	"\x0eConnectRequestJ\x04\b\x01\x10\x02R\x0fclient_identity\"[\n" +
 	"\x16CloseConnectionRequest\x12A\n" +

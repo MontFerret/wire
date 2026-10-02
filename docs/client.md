@@ -38,6 +38,7 @@ identity metadata are exposed by the returned API interfaces. `Runtime.Version(c
 the portable UAPI runtime version captured during Connect.
 
 The Connect snapshot requires a present `runtime_version`, including when empty.
+Its bytes are converted to `api.Version` unchanged, including invalid UTF-8.
 Absent version metadata follows the invalid-Connect handshake path; host identity
 is never substituted. `Runtime.Version(ctx)` and `Plan.Params(ctx)` reject nil
 contexts and preserve `context.Canceled` and `context.DeadlineExceeded`. Both read
@@ -233,4 +234,5 @@ compatibility shims.
 Use canonical runtime/plan/session operations, cancellation contexts, and
 debugger events. The versioned protobuf services and shared domain packages
 are extended additively for alpha.19 and alpha.20; callers implementing protocol
-tooling may still use the generated bindings directly. See the [contract audit](uapi-audit.md).
+tooling may still use the generated bindings directly. See the
+[alpha.20 protocol contract](protocol.md#alpha20-metadata-adoption).

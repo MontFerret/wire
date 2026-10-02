@@ -1,11 +1,13 @@
 package server_test
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
@@ -345,7 +347,41 @@ func TestProtocolSourcesContainNoNativeMetadataOrFakeCapabilities(t *testing.T) 
 
 func TestRuntimeVersionFieldPreservesPresence(t *testing.T) {
 	field := wirev1.File_ferret_wire_v1_runtime_proto.Messages().ByName("ConnectResponse").Fields().ByName("runtime_version")
-	if field == nil || field.Number() != 6 || field.Kind() != protoreflect.StringKind || !field.HasOptionalKeyword() || !field.HasPresence() {
-		t.Fatalf("runtime_version must remain optional string field 6: %v", field)
+	if field == nil || field.Number() != 6 || field.Kind() != protoreflect.BytesKind || !field.HasOptionalKeyword() || !field.HasPresence() {
+		t.Fatalf("runtime_version must remain optional bytes field 6: %v", field)
+	}
+}
+
+func TestRuntimeVersionSerializationPreservesBytesAndPresence(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		value []byte
+	}{
+		{name: "absent"},
+		{name: "present empty", value: []byte{}},
+		{name: "Unicode", value: []byte("版本-α")},
+		{name: "invalid UTF-8", value: []byte{0xff}},
+		{name: "mixed NUL and invalid bytes", value: []byte("runtime\x00\xff\xc3")},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			message := &wirev1.ConnectResponse{RuntimeVersion: test.value}
+
+			encoded, err := proto.Marshal(message)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			var decoded wirev1.ConnectResponse
+			if err := proto.Unmarshal(encoded, &decoded); err != nil {
+				t.Fatal(err)
+			}
+
+			field := decoded.ProtoReflect().Descriptor().Fields().ByName("runtime_version")
+
+			present := test.value != nil
+			if decoded.ProtoReflect().Has(field) != present || (decoded.RuntimeVersion != nil) != present || !bytes.Equal(decoded.RuntimeVersion, test.value) {
+				t.Fatalf("decoded version=%q presence=%v; want %q presence=%v", decoded.RuntimeVersion, decoded.ProtoReflect().Has(field), test.value, present)
+			}
+		})
 	}
 }

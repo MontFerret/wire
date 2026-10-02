@@ -45,7 +45,7 @@ func (s *connectStream) Send(response *wirev1.ConnectResponse) error {
 }
 
 func TestConnectProjectsOpaqueRuntimeVersionIndependentlyOfHostIdentity(t *testing.T) {
-	for _, version := range []api.Version{"v2.0.0-alpha.test", " runtime-2.0+opaque \n", ""} {
+	for _, version := range []api.Version{"v2.0.0-alpha.test", " runtime-2.0+opaque \n", "版本-α", "\xff", "runtime\x00\xff\xc3", ""} {
 		t.Run(string(version), func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 			defer cancel()
@@ -72,7 +72,7 @@ func TestConnectProjectsOpaqueRuntimeVersionIndependentlyOfHostIdentity(t *testi
 				t.Fatal(err)
 			}
 
-			if calls != 1 || stream.response.RuntimeVersion == nil || stream.response.GetRuntimeVersion() != string(version) || stream.response.GetRuntimeIdentity().GetVersion() != "host-7.1" {
+			if calls != 1 || stream.response.RuntimeVersion == nil || string(stream.response.GetRuntimeVersion()) != string(version) || stream.response.GetRuntimeIdentity().GetVersion() != "host-7.1" {
 				t.Fatalf("Connect calls=%d response=%v", calls, stream.response)
 			}
 

@@ -75,7 +75,7 @@ func (s *clientTestServer) Connect(_ *wirev1.ConnectRequest, stream wirev1.Runti
 		response = &wirev1.ConnectResponse{
 			ConnectionId:   &wirev1.ConnectionId{Value: "connection"},
 			Protocol:       &wirev1.ProtocolInfo{Name: "ferret.wire", Version: "v1"},
-			RuntimeVersion: new(string),
+			RuntimeVersion: []byte{},
 		}
 	}
 
