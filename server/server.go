@@ -16,7 +16,7 @@ import (
 )
 
 // Server hosts Ferret Wire over a caller-supplied listener. It borrows the
-// runtime passed to NewServer and never closes it.
+// runtime passed to New and never closes it.
 type Server struct {
 	grpcServer  *grpc.Server
 	connections *core.ConnectionRegistry
@@ -26,9 +26,9 @@ type Server struct {
 	shutdown lifecycle.Close
 }
 
-// NewServer adapts a caller-configured runtime without taking ownership
+// New adapts a caller-configured runtime without taking ownership
 // or creating a listener. Limits default to DefaultLimits.
-func NewServer(runtime api.Runtime, options ...Option) (*Server, error) {
+func New(runtime api.Runtime, options ...Option) (*Server, error) {
 	if isNilRuntime(runtime) {
 		return nil, errors.New("runtime is required")
 	}
@@ -71,7 +71,7 @@ func NewServer(runtime api.Runtime, options ...Option) (*Server, error) {
 }
 
 // Serve serves the caller-owned listener until it fails, ctx is cancelled, or
-// Shutdown is called. NewServer and package initialization never open a listener.
+// Shutdown is called. New and package initialization never open a listener.
 func (s *Server) Serve(ctx context.Context, listener net.Listener) error {
 	if listener == nil {
 		return errors.New("listener is required")
@@ -159,13 +159,4 @@ func (s *Server) settleShutdown(deadline time.Time) {
 
 	err = s.connections.Close(context.Background())
 	s.grpcServer.GracefulStop()
-}
-
-func deadlineFrom(ctx context.Context) time.Time {
-	deadline, ok := ctx.Deadline()
-	if !ok {
-		return time.Time{}
-	}
-
-	return deadline
 }

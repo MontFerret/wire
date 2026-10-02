@@ -23,7 +23,7 @@ host application                         client application
              └── Debug sessions
 ```
 
-`NewServer` only constructs state. It does not listen, dial, inspect the environment, or close the supplied runtime. `Serve` is the only operation that accepts a listener, and the caller retains responsibility for the endpoint. `Shutdown` releases Wire-owned resources while leaving the runtime open.
+`New` only constructs state. It does not listen, dial, inspect the environment, or close the supplied runtime. `Serve` is the only operation that accepts a listener, and the caller retains responsibility for the endpoint. `Shutdown` releases Wire-owned resources while leaving the runtime open.
 
 Every `Connect` server stream creates one logical ownership scope. It is deliberately independent of the physical HTTP/2 connection: several logical connections can share one `grpc.ClientConn`, but their IDs and resources remain isolated. Cancelling the Connect stream or calling `CloseConnection` first cancels and waits for pending creation, then settles executions, normal sessions, debug sessions, and plans in descendants-first order. Concurrent callers that observe the same in-flight release wait for its retained result. Once cleanup completes, the ID is stale and returns the corresponding structured not-found error. Cancelling one waiter does not abandon committed cleanup.
 
@@ -63,7 +63,7 @@ The host chooses and configures both the runtime implementation and endpoint. Th
 
 ```go
 func serveRuntime(ctx context.Context, hostRuntime api.Runtime, listener net.Listener) error {
-    wireServer, err := server.NewServer(hostRuntime, server.WithRuntimeIdentity(server.RuntimeIdentity{
+    wireServer, err := server.New(hostRuntime, server.WithRuntimeIdentity(server.RuntimeIdentity{
         Name: "my-app", Version: "1.0.0", InstanceID: "worker-1",
     }))
     if err != nil {
@@ -74,7 +74,7 @@ func serveRuntime(ctx context.Context, hostRuntime api.Runtime, listener net.Lis
 }
 ```
 
-`NewServer` accepts the canonical `api.Runtime` directly. `server.RuntimeIdentity`
+`New` accepts the canonical `api.Runtime` directly. `server.RuntimeIdentity`
 is optional host-supplied handshake metadata.
 
 For existing hosts, replace `server.Runtime` with `api.Runtime` and

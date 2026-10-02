@@ -19,7 +19,7 @@ type Limits struct {
 	MaxOutboundMessageBytes       int
 }
 
-// DefaultLimits returns the secure finite limits used by NewServer.
+// DefaultLimits returns the secure finite limits used by New.
 func DefaultLimits() Limits {
 	return Limits{
 		MaxConnections:                64,

@@ -95,7 +95,7 @@ func New(t testing.TB, options ...Option) *Harness {
 
 	var err error
 
-	h.server, err = server.NewServer(hosted, configured.serverOptions...)
+	h.server, err = server.New(hosted, configured.serverOptions...)
 	if err != nil {
 		t.Fatal(err)
 	}

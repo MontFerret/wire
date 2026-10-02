@@ -2,5 +2,5 @@
 // and a caller-configured Unified API runtime.
 //
 // Runtime aliases the canonical github.com/MontFerret/api.Runtime interface
-// accepted by NewServer. The host retains ownership of its implementation.
+// accepted by New. The host retains ownership of its implementation.
 package server

@@ -69,7 +69,7 @@ func newHarness(t *testing.T, options ...server.Option) *harness {
 		}
 	})
 
-	h.server, err = server.NewServer(h.hosted, options...)
+	h.server, err = server.New(h.hosted, options...)
 	if err != nil {
 		t.Fatal(err)
 	}

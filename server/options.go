@@ -43,7 +43,7 @@ func WithRuntimeIdentity(identity RuntimeIdentity) Option {
 	})
 }
 
-// WithLimits replaces the complete default limit set. NewServer rejects
+// WithLimits replaces the complete default limit set. New rejects
 // the option when any resource or message limit is not positive.
 func WithLimits(limits Limits) Option {
 	return serverOptionFunc(func(cfg *config) error {

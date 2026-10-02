@@ -265,7 +265,7 @@ func TestNewServerRejectsNilAndTypedNilRuntime(t *testing.T) {
 		"typed nil":     typedNil,
 	} {
 		t.Run(name, func(t *testing.T) {
-			if _, err := server.NewServer(runtime); err == nil || !strings.Contains(err.Error(), "runtime") {
+			if _, err := server.New(runtime); err == nil || !strings.Contains(err.Error(), "runtime") {
 				t.Fatalf("unexpected nil runtime result: %v", err)
 			}
 		})
@@ -425,7 +425,7 @@ func TestMessageLimitsRemainAtTheGRPCBoundary(t *testing.T) {
 func newIntegrationEnv(t testing.TB, runtime api.Runtime, options ...server.Option) *integrationEnv {
 	t.Helper()
 
-	server, err := server.NewServer(runtime, options...)
+	server, err := server.New(runtime, options...)
 	if err != nil {
 		t.Fatal(err)
 	}
