@@ -20,7 +20,7 @@ func TestProtocolDescriptorsReserveRemovedV1Surface(t *testing.T) {
 	}{
 		{
 			message:  wirev1.File_ferret_wire_v1_runtime_proto.Messages().ByName("ConnectResponse"),
-			fields:   []protoreflect.Name{"connection_id", "protocol", "runtime_identity"},
+			fields:   []protoreflect.Name{"connection_id", "protocol", "runtime_identity", "runtime_version"},
 			numbers:  []protoreflect.FieldNumber{1, 2},
 			reserved: []protoreflect.Name{"opened", "closing"},
 		},
@@ -340,5 +340,12 @@ func TestProtocolSourcesContainNoNativeMetadataOrFakeCapabilities(t *testing.T) 
 				t.Errorf("%s still contains removed native protocol token %q", file, token)
 			}
 		}
+	}
+}
+
+func TestRuntimeVersionFieldPreservesPresence(t *testing.T) {
+	field := wirev1.File_ferret_wire_v1_runtime_proto.Messages().ByName("ConnectResponse").Fields().ByName("runtime_version")
+	if field == nil || field.Number() != 6 || field.Kind() != protoreflect.StringKind || !field.HasOptionalKeyword() || !field.HasPresence() {
+		t.Fatalf("runtime_version must remain optional string field 6: %v", field)
 	}
 }

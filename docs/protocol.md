@@ -143,13 +143,13 @@ and field. Rows that list several fields classify each listed field.
 | RPC `Run` | A/B/C | Creates one connection-owned Execution that invokes hosted `api.Runtime.Run`. |
 | `RunRequest` | A/B/C | `connection_id=1`, `source=2`, optional `parameters=3`, requested `output_content_type=4`, optional `fs_root=5`, `output_content_type_set=6`. |
 | `RunResponse` | B/C | Required running `execution=1`. |
-| RPC `Connect` | B/C | `ConnectRequest` to streaming `ConnectResponse`; creates and signals one logical connection. |
+| RPC `Connect` | A/B/C | `ConnectRequest` to streaming `ConnectResponse`; creates and signals one logical connection. |
 | RPC `CloseConnection` | B/C | Explicit connection teardown and empty acknowledgement. |
 | `ConnectionId` | B | `value=1`, opaque and non-empty. |
 | `ProtocolInfo` | C | `name=1`, `version=2`; identifies Wire, not the runtime. |
 | `RuntimeIdentity` | C | Host-supplied `name=1`, optional `version=2`, optional `instance_id=3`. |
 | `ConnectRequest` | C | Empty request. |
-| `ConnectResponse` | B/C | `connection_id=3`, `protocol=4`, optional `runtime_identity=5`; sent once. |
+| `ConnectResponse` | A/B/C | `connection_id=3` (B), `protocol=4` (C), optional `runtime_identity=5` (C), optional opaque `runtime_version=6` (A/C); sent once. Runtime version presence is required by alpha.20 clients. |
 | `CloseConnectionRequest` | B/C | `connection_id=1`. |
 | `CloseConnectionResponse` | C | Empty acknowledgement. |
 | enum `ErrorCategory` | A/B/C | `UNSPECIFIED=0`; compilation `2`, execution `3`; Plan `4`, Execution `5`, DebugSession `6`, Connection `7`, Session `16` not found; invalid state `8`; internal runtime boundary `10`; watcher lag `11`; breakpoint not found `15`. |
@@ -288,8 +288,8 @@ and field. Rows that list several fields classify each listed field.
 
 ### D: implementation leakage
 
-- Ferret version, module-build metadata, runtime module inventories, native
-  runtime values, native diagnostic spans/source identities, panic data, and
+- Ferret-specific build/Git metadata, module-build metadata, runtime module
+  inventories, native runtime values, native diagnostic spans/source identities, panic data, and
   arbitrary implementation errors are absent.
 - `Capability`, `RuntimeInfo`, `ConnectionOpened`, `ResourceKind`, and
   `DiagnosticSpan` messages/enums are absent.
@@ -332,8 +332,8 @@ and field. Rows that list several fields classify each listed field.
 
 Wire does not invent diagnostic severity, a general structured runtime-error
 taxonomy, a Unified API declaration of accepted parameter values, runtime
-introspection/versioning, or capability negotiation. Host-supplied
-`RuntimeIdentity` is not presented as API introspection.
+introspection beyond portable `api.Runtime.Version`, or capability negotiation.
+Host-supplied `RuntimeIdentity` is not presented as API introspection.
 
 Native Ferret consumer migration, bytecode/node protocols, distributed execution,
 and advanced negotiated capabilities remain separate work. The public client
@@ -391,3 +391,33 @@ RunCommand allows at most `MaxWatchersPerResource + 1` live streams per debugger
 Reservations remain charged until the stream handler exits. A debugger poisoned
 by an implementation panic is closed and never reused for final enumeration;
 the sanitized poisoning error is retained instead.
+
+## Alpha.20 metadata adoption
+
+Connect contains four independently owned concepts:
+
+| Field | Owner and meaning |
+| --- | --- |
+| `connection_id` | Wire logical resource/lifecycle identity |
+| `protocol` | Wire protocol name/version |
+| `runtime_version` | Exact opaque version of the hosted `api.Runtime` implementation |
+| `runtime_identity` | Optional host-supplied application/instance identity |
+
+`runtime_version` is a UAPI projection (class A), encoded as optional string field
+6. The server invokes hosted `Runtime.Version(ctx)` once per handshake and always
+sets presence, including for an empty result. Failure or panic prevents a
+successful handshake and reclaims the logical connection; existing context status
+mapping and runtime-error sanitization apply. `runtime_version` is independent of
+`runtime_identity.version`; neither derives from or overwrites the other.
+
+Alpha.20 clients reject absent runtime version as an invalid Connect handshake.
+Older protobuf readers can ignore the additive field. The client retains the value
+as `api.Version` and serves `Version(ctx)` locally, including after cleanup.
+
+Normal and debug compilation call hosted `Plan.Params(ctx)` with the existing
+allocation context. Ordered parameter names still cross through `Plan.parameters=2`
+as an eager snapshot. Metadata failure closes the unpublished hosted plan and
+joins cleanup errors; successful empty metadata is valid. Client `Params(ctx)`
+returns a detached snapshot locally, including after cleanup. Both cached metadata
+methods require non-nil contexts and preserve cancellation/deadline identities.
+No Version or Params RPC, general introspection, or capability negotiation is added.

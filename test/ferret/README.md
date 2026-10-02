@@ -3,12 +3,12 @@
 This focused ecosystem suite exercises the complete public boundary:
 
 ```text
-native engine.New → ferret/uapi.Wrap → api.Runtime → wire/server
+native engine.New → ferret/uapi.Wrap(native, version) → api.Runtime → wire/server
 → protobuf and real gRPC over bufconn → wire/client.New → api.Runtime consumer
 ```
 
-The nested module pins Ferret `v2.0.0-alpha.56` and Universal API
-`v1.0.0-alpha.19`, matching Wire's UAPI dependency. It replaces only Wire with
+The nested module pins Ferret `v2.0.0-alpha.57` and Universal API
+`v1.0.0-alpha.20`, matching Wire's UAPI dependency. It replaces only Wire with
 the local checkout. Native Ferret is not a root-module dependency and is never
 imported by Wire production packages. No workspace file or local Ferret checkout
 is required.
@@ -18,10 +18,16 @@ exhaustive Wire contracts, fault injection, cancellation, quotas, and cleanup
 counts. These tests instead verify that the real native implementation and
 Wire's projection compose correctly. Both layers cross real serialization.
 
+The harness supplies an opaque deterministic version to `uapi.Wrap`; the native
+Version round trip compares direct and remote adapter results without hardcoding
+a Ferret release string or deriving a version from Wire/build metadata.
+
 ## Coverage
 
 | Test | Contract |
 | --- | --- |
+| `TestRuntimeVersionRoundTrip` | Exact native and remote version equality, including cached reads after Wire cleanup |
+| `TestPlanParametersRoundTrip` | Normal/debug local and remote `Params(ctx)` equality, empty and ordered multi-parameter snapshots, detached storage |
 | `TestRuntimeRun` | Real FQL, bind parameter, JSON output, and a filesystem-root override distinct from the engine default |
 | `TestReusablePlanAndDurableSessions` | Detached parameter metadata, independent sessions, repeated session runs, and detached encoded output |
 | `TestPlanClosePreservesSession` | Existing session executes after plan Close; new constructors fail while detached metadata survives |
@@ -59,7 +65,7 @@ The diagnostic test compares complete portable diagnostics from direct hosted
 compilation with those returned through Wire for both `RETURN )` and bare
 `RETURN`. Both must retain the compilation-error category and gRPC
 `InvalidArgument` status. The EOF case explicitly verifies line `1`, column `7`,
-and the zero-width insertion span `[6,6)` supplied by Ferret alpha.56. Wire
+and the zero-width insertion span `[6,6)` supplied by Ferret. Wire
 preserves those coordinates without repairing or normalizing hosted ranges.
 
 ## Running

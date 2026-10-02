@@ -19,7 +19,11 @@ type contractPlan struct {
 	closeCalls      int
 }
 
-func (p *contractPlan) Params() ([]string, error) {
+func (p *contractPlan) Params(ctx context.Context) ([]string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	p.mu.Lock()
 	defer p.mu.Unlock()
 

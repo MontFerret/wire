@@ -11,7 +11,7 @@ import (
 type spyPlan struct {
 	mu              sync.Mutex
 	params          []string
-	paramsCall      func() []string
+	paramsCall      func(context.Context) ([]string, error)
 	paramsError     error
 	newSession      func(context.Context, sessionOptions) (api.Session, error)
 	newDebugSession func(context.Context, sessionOptions) (debugger.Session, error)
@@ -21,15 +21,20 @@ type spyPlan struct {
 	closeCalls      int
 }
 
-func (p *spyPlan) Params() ([]string, error) {
+func (p *spyPlan) Params(ctx context.Context) ([]string, error) {
 	p.mu.Lock()
-	defer p.mu.Unlock()
+	call, params, err := p.paramsCall, p.params, p.paramsError
+	p.mu.Unlock()
 
-	if p.paramsCall != nil {
-		return p.paramsCall(), nil
+	if call != nil {
+		return call(ctx)
 	}
 
-	return p.params, p.paramsError
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, ctxErr
+	}
+
+	return params, err
 }
 
 func (p *spyPlan) NewSession(ctx context.Context, options ...api.SessionOption) (api.Session, error) {

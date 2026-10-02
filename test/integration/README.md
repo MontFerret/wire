@@ -8,7 +8,7 @@ api.Runtime caller → wire/client → protobuf and real gRPC over bufconn
 ```
 
 The suite depends on the API version pinned in the root `go.mod` (currently
-`v1.0.0-alpha.19`). It imports neither native Ferret nor Wire internal packages.
+`v1.0.0-alpha.20`). It imports neither native Ferret nor Wire internal packages.
 Existing component, conversion, low-level facade/protocol tests, and benchmarks
 remain beside their owning packages. The former server-package Universal API
 adapter, allocation, cancellation, and transport tests are consolidated here.
@@ -55,16 +55,23 @@ transport/closed-handle errors. Wire must never close the hosted runtime.
 
 ## Interface coverage
 
-Every current interface method has end-to-end coverage. Names below are Go test
+Every current interface method has end-to-end coverage. The alpha.20 metadata
+suite covers opaque/empty runtime versions, one hosted call per connection,
+handshake failure and capacity reclamation, constructor cancellation, cached
+metadata context errors, detached normal/debug parameter snapshots, and reads
+after cleanup. Hosted metadata hooks receive their operation context. Core/raw
+protocol tests additionally prove cancellation during hosted parameter retrieval
+without changing the client's detached allocation contract. Names below are Go test
 names; each linked file contains the complete scenario and assertions.
 
 | Interface | Method | Contract test |
 | --- | --- | --- |
-| `api.Runtime` | `Run` | [TestRuntimeAndSessionOutputRoundTrip](runtime_test.go) |
+| `api.Runtime` | `Version(ctx)` | [TestRuntimeVersionSnapshot](metadata_test.go), [TestRuntimeVersionFailureReclaimsConnection](metadata_test.go), [TestConstructionCancellationReachesRuntimeVersion](metadata_test.go) |
+| | `Run` | [TestRuntimeAndSessionOutputRoundTrip](runtime_test.go) |
 | | `Compile` | [TestCompileRoundTrip](plan_test.go) |
 | | `CompileDebug` | [TestCompileRoundTrip](plan_test.go), [TestDebuggerRoundTrip](debugger_test.go) |
 | | `Close` | [TestRuntimeCloseBorrowsTransportAndHostedRuntime](runtime_test.go) |
-| `api.Plan` | `Params` | [TestCompileRoundTrip](plan_test.go) |
+| `api.Plan` | `Params(ctx)` | [TestCompileRoundTrip](plan_test.go), [TestCachedMetadataContextsAndPlanLifecycle](metadata_test.go) |
 | | `NewSession` | [TestReusablePlanAndDurableSessions](plan_test.go) |
 | | `NewDebugSession` | [TestDebuggerRoundTrip](debugger_test.go) |
 | | `Close` | [TestReusablePlanAndDurableSessions](plan_test.go), [TestParentClosePreservesChildrenAndActiveWork](lifecycle_test.go) |

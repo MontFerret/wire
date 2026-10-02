@@ -3,8 +3,8 @@ module github.com/MontFerret/wire/test/ferret
 go 1.25.0
 
 require (
-	github.com/MontFerret/api v1.0.0-alpha.19
-	github.com/MontFerret/ferret/v2 v2.0.0-alpha.56
+	github.com/MontFerret/api v1.0.0-alpha.20
+	github.com/MontFerret/ferret/v2 v2.0.0-alpha.57
 	github.com/MontFerret/wire v0.0.0
 	google.golang.org/grpc v1.83.0
 )

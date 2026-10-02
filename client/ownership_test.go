@@ -53,8 +53,9 @@ func (s *handleServer) Connect(_ *wirev1.ConnectRequest, stream wirev1.RuntimeSe
 	s.mu.Unlock()
 
 	if err := stream.Send(&wirev1.ConnectResponse{
-		ConnectionId: &wirev1.ConnectionId{Value: id},
-		Protocol:     &wirev1.ProtocolInfo{Name: "ferret.wire", Version: "v1"},
+		ConnectionId:   &wirev1.ConnectionId{Value: id},
+		Protocol:       &wirev1.ProtocolInfo{Name: "ferret.wire", Version: "v1"},
+		RuntimeVersion: new(string),
 	}); err != nil {
 		return err
 	}

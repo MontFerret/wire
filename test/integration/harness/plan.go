@@ -12,7 +12,7 @@ type (
 	PlanBehavior struct {
 		Params          []string
 		ParamsError     error
-		Metadata        func() ([]string, error)
+		Metadata        func(context.Context) ([]string, error)
 		NewSession      func(context.Context, SessionOptions) error
 		NewDebugSession func(context.Context, SessionOptions) error
 		Session         func(SessionOptions) SessionBehavior
@@ -32,11 +32,15 @@ type (
 var _ api.Plan = (*PlanSpy)(nil)
 
 // Params records inspection and returns a copy of the configured parameter names.
-func (p *PlanSpy) Params() ([]string, error) {
+func (p *PlanSpy) Params(ctx context.Context) ([]string, error) {
 	p.recorder.record(Call{Resource: p.id, Method: "Params"})
 
 	if p.behavior.Metadata != nil {
-		return p.behavior.Metadata()
+		return p.behavior.Metadata(ctx)
+	}
+
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 
 	return append([]string(nil), p.behavior.Params...), p.behavior.ParamsError

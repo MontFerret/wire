@@ -2,7 +2,7 @@
 
 Ferret Wire is a versioned gRPC boundary for hosting an implementation of the [Unified Ferret API](https://github.com/MontFerret/api) in another process. It lets a host expose compilation, execution, and source-level debugging without moving runtime construction, configuration, policy, or listener security into this library.
 
-This module targets Go 1.25 and Unified API `v1.0.0-alpha.19`. The v1 protobuf package is `ferret.wire.v1`; its sources live in `proto/ferret/wire/v1`, and the checked-in Go bindings live in `gen/ferret/wire/v1`.
+This module targets Go 1.25 and Unified API `v1.0.0-alpha.20`. The v1 protobuf package is `ferret.wire.v1`; its sources live in `proto/ferret/wire/v1`, and the checked-in Go bindings live in `gen/ferret/wire/v1`.
 
 ## Ownership and architecture
 
@@ -42,7 +42,15 @@ Unary execution and debug resume calls publish work before returning. Once publi
 
 `DefaultLimits` bounds client-controlled state to 64 logical connections; 128 plans, 128 normal sessions, and 128 executions per connection; 32 debug sessions per connection; 8 watchers per execution or debug session; 256 breakpoints per debug session; and 4 MiB for both inbound and outbound gRPC messages. Pending, active, and closing resources all count. Hosts may replace the complete positive limit set with `WithLimits`.
 
-The one-shot Connect handshake publishes the connection ID, Wire protocol name and version, and optional host identity supplied through `WithRuntimeIdentity`. It does not publish fabricated capabilities, a Ferret version, or module-build metadata.
+The one-shot Connect handshake publishes four distinct values: `connection_id`
+identifies the Wire lifecycle scope; `protocol` identifies Wire; `runtime_version`
+is the exact opaque value from the hosted `api.Runtime.Version(ctx)`; and optional
+`runtime_identity` is host-supplied application or instance identity configured
+through `WithRuntimeIdentity`. `runtime_version` and `runtime_identity.version`
+have different owners and semantics, even when their strings happen to match.
+An empty runtime version is valid when present; alpha.20 clients reject handshakes
+without the field. Wire exposes no capability negotiation, Ferret-specific build
+metadata, Git metadata, or module inventories.
 
 The Go client converts values supplied through `api.WithParam` and `api.WithParams` without reflection. It accepts `nil`, booleans, signed integer types, unsigned integers that fit in `int64`, finite `float32`/`float64`, strings, `[]byte`, `[]any`, and `map[string]any`. Duration, datetime, regexp, and other Go types are rejected locally.
 
@@ -149,13 +157,17 @@ only the hosted plan after admitted constructors settle; existing children
 survive. Close every returned child. Transport release and lost-allocation
 recovery still cascade. Output presence and available output accompanying an
 error are preserved. Filesystem roots and output content types preserve explicit
-empty settings; the hosted runtime owns their validation.
+empty settings; the hosted runtime owns their validation. `Runtime.Version(ctx)`
+reads the Connect snapshot and `Plan.Params(ctx)` returns a defensive copy of the
+parameter snapshot captured during compile. Both validate non-nil caller contexts,
+preserve cancellation/deadline errors, and remain readable after cleanup without
+another RPC.
 
 Debugger methods take caller contexts. `RunCommand` streams preserve Start's
 execution lifetime and each resume's request context; cancellation does not
 release the debugger. Atomic breakpoint replacement works while running, and
 breakpoint enumeration remains available after explicit Close. See the complete
-[alpha.19 method and setter audit](docs/uapi-audit.md).
+[alpha.20 method and setter audit](docs/uapi-audit.md).
 
 The public client exports only `New`, `Error`, `ErrClosed`, and
 `ErrExecutionCancelled`. Existing users of `NewRuntime` should call `New`;

@@ -82,7 +82,7 @@ func TestUnifiedRuntimeCompileExecuteAndBorrowedOwnership(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	params, err := compiled.Params()
+	params, err := compiled.Params(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}

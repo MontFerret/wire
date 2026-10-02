@@ -2,6 +2,7 @@
 package core
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"reflect"
@@ -11,12 +12,12 @@ import (
 	"github.com/MontFerret/wire/server/internal/panicboundary"
 )
 
-func apiPlanParameters(plan api.Plan) ([]string, error) {
+func apiPlanParameters(ctx context.Context, plan api.Plan) ([]string, error) {
 	parameters, err := panicboundary.Call(func() ([]string, error) {
-		return plan.Params()
+		return plan.Params(ctx)
 	})
 	if err != nil {
-		return nil, runtimePanicError("read runtime plan parameters", err)
+		return nil, errors.Join(ctx.Err(), runtimePanicError("read runtime plan parameters", err))
 	}
 
 	return append([]string(nil), parameters...), nil

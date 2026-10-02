@@ -38,6 +38,9 @@ message ConnectResponse {
   ConnectionId connection_id = 3;
   ProtocolInfo protocol = 4;
   RuntimeIdentity runtime_identity = 5;
+  // runtime_version projects api.Runtime.Version verbatim, independently of host identity.
+  // Presence is required by alpha.20 peers; an empty but present value is valid.
+  optional string runtime_version = 6;
 }
 
 // ConnectRequest has no transport- or client-identity fields.

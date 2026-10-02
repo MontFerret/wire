@@ -81,34 +81,44 @@ func TestOutputPresenceAndCleanupErrors(t *testing.T) {
 }
 
 func TestMetadataFailureClosesUnpublishedPlan(t *testing.T) {
-	for _, mode := range []string{"error", "panic", "error and close error"} {
-		t.Run(mode, func(t *testing.T) {
-			behavior := harness.PlanBehavior{Metadata: func() ([]string, error) {
-				if mode == "panic" {
-					panic("private metadata")
+	for _, debug := range []bool{false, true} {
+		for _, mode := range []string{"error", "panic", "error and close error"} {
+			t.Run(map[bool]string{false: "normal/", true: "debug/"}[debug]+mode, func(t *testing.T) {
+				behavior := harness.PlanBehavior{Metadata: func(context.Context) ([]string, error) {
+					if mode == "panic" {
+						panic("private metadata")
+					}
+
+					return []string{"partial"}, errors.New("private metadata")
+				}}
+
+				if mode == "error and close error" {
+					behavior.Close = func() error { return errors.New("private cleanup") }
 				}
 
-				return []string{"partial"}, errors.New("private metadata")
-			}}
+				limits := server.DefaultLimits()
+				limits.MaxPlansPerConnection = 1
+				h := harness.New(t, harness.WithServerOptions(server.WithLimits(limits)), harness.WithBehavior(harness.RuntimeBehavior{Plan: behavior}))
+				compile := h.Runtime().Compile
 
-			if mode == "error and close error" {
-				behavior.Close = func() error { return errors.New("private cleanup") }
-			}
-
-			h := harness.New(t, harness.WithBehavior(harness.RuntimeBehavior{Plan: behavior}))
-			for range 2 {
-				plan, err := h.Runtime().Compile(h.Context(), api.Source{})
-				if plan != nil || err == nil || strings.Contains(err.Error(), "private") {
-					t.Fatalf("unpublished plan=%v err=%v", plan, err)
+				if debug {
+					compile = h.Runtime().CompileDebug
 				}
-			}
 
-			h.RuntimeSpy().Recorder().AssertClosed(t)
+				for range 2 {
+					plan, err := compile(h.Context(), api.Source{})
+					if plan != nil || err == nil || strings.Contains(err.Error(), "private") {
+						t.Fatalf("unpublished plan=%v err=%v", plan, err)
+					}
+				}
 
-			if h.Faults().Count(harness.ReleasePlan) != 0 {
-				t.Fatal("unpublished plan acquired a transport handle")
-			}
-		})
+				h.RuntimeSpy().Recorder().AssertClosed(t)
+
+				if h.Faults().Count(harness.ReleasePlan) != 0 {
+					t.Fatal("unpublished plan acquired a transport handle")
+				}
+			})
+		}
 	}
 }
 

@@ -15,6 +15,10 @@ type apiRuntimeSpy struct {
 	closeCalls int
 }
 
+func (r *apiRuntimeSpy) Version(ctx context.Context) (api.Version, error) {
+	return api.Version("runtime-test"), ctx.Err()
+}
+
 func (r *apiRuntimeSpy) Run(context.Context, api.Source, ...api.SessionOption) (*api.Output, error) {
 	return &api.Output{ContentType: "application/json", Content: []byte("1")}, nil
 }

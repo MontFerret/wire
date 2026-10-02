@@ -17,7 +17,11 @@ type apiPlanSpy struct {
 	closeCalls     int
 }
 
-func (p *apiPlanSpy) Params() ([]string, error) {
+func (p *apiPlanSpy) Params(ctx context.Context) ([]string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
