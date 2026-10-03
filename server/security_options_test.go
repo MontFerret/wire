@@ -14,6 +14,22 @@ type nilCredentials struct {
 	credentials.TransportCredentials
 }
 
+func TestServerOptionsRejectNilFunctionsBeforeConstruction(t *testing.T) {
+	var zero Option
+	for _, option := range []Option{nil, zero} {
+		runtime := &managedRuntime{}
+
+		s, err := New(runtime, option)
+		if err == nil || err.Error() != "server option must not be nil" || s != nil {
+			t.Fatalf("nil option returned server=%v err=%v", s, err)
+		}
+
+		if runtime.calls.Load() != 0 || runtime.closes.Load() != 0 {
+			t.Fatal("invalid options touched the borrowed runtime")
+		}
+	}
+}
+
 func TestSecurityOptionsValidateAndCopyRegistration(t *testing.T) {
 	var typedNil *nilCredentials
 	for _, option := range []Option{WithTransportCredentials(nil), WithTransportCredentials(typedNil), WithUnaryInterceptors(nil), WithStreamInterceptors(nil)} {
@@ -25,7 +41,7 @@ func TestSecurityOptionsValidateAndCopyRegistration(t *testing.T) {
 	first, second := credentials.NewTLS(&tls.Config{ServerName: "first"}), credentials.NewTLS(&tls.Config{ServerName: "second"})
 	cfg := config{}
 	for _, option := range []Option{WithTransportCredentials(first), WithTransportCredentials(second), WithUnaryInterceptors(), WithStreamInterceptors()} {
-		if err := option.apply(&cfg); err != nil {
+		if err := option(&cfg); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -43,7 +59,7 @@ func TestSecurityOptionsValidateAndCopyRegistration(t *testing.T) {
 	for range 2 {
 		cfg := config{}
 		for _, option := range []Option{u, u, s, s} {
-			if err := option.apply(&cfg); err != nil {
+			if err := option(&cfg); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -70,7 +86,7 @@ func TestSecurityOptionsValidateAndCopyRegistration(t *testing.T) {
 func TestRunOptionsUseLastPositiveTimeout(t *testing.T) {
 	cfg := runConfig{shutdownTimeout: 30 * time.Second}
 	for _, option := range []RunOption{WithShutdownTimeout(time.Second), WithShutdownTimeout(2 * time.Second)} {
-		if err := option.applyRun(&cfg); err != nil {
+		if err := option(&cfg); err != nil {
 			t.Fatal(err)
 		}
 	}

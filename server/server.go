@@ -59,7 +59,7 @@ func New(runtime api.Runtime, options ...Option) (*Server, error) {
 			return nil, errors.New("server option must not be nil")
 		}
 
-		if err := option.apply(&configured); err != nil {
+		if err := option(&configured); err != nil {
 			return nil, err
 		}
 	}
@@ -115,7 +115,7 @@ func (s *Server) Run(ctx context.Context, address string, options ...RunOption) 
 			return errors.New("run option must not be nil")
 		}
 
-		if err := option.applyRun(&configured); err != nil {
+		if err := option(&configured); err != nil {
 			return err
 		}
 	}

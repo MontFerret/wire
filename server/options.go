@@ -18,11 +18,8 @@ type (
 	}
 
 	// Option configures a Server without transferring host ownership.
-	Option interface {
-		apply(*config) error
-	}
-
-	serverOptionFunc func(*config) error
+	// New rejects nil functions and applies options in registration order.
+	Option func(*config) error
 
 	config struct {
 		runtimeIdentity RuntimeIdentity
@@ -33,15 +30,11 @@ type (
 	}
 )
 
-func (option serverOptionFunc) apply(cfg *config) error {
-	return option(cfg)
-}
-
 // WithTransportCredentials sets the host's gRPC transport policy for both Run
 // and Serve. New rejects nil credentials. Repeated options use the last value.
 // Without credentials, Wire provides no transport encryption or authentication.
 func WithTransportCredentials(creds credentials.TransportCredentials) Option {
-	return serverOptionFunc(func(cfg *config) error {
+	return func(cfg *config) error {
 		if creds == nil {
 			return errors.New("transport credentials must not be nil")
 		}
@@ -57,7 +50,7 @@ func WithTransportCredentials(creds credentials.TransportCredentials) Option {
 		cfg.credentials = creds
 
 		return nil
-	})
+	}
 }
 
 // WithUnaryInterceptors appends host middleware for every unary RPC, inside
@@ -66,7 +59,7 @@ func WithTransportCredentials(creds credentials.TransportCredentials) Option {
 func WithUnaryInterceptors(interceptors ...grpc.UnaryServerInterceptor) Option {
 	captured := append([]grpc.UnaryServerInterceptor(nil), interceptors...)
 
-	return serverOptionFunc(func(cfg *config) error {
+	return func(cfg *config) error {
 		for _, interceptor := range captured {
 			if interceptor == nil {
 				return errors.New("unary interceptor must not be nil")
@@ -76,7 +69,7 @@ func WithUnaryInterceptors(interceptors ...grpc.UnaryServerInterceptor) Option {
 		cfg.unary = append(cfg.unary, captured...)
 
 		return nil
-	})
+	}
 }
 
 // WithStreamInterceptors appends host middleware for every streaming RPC,
@@ -86,7 +79,7 @@ func WithUnaryInterceptors(interceptors ...grpc.UnaryServerInterceptor) Option {
 func WithStreamInterceptors(interceptors ...grpc.StreamServerInterceptor) Option {
 	captured := append([]grpc.StreamServerInterceptor(nil), interceptors...)
 
-	return serverOptionFunc(func(cfg *config) error {
+	return func(cfg *config) error {
 		for _, interceptor := range captured {
 			if interceptor == nil {
 				return errors.New("stream interceptor must not be nil")
@@ -96,14 +89,14 @@ func WithStreamInterceptors(interceptors ...grpc.StreamServerInterceptor) Option
 		cfg.stream = append(cfg.stream, captured...)
 
 		return nil
-	})
+	}
 }
 
 // WithRuntimeIdentity publishes optional host application identity during the
 // Connect handshake. Name is required; Wire does not derive identity from the
 // process or environment.
 func WithRuntimeIdentity(identity RuntimeIdentity) Option {
-	return serverOptionFunc(func(cfg *config) error {
+	return func(cfg *config) error {
 		if identity.Name == "" {
 			return errors.New("runtime identity name is required")
 		}
@@ -111,13 +104,13 @@ func WithRuntimeIdentity(identity RuntimeIdentity) Option {
 		cfg.runtimeIdentity = identity
 
 		return nil
-	})
+	}
 }
 
 // WithLimits replaces the complete default limit set. New rejects
 // the option when any resource or message limit is not positive.
 func WithLimits(limits Limits) Option {
-	return serverOptionFunc(func(cfg *config) error {
+	return func(cfg *config) error {
 		if err := limits.validate(); err != nil {
 			return err
 		}
@@ -125,5 +118,5 @@ func WithLimits(limits Limits) Option {
 		cfg.limits = limits
 
 		return nil
-	})
+	}
 }

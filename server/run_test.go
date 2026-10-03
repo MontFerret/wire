@@ -52,6 +52,7 @@ func (l *failedListener) Close() error {
 }
 
 func TestRunValidationDoesNotListenOrConsumeServer(t *testing.T) {
+	var zero RunOption
 	tests := []struct {
 		name, address string
 		ctx           context.Context
@@ -59,6 +60,7 @@ func TestRunValidationDoesNotListenOrConsumeServer(t *testing.T) {
 	}{
 		{name: "empty", ctx: context.Background()},
 		{name: "nil option", address: "127.0.0.1:0", ctx: context.Background(), options: []RunOption{nil}},
+		{name: "zero value option", address: "127.0.0.1:0", ctx: context.Background(), options: []RunOption{zero}},
 		{name: "zero timeout", address: "127.0.0.1:0", ctx: context.Background(), options: []RunOption{WithShutdownTimeout(0)}},
 		{name: "negative timeout", address: "127.0.0.1:0", ctx: context.Background(), options: []RunOption{WithShutdownTimeout(-time.Second)}},
 		{name: "nil context", address: "127.0.0.1:0"},
