@@ -110,6 +110,17 @@ when serving returns. Both paths borrow the runtime and share constructor
 security configuration. Wire never reconstructs host modules, functions,
 policies, resources, or runtime configuration.
 
+Constructor and managed-startup options retain named function types over private
+configuration. Builders from `go-options` validate values before applying their
+setters. The server invokes every non-nil option once in registration order and
+joins all failures, including nil-option errors, before construction or startup
+reservation. Failed configuration is discarded; a valid later override does not
+erase earlier errors. `MapValues` reports every invalid limit under a relative
+field-key label, with unspecified field-error order. `SliceEach` identifies nil
+interceptors by relative index in ascending order. Collection wrappers omit
+aggregate values while preserving child causes and rejected values. Existing
+defaults and accepted values are preserved.
+
 ### Public serving lifecycle
 
 Server admission has one mutex-protected state: idle, starting, serving, or

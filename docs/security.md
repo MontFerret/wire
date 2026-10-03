@@ -189,6 +189,42 @@ calls. Authentication hooks must cover unary and streaming RPCs across all servi
 including operation calls, execution watches, and debugger command/watch streams.
 Hosts can compute or refresh per-call credentials in their credential provider.
 
+## Option validation
+
+`New` and `Run` apply every non-nil option once in registration order, collecting
+failures with `errors.Join`. Nil options are rejected. Construction and startup
+reservation/listening do not proceed when any option fails, even if a later
+valid option overrides the same setting. Invalid options never run their setters.
+
+Validation uses `github.com/ziflex/go-options` named builders and collection
+validators. Their named outer errors contain relative diagnostic labels, such as
+`[2]` for an interceptor or `["max connections"]` for a limit field. Interceptor
+failures retain ascending index order; ordering among invalid limit fields is
+unspecified. These labels are diagnostic text, not machine-readable paths.
+
+Collection wrappers set `ValidationError.OmitValue` and omit aggregate values.
+Child causes and non-secret rejected values remain available, for example
+`unary interceptors: [2]: must not be nil: value=<nil>`. Credentials and unrelated
+runtime identity metadata are excluded from validation messages. Numeric values,
+empty identity names, and nil entries provide rejected-value context.
+The accepted values and defaults are unchanged: empty interceptor lists are
+no-ops, every limit is positive, and explicit non-positive shutdown timeouts fail.
+
+Use `errors.As` to inspect the first matching validation error in the joined
+chain, while retaining the complete error for reporting all failures:
+
+```go
+var invalid gooptions.ValidationError
+if errors.As(err, &invalid) {
+    return fmt.Errorf("invalid option %s: %w", invalid.Field, err)
+}
+```
+
+Import `gooptions "github.com/ziflex/go-options"`. Standard `errors.Is` and
+`errors.As` retain access to validator causes. These are host configuration
+errors; RPC authentication and Wire's sanitized runtime error contracts remain
+unchanged.
+
 ## Middleware and trust boundaries
 
 Repeated interceptor options append in registration order. Wire recovery is the

@@ -1,9 +1,7 @@
 package server
 
 import (
-	"errors"
-	"reflect"
-
+	gooptions "github.com/ziflex/go-options"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 )
@@ -18,7 +16,9 @@ type (
 	}
 
 	// Option configures a Server without transferring host ownership.
-	// New rejects nil functions and applies options in registration order.
+	// New applies every non-nil option in registration order and joins failures.
+	// Nil functions are rejected before server construction.
+	// Factory validation failures expose gooptions.ValidationError through errors.As.
 	Option func(*config) error
 
 	config struct {
@@ -34,89 +34,81 @@ type (
 // and Serve. New rejects nil credentials. Repeated options use the last value.
 // Without credentials, Wire provides no transport encryption or authentication.
 func WithTransportCredentials(creds credentials.TransportCredentials) Option {
-	return func(cfg *config) error {
-		if creds == nil {
-			return errors.New("transport credentials must not be nil")
-		}
-
-		value := reflect.ValueOf(creds)
-		switch value.Kind() {
-		case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
-			if value.IsNil() {
-				return errors.New("transport credentials must not be nil")
-			}
-		}
-
-		cfg.credentials = creds
-
-		return nil
-	}
+	return gooptions.New(func(cfg *config, value credentials.TransportCredentials) {
+		cfg.credentials = value
+	}).
+		Value(creds).
+		Named("transport credentials").
+		Validators(gooptions.NotNil[credentials.TransportCredentials]()).
+		Build()
 }
 
 // WithUnaryInterceptors appends host middleware for every unary RPC, inside
 // Wire's sanitized recovery boundary. Nil entries are rejected by New.
+// Validation errors identify entries by relative index and omit the list value.
 // The interceptor list is copied; middleware itself must support concurrent calls.
 func WithUnaryInterceptors(interceptors ...grpc.UnaryServerInterceptor) Option {
 	captured := append([]grpc.UnaryServerInterceptor(nil), interceptors...)
 
-	return func(cfg *config) error {
-		for _, interceptor := range captured {
-			if interceptor == nil {
-				return errors.New("unary interceptor must not be nil")
-			}
-		}
-
-		cfg.unary = append(cfg.unary, captured...)
-
-		return nil
-	}
+	return gooptions.New(func(cfg *config, value []grpc.UnaryServerInterceptor) {
+		cfg.unary = append(cfg.unary, value...)
+	}).
+		Value(captured).
+		Named("unary interceptors").
+		Validators(
+			gooptions.SliceEach[[]grpc.UnaryServerInterceptor](gooptions.NotNil[grpc.UnaryServerInterceptor]()),
+		).
+		Build()
 }
 
 // WithStreamInterceptors appends host middleware for every streaming RPC,
 // inside Wire's sanitized recovery boundary. Nil entries are rejected by New.
+// Validation errors identify entries by relative index and omit the list value.
 // The interceptor list is copied; middleware itself must support concurrent calls.
 // Authentication here applies at stream establishment; later revocation is host policy.
 func WithStreamInterceptors(interceptors ...grpc.StreamServerInterceptor) Option {
 	captured := append([]grpc.StreamServerInterceptor(nil), interceptors...)
 
-	return func(cfg *config) error {
-		for _, interceptor := range captured {
-			if interceptor == nil {
-				return errors.New("stream interceptor must not be nil")
-			}
-		}
-
-		cfg.stream = append(cfg.stream, captured...)
-
-		return nil
-	}
+	return gooptions.New(func(cfg *config, value []grpc.StreamServerInterceptor) {
+		cfg.stream = append(cfg.stream, value...)
+	}).
+		Value(captured).
+		Named("stream interceptors").
+		Validators(
+			gooptions.SliceEach[[]grpc.StreamServerInterceptor](gooptions.NotNil[grpc.StreamServerInterceptor]()),
+		).
+		Build()
 }
 
 // WithRuntimeIdentity publishes optional host application identity during the
 // Connect handshake. Name is required; Wire does not derive identity from the
 // process or environment.
 func WithRuntimeIdentity(identity RuntimeIdentity) Option {
-	return func(cfg *config) error {
-		if identity.Name == "" {
-			return errors.New("runtime identity name is required")
-		}
-
-		cfg.runtimeIdentity = identity
-
-		return nil
-	}
+	return gooptions.New(func(cfg *config, value RuntimeIdentity) {
+		cfg.runtimeIdentity = value
+	}).
+		Value(identity).
+		Named("runtime identity name").
+		Validators(
+			gooptions.Check(func(value RuntimeIdentity) error {
+				return gooptions.NotEmpty[string]()(value.Name)
+			}),
+		).
+		Build()
 }
 
 // WithLimits replaces the complete default limit set. New rejects
-// the option when any resource or message limit is not positive.
+// the option when any resource or message limit is not positive, reporting
+// every invalid field without applying a partial replacement.
+// Validation errors use relative field-key labels; their order is unspecified.
 func WithLimits(limits Limits) Option {
-	return func(cfg *config) error {
-		if err := limits.validate(); err != nil {
-			return err
-		}
-
-		cfg.limits = limits
-
-		return nil
-	}
+	return gooptions.New(func(cfg *config, value Limits) {
+		cfg.limits = value
+	}).
+		Value(limits).
+		Named("limits").
+		Validators(
+			gooptions.Check(Limits.validate),
+		).
+		Build()
 }

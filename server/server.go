@@ -47,21 +47,29 @@ const (
 )
 
 // New adapts a caller-configured runtime without taking ownership
-// or creating a listener. Limits default to DefaultLimits.
+// or creating a listener. Limits default to DefaultLimits. Option failures
+// are joined after all non-nil options run, before server construction.
 func New(runtime api.Runtime, options ...Option) (*Server, error) {
 	if isNilRuntime(runtime) {
 		return nil, errors.New("runtime is required")
 	}
 
 	configured := config{limits: DefaultLimits()}
+	var failures []error
 	for _, option := range options {
 		if option == nil {
-			return nil, errors.New("server option must not be nil")
+			failures = append(failures, errors.New("server option must not be nil"))
+
+			continue
 		}
 
 		if err := option(&configured); err != nil {
-			return nil, err
+			failures = append(failures, err)
 		}
+	}
+
+	if err := errors.Join(failures...); err != nil {
+		return nil, err
 	}
 
 	info := grpcserver.Handshake{
@@ -107,17 +115,25 @@ func New(runtime api.Runtime, options ...Option) (*Server, error) {
 // endpoint is supplied. Cancellation after startup returns nil if cleanup succeeds.
 // Shutdown defaults to a 30-second budget, independent of ctx. A timeout matches
 // context.DeadlineExceeded and leaves committed hosted cleanup observable through
-// Shutdown. Run never closes the borrowed runtime.
+// Shutdown. Option failures are joined before startup reservation or listening.
+// Run never closes the borrowed runtime.
 func (s *Server) Run(ctx context.Context, address string, options ...RunOption) error {
 	configured := runConfig{shutdownTimeout: 30 * time.Second}
+	var failures []error
 	for _, option := range options {
 		if option == nil {
-			return errors.New("run option must not be nil")
+			failures = append(failures, errors.New("run option must not be nil"))
+
+			continue
 		}
 
 		if err := option(&configured); err != nil {
-			return err
+			failures = append(failures, err)
 		}
+	}
+
+	if err := errors.Join(failures...); err != nil {
+		return err
 	}
 
 	if address == "" {

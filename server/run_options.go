@@ -1,13 +1,16 @@
 package server
 
 import (
-	"errors"
 	"time"
+
+	gooptions "github.com/ziflex/go-options"
 )
 
 type (
 	// RunOption configures managed shutdown without changing constructor policy.
-	// Run rejects nil functions and applies options in registration order.
+	// Run applies every non-nil option in registration order and joins failures.
+	// Nil functions are rejected before startup reservation or listening.
+	// Factory validation failures expose gooptions.ValidationError through errors.As.
 	RunOption func(*runConfig) error
 
 	runConfig struct {
@@ -20,13 +23,7 @@ type (
 // deadline may shorten this budget. Timeout stops transport but does not imply
 // hosted cleanup has settled; later Shutdown calls can observe its retained result.
 func WithShutdownTimeout(timeout time.Duration) RunOption {
-	return func(cfg *runConfig) error {
-		if timeout <= 0 {
-			return errors.New("shutdown timeout must be positive")
-		}
-
-		cfg.shutdownTimeout = timeout
-
-		return nil
-	}
+	return gooptions.New(func(cfg *runConfig, value time.Duration) {
+		cfg.shutdownTimeout = value
+	}).Value(timeout).Named("shutdown timeout").Validators(gooptions.Positive[time.Duration]()).Build()
 }

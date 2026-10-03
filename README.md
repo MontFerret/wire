@@ -128,6 +128,14 @@ func serveListener(ctx context.Context, hostRuntime api.Runtime, listener net.Li
 Concurrent/repeated starts are rejected without disturbing the accepted start.
 A failed bind permits retry until serving or shutdown commits.
 
+`New` and `Run` invoke every non-nil option in registration order and join all
+validation failures before constructing the server or reserving startup. Nil
+options remain errors. Invalid options never apply their setters, and a later
+valid override cannot erase an earlier failure. Named validation errors support
+`errors.As` inspection; see [option validation](docs/security.md#option-validation).
+Collection errors use relative indices or field-key labels; ordering among
+invalid limit fields is unspecified.
+
 `New` accepts the canonical `api.Runtime` directly. `server.RuntimeIdentity`
 is optional host-supplied handshake metadata.
 
