@@ -257,10 +257,16 @@ func TestConnectionTeardownJoinsFailuresExactlyOnce(t *testing.T) {
 }
 
 func TestConnectionCloseWaiterTimeoutDoesNotAbandonTransport(t *testing.T) {
-	entered, allow := make(chan struct{}), make(chan struct{})
+	entered, cleanupExpired, allow := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	var releaseOnce sync.Once
+
+	releaseCleanup := func() { releaseOnce.Do(func() { close(allow) }) }
+	t.Cleanup(releaseCleanup)
 	logicalErr := errors.New("late cleanup failure")
-	connection := &constructorConnection{release: func(context.Context, *wirev1.CloseConnectionRequest) error {
+	connection := &constructorConnection{release: func(cleanupCtx context.Context, _ *wirev1.CloseConnectionRequest) error {
 		close(entered)
+		<-cleanupCtx.Done()
+		close(cleanupExpired)
 		<-allow
 
 		return logicalErr
@@ -281,11 +287,14 @@ func TestConnectionCloseWaiterTimeoutDoesNotAbandonTransport(t *testing.T) {
 		t.Fatalf("waiter did not time out: %v", err)
 	}
 
+	// Equal deadlines use separate timers; observe cleanup expiry explicitly.
+	awaitConstructor(t, cleanupExpired)
+
 	if connection.transportCloses.Load() != 0 {
 		t.Fatal("channel closed before logical cleanup attempt settled")
 	}
 
-	close(allow)
+	releaseCleanup()
 
 	if err := handle.Close(testClientContext(t)); !errors.Is(err, logicalErr) || !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("late cleanup lost retained error: %v", err)
