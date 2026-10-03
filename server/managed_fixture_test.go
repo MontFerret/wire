@@ -173,7 +173,7 @@ func managedClient(t testing.TB, listener net.Listener, options ...grpc.DialOpti
 func managedRemote(t testing.TB, listener net.Listener) api.Runtime {
 	t.Helper()
 
-	remote, err := client.New(managedContext(t), managedClient(t, listener))
+	remote, err := client.From(managedContext(t), managedClient(t, listener))
 	if err != nil {
 		t.Fatal(err)
 	}

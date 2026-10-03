@@ -144,7 +144,7 @@ func TestTransportCredentialsTLSAndMTLS(t *testing.T) {
 					conn := managedClient(t, listener, grpc.WithTransportCredentials(transport))
 					ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 					defer cancel()
-					remote, err := client.New(ctx, conn)
+					remote, err := client.From(ctx, conn)
 
 					if test != "valid" {
 						if err == nil {
@@ -335,7 +335,7 @@ func TestHostInterceptorsPreserveOrderAndRequestContexts(t *testing.T) {
 	running := startManaged(t, s)
 	conn := managedClient(t, running.listener, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithPerRPCCredentials(contextCredentials{}))
 
-	remote, err := client.New(managedContext(t), conn)
+	remote, err := client.From(managedContext(t), conn)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -401,7 +401,7 @@ func TestTokenAuthenticationCoversOperationsAfterConnect(t *testing.T) {
 
 			token.value.Store("Bearer test-token")
 
-			remote, err := client.New(managedContext(t), conn)
+			remote, err := client.From(managedContext(t), conn)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -474,7 +474,7 @@ func TestHostMiddlewarePreservesMessageAndResourceLimits(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	remote, err := client.New(managedContext(t), conn)
+	remote, err := client.From(managedContext(t), conn)
 	if err != nil {
 		t.Fatal(err)
 	}

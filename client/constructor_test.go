@@ -12,7 +12,7 @@ import (
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
 )
 
-func TestNewFailureReturnsNilRuntimeAndClosesHandshake(t *testing.T) {
+func TestFromFailureReturnsNilRuntimeAndClosesHandshake(t *testing.T) {
 	for _, test := range []struct {
 		name      string
 		handshake *wirev1.ConnectResponse
@@ -32,9 +32,9 @@ func TestNewFailureReturnsNilRuntimeAndClosesHandshake(t *testing.T) {
 			connection := startClientTestServer(t, server)
 			ctx := testClientContext(t)
 
-			remote, err := New(ctx, connection)
+			remote, err := From(ctx, connection)
 			if err == nil || remote != nil {
-				t.Fatalf("New returned %v, %v; want nil runtime and an error", remote, err)
+				t.Fatalf("From returned %v, %v; want nil runtime and an error", remote, err)
 			}
 
 			if test.err == nil && err.Error() != "Wire server returned an invalid Connect handshake" {
@@ -57,7 +57,7 @@ func TestNewFailureReturnsNilRuntimeAndClosesHandshake(t *testing.T) {
 	}
 }
 
-func TestNewBorrowsTransportAndDetachesConstructionContext(t *testing.T) {
+func TestFromBorrowsTransportAndDetachesConstructionContext(t *testing.T) {
 	server := &clientTestServer{watchScripts: []executionWatchScript{{events: []*wirev1.WatchExecutionResponse{
 		executionCompletedEvent("execution-1", "text/plain", []byte("done")),
 	}}}}
@@ -65,7 +65,7 @@ func TestNewBorrowsTransportAndDetachesConstructionContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(testClientContext(t))
 	defer cancel()
 
-	remote, err := New(ctx, connection)
+	remote, err := From(ctx, connection)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +86,7 @@ func TestNewBorrowsTransportAndDetachesConstructionContext(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	other, err := New(testClientContext(t), connection)
+	other, err := From(testClientContext(t), connection)
 	if err != nil {
 		t.Fatalf("runtime Close affected borrowed transport: %v", err)
 	}

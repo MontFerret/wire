@@ -6,6 +6,7 @@ import (
 	"io"
 	"sync"
 
+	gooptions "github.com/ziflex/go-options"
 	"google.golang.org/grpc"
 
 	"github.com/MontFerret/api"
@@ -14,7 +15,7 @@ import (
 )
 
 type (
-	// connectionHandle owns one logical connection and borrows its gRPC transport.
+	// connectionHandle owns one logical connection and its optional transport teardown.
 	connectionHandle struct {
 		runtimeClient   wirev1.RuntimeServiceClient
 		planClient      wirev1.PlanServiceClient
@@ -32,82 +33,88 @@ type (
 		lifecycleCtx    context.Context
 		lifecycleCancel context.CancelFunc
 
-		closeOnce sync.Once
-		closeDone chan struct{}
-		closeMu   sync.Mutex
-		closeErr  error
-		closing   bool
+		closeOnce      sync.Once
+		closeDone      chan struct{}
+		closeMu        sync.Mutex
+		closeErr       error
+		closing        bool
+		terminal       bool // Connect ended before close committed; preserve its error.
+		transportClose func() error
 	}
 )
 
-// newConnection opens one logical Wire connection over a caller-owned gRPC connection.
-// The construction context bounds the Connect handshake; Close owns the
-// resulting long-lived logical lifecycle.
-func newConnection(ctx context.Context, connection grpc.ClientConnInterface) (*connectionHandle, error) {
-	if connection == nil {
-		return nil, errors.New("gRPC connection is required")
+// newConnection establishes the startup-only cancellation link before stream
+// creation. One teardown owner handles both rollback and published lifetimes.
+func newConnection(ctx context.Context, connection grpc.ClientConnInterface, transportClose func() error) (result *connectionHandle, resultErr error) {
+	base := ctx
+	if base == nil {
+		base = context.Background()
 	}
 
-	runtimeClient := wirev1.NewRuntimeServiceClient(connection)
-	streamCtx, streamCancel := context.WithCancel(context.WithoutCancel(ctx))
-
-	stream, err := runtimeClient.Connect(streamCtx, &wirev1.ConnectRequest{})
-	if err != nil {
-		streamCancel()
-
-		return nil, decodeError(err)
-	}
-
-	type firstResult struct {
-		response *wirev1.ConnectResponse
-		err      error
-	}
-
-	first := make(chan firstResult, 1)
-
-	go func() {
-		response, receiveErr := stream.Recv()
-		first <- firstResult{response: response, err: receiveErr}
-	}()
-
-	var response *wirev1.ConnectResponse
-	select {
-	case <-ctx.Done():
-		streamCancel()
-
-		return nil, ctx.Err()
-	case result := <-first:
-		if result.err != nil {
-			streamCancel()
-
-			return nil, decodeError(result.err)
-		}
-
-		response = result.response
-	}
-
-	if response.GetConnectionId().GetValue() == "" || response.GetProtocol() == nil ||
-		response.GetProtocol().GetName() == "" || response.GetProtocol().GetVersion() == "" || response.RuntimeVersion == nil {
-		streamCancel()
-
-		return nil, errors.New("Wire server returned an invalid Connect handshake")
-	}
-
-	lifecycleCtx, lifecycleCancel := context.WithCancel(context.Background())
+	streamCtx, streamCancel := context.WithCancel(context.WithoutCancel(base))
+	lifecycleCtx, lifecycleCancel := context.WithCancel(context.WithoutCancel(base))
 	client := &connectionHandle{
-		runtimeClient:   runtimeClient,
+		runtimeClient:   wirev1.NewRuntimeServiceClient(connection),
 		planClient:      wirev1.NewPlanServiceClient(connection),
 		sessionClient:   wirev1.NewSessionServiceClient(connection),
 		executionClient: wirev1.NewExecutionServiceClient(connection),
 		debugClient:     wirev1.NewDebugServiceClient(connection),
-		connectionID:    response.GetConnectionId().GetValue(),
-		runtimeVersion:  api.Version(response.GetRuntimeVersion()),
-		stream:          stream,
 		streamCancel:    streamCancel,
 		streamDone:      make(chan struct{}),
 		lifecycleCtx:    lifecycleCtx,
 		lifecycleCancel: lifecycleCancel,
 		closeDone:       make(chan struct{}),
+		transportClose:  transportClose,
+	}
+
+	defer func() {
+		if resultErr != nil {
+			// No monitor has been published; the constructor's reader is done.
+			close(client.streamDone)
+			resultErr = errors.Join(resultErr, boundedCleanup(base, convenienceCleanupTimeout, client.Close))
+		}
+	}()
+
+	if err := runtimeContextError(ctx); err != nil {
+		return nil, err
+	}
+
+	if err := gooptions.NotNil[grpc.ClientConnInterface]()(connection); err != nil {
+		return nil, errors.New("gRPC connection is required")
+	}
+
+	stopStartup := context.AfterFunc(ctx, streamCancel)
+	defer stopStartup()
+
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	stream, err := client.runtimeClient.Connect(streamCtx, &wirev1.ConnectRequest{})
+	if err != nil {
+		return nil, errors.Join(ctx.Err(), decodeError(err))
+	}
+
+	client.stream = stream
+
+	response, err := stream.Recv()
+	if err != nil {
+		return nil, errors.Join(ctx.Err(), decodeError(err))
+	}
+
+	client.connectionID = response.GetConnectionId().GetValue()
+	if client.connectionID == "" || response.GetProtocol() == nil ||
+		response.GetProtocol().GetName() == "" || response.GetProtocol().GetVersion() == "" || response.RuntimeVersion == nil {
+		return nil, errors.Join(ctx.Err(), errors.New("Wire server returned an invalid Connect handshake"))
+	}
+
+	client.runtimeVersion = api.Version(response.GetRuntimeVersion())
+	stopStartup()
+
+	// This check commits successful publication. Later startup cancellation has
+	// no link to the connection, its operations, or its descendants.
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 
 	go client.monitorConnect()
@@ -115,8 +122,8 @@ func newConnection(ctx context.Context, connection grpc.ClientConnInterface) (*c
 	return client, nil
 }
 
-// Close releases the logical Wire connection without closing the caller-owned
-// gRPC transport. Concurrent callers wait for the same retained result.
+// Close releases the logical connection and then any owned transport. Borrowed
+// transports remain open. Concurrent callers wait for the same retained result.
 func (c *connectionHandle) Close(ctx context.Context) error {
 	c.closeOnce.Do(func() {
 		c.closeMu.Lock()
@@ -156,8 +163,19 @@ func (c *connectionHandle) monitorConnect() {
 
 	c.streamMu.Unlock()
 
+	c.closeMu.Lock()
+	terminal := !c.closing
+	c.terminal = terminal
+	c.closeMu.Unlock()
+
 	c.lifecycleCancel()
 	close(c.streamDone)
+
+	// Publish reader completion before teardown can wait for it. Definitive
+	// stream loss invalidates the logical lifetime even when resources remain.
+	if terminal {
+		_ = boundedCleanup(c.lifecycleCtx, convenienceCleanupTimeout, c.Close)
+	}
 }
 
 func (c *connectionHandle) checkOpen() error {
@@ -166,10 +184,20 @@ func (c *connectionHandle) checkOpen() error {
 	}
 
 	c.closeMu.Lock()
-	closing := c.closing
+	closing, terminal := c.closing, c.terminal
 	c.closeMu.Unlock()
 
-	if closing {
+	if closing || terminal {
+		if terminal {
+			c.streamMu.Lock()
+			err := c.streamErr
+			c.streamMu.Unlock()
+
+			if err != nil {
+				return err
+			}
+		}
+
 		return ErrClosed
 	}
 
@@ -236,18 +264,26 @@ func (c *connectionHandle) settleClose(ctx context.Context) {
 
 		c.streamCancel()
 		c.lifecycleCancel()
+		result = errors.Join(result, c.closeTransport())
+
+		if ctxErr := ctx.Err(); ctxErr != nil && !errors.Is(result, ctxErr) {
+			result = errors.Join(result, ctxErr)
+		}
+
 		c.closeMu.Lock()
 		c.closeErr = result
 		c.closeMu.Unlock()
 		close(c.closeDone)
 	}()
 
-	_, err := c.runtimeClient.CloseConnection(ctx, &wirev1.CloseConnectionRequest{ConnectionId: c.connectionProto()})
-	result = decodeError(err)
+	if c.connectionID != "" {
+		_, err := c.runtimeClient.CloseConnection(ctx, &wirev1.CloseConnectionRequest{ConnectionId: c.connectionProto()})
+		result = decodeError(err)
 
-	var wireErr *Error
-	if errors.As(result, &wireErr) && wireErr.Category == failure.CategoryConnectionNotFound {
-		result = nil
+		var wireErr *Error
+		if errors.As(result, &wireErr) && wireErr.Category == failure.CategoryConnectionNotFound {
+			result = nil
+		}
 	}
 
 	c.streamCancel()
@@ -257,6 +293,20 @@ func (c *connectionHandle) settleClose(ctx context.Context) {
 	case <-c.streamDone:
 	case <-ctx.Done():
 	}
+}
+
+func (c *connectionHandle) closeTransport() (result error) {
+	if c.transportClose == nil {
+		return nil
+	}
+
+	defer func() {
+		if recover() != nil {
+			result = errors.New("Wire client transport close panicked")
+		}
+	}()
+
+	return c.transportClose()
 }
 
 func (c *connectionHandle) watchContext(ctx context.Context) (context.Context, context.CancelFunc) {

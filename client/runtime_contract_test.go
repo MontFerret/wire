@@ -16,19 +16,21 @@ import (
 	"github.com/MontFerret/wire/client"
 )
 
-// The constructor returns the canonical interface, including a nil interface
+var _ func(context.Context, string, ...client.Option) (api.Runtime, error) = client.New
+
+// The borrowed constructor returns the canonical interface, including a nil interface
 // on failure, without requiring a Wire resource type in consumer code.
-var _ func(context.Context, grpc.ClientConnInterface) (api.Runtime, error) = client.New
+var _ func(context.Context, grpc.ClientConnInterface) (api.Runtime, error) = client.From
 
 var (
 	_ func(api.Runtime, context.Context) (api.Version, error) = api.Runtime.Version
 	_ func(api.Plan, context.Context) ([]string, error)       = api.Plan.Params
 )
 
-func TestNewRejectsMissingTransport(t *testing.T) {
-	remote, err := client.New(t.Context(), nil)
+func TestFromRejectsMissingTransport(t *testing.T) {
+	remote, err := client.From(t.Context(), nil)
 	if err == nil || remote != nil {
-		t.Fatalf("New(nil) = %v, %v; want nil runtime and an error", remote, err)
+		t.Fatalf("From(nil) = %v, %v; want nil runtime and an error", remote, err)
 	}
 }
 
@@ -59,7 +61,7 @@ func TestPublicSurface(t *testing.T) {
 
 	slices.Sort(exported)
 
-	want := []string{"ErrClosed", "ErrExecutionCancelled", "Error", "New"}
+	want := []string{"ErrClosed", "ErrExecutionCancelled", "Error", "From", "New", "Option", "WithInsecure", "WithPerRPCCredentials", "WithTransportCredentials"}
 	if !slices.Equal(exported, want) {
 		t.Fatalf("public client surface = %v, want %v", exported, want)
 	}

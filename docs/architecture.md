@@ -25,7 +25,8 @@ host → server → server/internal ──┘→ Unified API → runtime impleme
 | Logical connections and resources | `server/internal/core` |
 | Public server lifecycle | `server` package |
 | Go client facade | `client` |
-| Physical transport, listener, authentication, and TLS | Host and Wire server layer |
+| Listener and host security policy | Host and Wire server layer |
+| Client channel construction and lifetime | Client `New`, or the caller with `From` |
 | DAP translation, LSP, and language intelligence | ferretd and compiler tooling |
 
 Runtime implementations must never depend on Wire. Wire must not absorb DAP,
@@ -34,15 +35,24 @@ integrates host-supplied gRPC credentials and middleware;
 certificate identities, trust roots, authentication, and authorization policy
 remain host responsibilities.
 
-`client.New(ctx, conn)` returns the canonical `api.Runtime` interface.
+`client.New(ctx, target, options...)` and `client.From(ctx, conn)` return the canonical `api.Runtime` interface.
 Private adapters implement `api.Plan`, `api.Session`, and `api/debugger.Session`;
 output is `*api.Output`, whose definition belongs to `api/result`. The client
 does not re-export aliases or expose a second resource or event model.
 Its logical connection, allocation handles, RPC clients, and watches remain
 private within the owning client package.
 
-The caller supplies and owns the physical transport. Runtime and resource
-`Close` methods release logical resources with bounded detached cleanup.
+`New` creates an independent gRPC channel with verified TLS and system trust by
+default. Plaintext requires `WithInsecure`; custom transport and per-RPC credentials
+pass through gRPC. `From` borrows the caller's configured transport on every path.
+Both complete the Wire handshake eagerly and return `api.Runtime`; this constructor
+API change does not change the protocol. Startup cancellation is linked before
+stream creation and detached at publication while context values and outgoing
+metadata remain available. Rollback is bounded and detached and may outlast startup
+cancellation. Runtime and resource `Close` methods release logical resources through
+existing reference accounting; final connection teardown also closes a `New`-owned
+channel after attempting logical cleanup and canceling the Connect stream. Only
+`From` leaves physical transport caller-owned.
 `server.New` accepts `api.Runtime` directly. Optional host identity is
 `server.RuntimeIdentity`, supplied through `WithRuntimeIdentity`.
 
@@ -295,8 +305,8 @@ retain and return the cleanup error without automatic ancestor invalidation.
 An undelivered release can leave the hosted child until explicit ancestor
 cleanup; a lost acknowledgement after committed cleanup permits Session reuse.
 Acquisition and automatic release waits each have a 30-second bound. Successful
-narrow cleanup preserves siblings outside its subtree and never closes the
-borrowed physical transport. See [Client Handles](client.md)
+narrow cleanup preserves siblings outside its subtree. Whole-connection recovery
+also releases an owned channel but never closes a borrowed physical transport. See [Client Handles](client.md)
 for the cancellation contract.
 
 `Execution` and `DebugSession` share a private event stream that owns sequence
@@ -340,8 +350,13 @@ call retains the connection; a successful compile transfers that reference to
 its plan. Runtime Close gates new root calls and releases immediately only if
 there are no references. The last operation or resource performs deferred
 connection teardown and receives any resulting error. Earlier close results
-remain stable. Recovery explicitly uses cascading transport release, never
-ordinary API Close. All server admission and parent links remain under the
+remain stable. Optional channel ownership is attached to that connection teardown,
+not to Runtime.Close itself. Logical cleanup is attempted before stream cancellation
+and owned channel closure, including failure and timeout paths. Definitive Connect
+termination commits the same teardown after publishing stream-reader completion;
+transient RPC failures retain their existing classification. No lifecycle lock spans
+RPCs, channel closure, or cleanup waits. Recovery explicitly uses cascading transport
+release, never ordinary API Close. All server admission and parent links remain under the
 store mutex; hosted calls and cleanup waits remain outside it.
 
 Connection teardown cancels in-flight work, closes store admission, waits for

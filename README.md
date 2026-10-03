@@ -8,11 +8,11 @@ This module targets Go 1.25 and Unified API `v1.0.0-alpha.20`. The v1 protobuf p
 
 ```text
 host application                         client application
-  owns configured api.Runtime              owns grpc.ClientConnInterface
-  chooses endpoint and security policy     owns transport lifetime
+  owns configured api.Runtime              chooses New or From
+  chooses endpoint and security policy     closes runtimes and descendants
              |                                         |
              v                                         v
-     server.Server  <-------- ferret.wire.v1 ------ api.Runtime via client.New
+     server.Server  <-------- ferret.wire.v1 ------ api.Runtime via client.New/From
         borrows runtime                           owns Connect stream
              |
        logical Connection
@@ -23,7 +23,7 @@ host application                         client application
              └── Debug sessions
 ```
 
-`New` only constructs state. It does not listen, dial, inspect the environment, or close the supplied runtime. `Run` explicitly creates a TCP listener at the supplied address and manages serving and shutdown. `Serve` accepts a caller-created listener, including Unix sockets and custom transports; gRPC closes that listener when serving returns. Both use the same constructor-configured security policy. `Shutdown` releases Wire-owned resources while leaving the runtime open.
+`server.New` only constructs state. It does not listen, dial, inspect the environment, or close the supplied runtime. `Run` explicitly creates a TCP listener at the supplied address and manages serving and shutdown. `Serve` accepts a caller-created listener, including Unix sockets and custom transports; gRPC closes that listener when serving returns. Both use the same constructor-configured security policy. `Shutdown` releases Wire-owned resources while leaving the runtime open.
 
 Every `Connect` server stream creates one logical ownership scope. It is deliberately independent of the physical HTTP/2 connection: several logical connections can share one `grpc.ClientConn`, but their IDs and resources remain isolated. Cancelling the Connect stream or calling `CloseConnection` first cancels and waits for pending creation, then settles executions, normal sessions, debug sessions, and plans in descendants-first order. Concurrent callers that observe the same in-flight release wait for its retained result. Once cleanup completes, the ID is stale and returns the corresponding structured not-found error. Cancelling one waiter does not abandon committed cleanup.
 
@@ -73,20 +73,11 @@ func serveRuntime(ctx context.Context, hostRuntime api.Runtime) error {
 ```
 
 This example uses **unencrypted, unauthenticated transport**, even on loopback.
-The matching client executes through the public runtime and closes its logical
-resources before the transport:
+The matching client explicitly selects plaintext and owns its channel:
 
 ```go
 func runLoopback(ctx context.Context) (out *api.Output, err error) {
-    conn, err := grpc.NewClient("127.0.0.1:50051",
-        grpc.WithTransportCredentials(insecure.NewCredentials()),
-    )
-    if err != nil {
-        return nil, err
-    }
-    defer func() { err = errors.Join(err, conn.Close()) }()
-
-    remote, err := client.New(ctx, conn)
+    remote, err := client.New(ctx, "127.0.0.1:50051", client.WithInsecure())
     if err != nil {
         return nil, err
     }
@@ -95,6 +86,26 @@ func runLoopback(ctx context.Context) (out *api.Output, err error) {
     return remote.Run(ctx, api.NewAnonymousSource("RETURN 1"))
 }
 ```
+
+`client.New(ctx, target, options...)` completes the Wire handshake before
+returning. Its default is TLS with system trust and server identity verification;
+there is no automatic plaintext fallback, including on loopback or Unix sockets.
+`WithInsecure` disables encryption and peer authentication. Custom credentials
+and per-RPC authentication use `WithTransportCredentials` and
+`WithPerRPCCredentials`; see [security examples](docs/security.md).
+
+The constructor context controls startup only. Cancellation after successful
+construction does not close the runtime. Failed construction returns a nil
+runtime and rolls back with bounded detached cleanup, which may take additional
+time after startup cancellation. Closing a runtime gates new root calls, while
+admitted work and retained plans, sessions, and debuggers keep their lifetimes.
+The owned channel closes after final logical release, even if cleanup fails.
+Callers must still close all returned descendants.
+
+| Constructor | Logical Wire connection | gRPC channel |
+| --- | --- | --- |
+| `New(ctx, target, options...)` | Managed by Wire | Created and eventually closed by Wire |
+| `From(ctx, connection)` | Managed by Wire | Always caller-owned |
 
 `Run` returns after managed shutdown settles. Serving-context cancellation or
 explicit shutdown returns `nil` when cleanup succeeds; serving and cleanup errors
@@ -163,12 +174,12 @@ conn, err := grpc.NewClient(
 
 The caller checks the connection error and closes `conn` after its remote
 runtimes. Credentials, TLS, dial options, and message limits belong to this
-transport setup. `client.New` borrows the supplied connection and returns
+transport setup. `client.From` borrows the supplied connection and returns
 `api.Runtime`; subsequent operations use the same interfaces as a local runtime:
 
 ```go
 func runRemote(ctx context.Context, conn grpc.ClientConnInterface) (out *api.Output, err error) {
-    remote, err := client.New(ctx, conn)
+    remote, err := client.From(ctx, conn)
     if err != nil {
         return nil, err
     }
@@ -232,8 +243,10 @@ release the debugger. Atomic breakpoint replacement works while running, and
 breakpoint enumeration remains available after explicit Close. See the
 [alpha.20 interface coverage](test/integration/README.md#interface-coverage).
 
-The public client exports only `New`, `Error`, `ErrClosed`, and
-`ErrExecutionCancelled`. Existing users of `NewRuntime` should call `New`;
+The public client exports `New`, `From`, `Option`, the three transport option
+factories, `Error`, `ErrClosed`, and `ErrExecutionCancelled`. This is an intentional
+Go constructor API break: existing `New(ctx, conn)` calls become `From(ctx, conn)`
+with unchanged caller ownership. Existing users of `NewRuntime` also use `From`;
 `client.Runtime`, `client.Session`, and `client.Output` declarations should use
 the canonical `api` types. The previous lower-level handles, options, metadata,
 and convenience operations have been removed without compatibility aliases.

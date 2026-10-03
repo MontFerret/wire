@@ -7,8 +7,11 @@ never opens a listener. Explicit `Run` creates TCP transport at the supplied
 address; `Serve` accepts a caller-created listener. Both use identical constructor
 credentials and middleware. gRPC closes accepted listeners when serving returns.
 
-Without configured transport credentials there is no encryption or authentication,
-including on loopback. Configured credentials do not fall back to plaintext.
+A server without configured transport credentials provides no encryption or
+authentication, including on loopback. `client.New` defaults to verified TLS with
+system trust roots; connecting to an unsecured server requires `WithInsecure`.
+Neither side automatically falls back to plaintext. `WithInsecure` disables
+encryption and peer authentication, rather than disabling TLS certificate checks.
 Wire does not load or generate certificates, validate JWTs/API keys, or add
 credentials to protobuf messages or UAPI interfaces.
 
@@ -36,19 +39,14 @@ The matching client verifies both the root and certificate identity:
 
 ```go
 func runTLS(ctx context.Context, serverRoots *x509.CertPool) (out *api.Output, err error) {
-    conn, err := grpc.NewClient(
+    remote, err := client.New(ctx,
         "127.0.0.1:50051",
-        grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{
+        client.WithTransportCredentials(credentials.NewTLS(&tls.Config{
             MinVersion: tls.VersionTLS12,
             RootCAs:    serverRoots,
             ServerName: "wire.test",
         })),
     )
-    if err != nil {
-        return nil, err
-    }
-    defer func() { err = errors.Join(err, conn.Close()) }()
-    remote, err := client.New(ctx, conn)
     if err != nil {
         return nil, err
     }
@@ -62,9 +60,42 @@ func runTLS(ctx context.Context, serverRoots *x509.CertPool) (out *api.Output, e
 construction as proof that TLS or authentication succeeded. Do not disable server
 certificate verification.
 
+## TLS with system trust
+
+For `inventory.example.com:50051`, the host supplies a server certificate whose
+DNS SAN is `inventory.example.com`, signed by a CA trusted by the client system.
+The host's chosen address must resolve to an interface on which it can listen.
+The matching pair needs no custom client trust configuration:
+
+```go
+func serveInventory(ctx context.Context, hostRuntime api.Runtime, certificate tls.Certificate) error {
+    srv, err := server.New(hostRuntime, server.WithTransportCredentials(
+        credentials.NewTLS(&tls.Config{Certificates: []tls.Certificate{certificate}}),
+    ))
+    if err != nil {
+        return err
+    }
+    return srv.Run(ctx, "inventory.example.com:50051")
+}
+
+func runInventory(ctx context.Context) (out *api.Output, err error) {
+    remote, err := client.New(ctx, "inventory.example.com:50051")
+    if err != nil {
+        return nil, err
+    }
+    defer func() { err = errors.Join(err, remote.Close()) }()
+    return remote.Run(ctx, api.NewAnonymousSource("RETURN 1"))
+}
+```
+
+Default client TLS configurations are fresh per construction, with `RootCAs` nil
+and ordinary chain/identity verification enabled. Wire does not load certificate
+files, modify caller credentials, or own the external resources they reference.
+
 ## Mutual TLS
 
-Use the same endpoint, server identity, and `serverRoots`. The client supplies a
+Use the private-CA example's endpoint `127.0.0.1:50051`, server identity
+`wire.test`, and `serverRoots`. The client supplies a
 certificate with client-authentication usage, signed by the CA in `clientRoots`.
 Configure the host's TLS policy as:
 
@@ -87,16 +118,22 @@ return srv.Run(ctx, "127.0.0.1:50051")
 The matching client configuration is:
 
 ```go
-clientTLS := &tls.Config{
-    MinVersion:   tls.VersionTLS12,
-    RootCAs:      serverRoots,
-    ServerName:   "wire.test",
-    Certificates: []tls.Certificate{clientCertificate},
+func runMTLS(ctx context.Context, serverRoots *x509.CertPool, certificate tls.Certificate) (out *api.Output, err error) {
+    clientTLS := &tls.Config{
+        MinVersion:   tls.VersionTLS12,
+        RootCAs:      serverRoots,
+        ServerName:   "wire.test",
+        Certificates: []tls.Certificate{certificate},
+    }
+    remote, err := client.New(ctx, "127.0.0.1:50051",
+        client.WithTransportCredentials(credentials.NewTLS(clientTLS)),
+    )
+    if err != nil {
+        return nil, err
+    }
+    defer func() { err = errors.Join(err, remote.Close()) }()
+    return remote.Run(ctx, api.NewAnonymousSource("RETURN 1"))
 }
-conn, err := grpc.NewClient("127.0.0.1:50051",
-    grpc.WithTransportCredentials(credentials.NewTLS(clientTLS)),
-)
-// Check err, then call client.New(ctx, conn) and manage logical/transport cleanup.
 ```
 
 Host middleware can inspect `peer.FromContext(ctx)` and
@@ -171,17 +208,23 @@ func (token bearerToken) GetRequestMetadata(context.Context, ...string) (map[str
 }
 func (bearerToken) RequireTransportSecurity() bool { return true }
 
-clientTLS := &tls.Config{
-    MinVersion: tls.VersionTLS12,
-    RootCAs:    serverRoots,
-    ServerName: "wire.test",
+func runAuthenticated(ctx context.Context, serverRoots *x509.CertPool, hostIssuedToken string) (out *api.Output, err error) {
+    clientTLS := &tls.Config{
+        MinVersion: tls.VersionTLS12,
+        RootCAs:    serverRoots,
+        ServerName: "wire.test",
+    }
+    // Add the client certificate from the mTLS example if the host requires it.
+    remote, err := client.New(ctx, "127.0.0.1:50051",
+        client.WithTransportCredentials(credentials.NewTLS(clientTLS)),
+        client.WithPerRPCCredentials(bearerToken(hostIssuedToken)),
+    )
+    if err != nil {
+        return nil, err
+    }
+    defer func() { err = errors.Join(err, remote.Close()) }()
+    return remote.Run(ctx, api.NewAnonymousSource("RETURN 1"))
 }
-// Add the client certificate from the mTLS example when the host requires it.
-conn, err := grpc.NewClient("127.0.0.1:50051",
-    grpc.WithTransportCredentials(credentials.NewTLS(clientTLS)),
-    grpc.WithPerRPCCredentials(bearerToken(hostIssuedToken)),
-)
-// Check err, then client.New(ctx, conn), query execution, and ordered cleanup.
 ```
 
 A token attached only to the constructor context does not authenticate subsequent
@@ -189,9 +232,44 @@ calls. Authentication hooks must cover unary and streaming RPCs across all servi
 including operation calls, execution watches, and debugger command/watch streams.
 Hosts can compute or refresh per-call credentials in their credential provider.
 
+## Caller-configured transport
+
+Use `From` for specialized gRPC dialers, interceptors, or transport limits. This
+example uses the same `127.0.0.1:50051` TLS host and `wire.test` identity. The caller
+owns the channel on construction failure and after all logical runtimes close:
+
+```go
+func runBorrowed(ctx context.Context, serverRoots *x509.CertPool) (out *api.Output, err error) {
+    conn, err := grpc.NewClient("127.0.0.1:50051",
+        grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{
+            RootCAs: serverRoots, ServerName: "wire.test",
+        })),
+        grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(8 << 20)),
+    )
+    if err != nil {
+        return nil, err
+    }
+    defer func() { err = errors.Join(err, conn.Close()) }()
+    remote, err := client.From(ctx, conn)
+    if err != nil {
+        return nil, err
+    }
+    defer func() { err = errors.Join(err, remote.Close()) }()
+    return remote.Run(ctx, api.NewAnonymousSource("RETURN 1"))
+}
+```
+
+Server message limits still apply. `From` accepts no transport options and never
+closes the borrowed connection. Multiple logical runtimes may share it without
+acquiring one another's lifetimes. An owned channel remains alive after ordinary
+runtime/plan API closure while admitted work or descendants retain it; callers
+must close those descendants. Failed startup and final release attempt bounded
+logical cleanup before owned channel closure, even when cleanup fails. Detached
+rollback may add time after the startup deadline.
+
 ## Option validation
 
-`New` and `Run` apply every non-nil option once in registration order, collecting
+`server.New` and `Server.Run` apply every non-nil option once in registration order, collecting
 failures with `errors.Join`. Nil options are rejected. Construction and startup
 reservation/listening do not proceed when any option fails, even if a later
 valid option overrides the same setting. Invalid options never run their setters.
@@ -207,7 +285,7 @@ Child causes and non-secret rejected values remain available, for example
 `unary interceptors: [2]: must not be nil: value=<nil>`. Credentials and unrelated
 runtime identity metadata are excluded from validation messages. Numeric values,
 empty identity names, and nil entries provide rejected-value context.
-The accepted values and defaults are unchanged: empty interceptor lists are
+The server accepted values and defaults are unchanged: empty interceptor lists are
 no-ops, every limit is positive, and explicit non-positive shutdown timeouts fail.
 
 Use `errors.As` to inspect the first matching validation error in the joined
@@ -221,9 +299,18 @@ if errors.As(err, &invalid) {
 ```
 
 Import `gooptions "github.com/ziflex/go-options"`. Standard `errors.Is` and
-`errors.As` retain access to validator causes. These are host configuration
+`errors.As` retain access to validator causes. These are constructor configuration
 errors; RPC authentication and Wire's sanitized runtime error contracts remain
 unchanged.
+
+Client options follow the same ordered validation convention. Nil/typed-nil
+credentials fail locally; repeated transport credentials use the last valid
+value and repeated per-RPC options append providers in gRPC registration order.
+`WithInsecure` is idempotent and conflicts with explicit transport credentials in
+either order. No later option erases earlier validation failures. gRPC rejects
+plaintext combined with credentials requiring transport security, without sending
+protected metadata. Credential providers own refresh and concurrency behavior;
+Wire adds no token cache or lifecycle. See [client options](client.md#transport-options).
 
 ## Middleware and trust boundaries
 

@@ -19,7 +19,7 @@ func BenchmarkRuntimeConnectClose(b *testing.B) {
 	b.ResetTimer()
 
 	for b.Loop() {
-		remote, err := client.New(ctx, env.conn)
+		remote, err := client.From(ctx, env.conn)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -45,7 +45,7 @@ func BenchmarkPlanCompileClose(b *testing.B) {
 			env := newIntegrationEnv(b, runtime)
 			ctx := b.Context()
 
-			remote, err := client.New(ctx, env.conn)
+			remote, err := client.From(ctx, env.conn)
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -96,7 +96,7 @@ func BenchmarkHostInterceptorChains(b *testing.B) {
 			b.ReportAllocs()
 			b.ResetTimer()
 			for b.Loop() {
-				remote, err := client.New(b.Context(), env.conn)
+				remote, err := client.From(b.Context(), env.conn)
 				if err != nil {
 					b.Fatal(err)
 				}

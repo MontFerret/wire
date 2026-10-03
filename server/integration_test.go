@@ -445,7 +445,7 @@ func newIntegrationEnv(t testing.TB, runtime api.Runtime, options ...server.Opti
 		t.Fatal(err)
 	}
 
-	wireClient, err := client.New(testContext(t), conn)
+	wireClient, err := client.From(testContext(t), conn)
 	if err != nil {
 		t.Fatal(err)
 	}

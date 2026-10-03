@@ -125,7 +125,7 @@ func TestCloseAfterServerDisconnectTreatsMissingConnectionAsSettled(t *testing.T
 	server := &lifecycleServer{disconnect: true}
 	connection := startLifecycleServer(t, server)
 
-	client, err := newConnection(testClientContext(t), connection)
+	client, err := newConnection(testClientContext(t), connection, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +152,7 @@ func TestCloseRejectsNewOperationsAndCancelsFacadeWatchers(t *testing.T) {
 	server := &lifecycleServer{closeEntered: make(chan struct{}), allowClose: make(chan struct{})}
 	connection := startLifecycleServer(t, server)
 
-	client, err := newConnection(testClientContext(t), connection)
+	client, err := newConnection(testClientContext(t), connection, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

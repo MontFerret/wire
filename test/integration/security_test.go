@@ -57,7 +57,7 @@ func TestPublicTLSAuthenticatedRuntimeRoundTrip(t *testing.T) {
 		}
 	})
 
-	remote, err := client.New(harness.Context(t), conn)
+	remote, err := client.From(harness.Context(t), conn)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -8,121 +8,145 @@ import (
 
 	"github.com/MontFerret/api"
 	"github.com/MontFerret/api/debugger"
+	"github.com/MontFerret/wire/client"
 	"github.com/MontFerret/wire/test/integration/harness"
 )
 
 func TestParentClosePreservesChildrenAndActiveWork(t *testing.T) {
-	for _, owner := range []string{"plan", "runtime"} {
-		t.Run(owner, func(t *testing.T) {
-			run := harness.NewBlock(t)
-			command := harness.NewBlock(t)
-			h := harness.New(t, harness.WithBehavior(harness.RuntimeBehavior{Plan: harness.PlanBehavior{
-				Session: func(harness.SessionOptions) harness.SessionBehavior {
-					return harness.SessionBehavior{Run: func(ctx context.Context, invocation int) (*api.Output, error) {
-						if invocation > 1 {
-							return &api.Output{}, nil
-						}
+	for _, ownership := range []string{"borrowed", "owned"} {
+		t.Run(ownership, func(t *testing.T) {
+			for _, owner := range []string{"plan", "runtime"} {
+				t.Run(owner, func(t *testing.T) {
+					run := harness.NewBlock(t)
+					command := harness.NewBlock(t)
+					options := []harness.Option{}
 
-						return &api.Output{}, run.Wait(ctx)
-					}}
-				},
-				Debugger: harness.DebuggerBehavior{Command: func(ctx context.Context, method string, _ int) (*debugger.Event, error) {
-					if method == "Continue" {
-						return &debugger.Event{Reason: debugger.ReasonCompleted, Output: &api.Output{}}, command.Wait(ctx)
+					if ownership == "owned" {
+						options = append(options, harness.WithOwnedTransport(client.WithInsecure()))
 					}
 
-					return &debugger.Event{Reason: debugger.ReasonEntry}, nil
-				}},
-			}}))
+					options = append(options, harness.WithBehavior(harness.RuntimeBehavior{Plan: harness.PlanBehavior{
+						Session: func(harness.SessionOptions) harness.SessionBehavior {
+							return harness.SessionBehavior{Run: func(ctx context.Context, invocation int) (*api.Output, error) {
+								if invocation > 1 {
+									return &api.Output{}, nil
+								}
 
-			plan, err := h.Runtime().CompileDebug(h.Context(), api.Source{Content: "RETURN 1"})
-			if err != nil {
-				t.Fatal(err)
+								return &api.Output{}, run.Wait(ctx)
+							}}
+						},
+						Debugger: harness.DebuggerBehavior{Command: func(ctx context.Context, method string, _ int) (*debugger.Event, error) {
+							if method == "Continue" {
+								return &debugger.Event{Reason: debugger.ReasonCompleted, Output: &api.Output{}}, command.Wait(ctx)
+							}
+
+							return &debugger.Event{Reason: debugger.ReasonEntry}, nil
+						}},
+					}}))
+					h := harness.New(t, options...)
+
+					plan, err := h.Runtime().CompileDebug(h.Context(), api.Source{Content: "RETURN 1"})
+					if err != nil {
+						t.Fatal(err)
+					}
+
+					h.Own(plan)
+
+					session, err := plan.NewSession(h.Context())
+					if err != nil {
+						t.Fatal(err)
+					}
+
+					h.Own(session)
+
+					debug, err := plan.NewDebugSession(h.Context())
+					if err != nil {
+						t.Fatal(err)
+					}
+
+					h.Own(debug)
+
+					if _, err := debug.Start(h.Context()); err != nil {
+						t.Fatal(err)
+					}
+
+					results := make(chan error, 2)
+					go func() { _, err := session.Run(h.Context()); results <- err }()
+					go func() { _, err := debug.Continue(h.Context()); results <- err }()
+					harness.Await(t, run.Started)
+					harness.Await(t, command.Started)
+					closeParent := plan.Close
+
+					if owner == "runtime" {
+						closeParent = h.Runtime().Close
+					}
+
+					if err := closeParent(); err != nil {
+						t.Fatal(err)
+					}
+
+					snapshot := h.RuntimeSpy().Recorder().Snapshot()
+					for _, kind := range []string{"session", "debugger"} {
+						if snapshot.Count(snapshot.OfKind(kind)[0].ID, "Close") != 0 {
+							t.Fatalf("%s Close closed %s", owner, kind)
+						}
+					}
+
+					if owner == "plan" {
+						if child, err := plan.NewSession(h.Context()); err == nil {
+							h.Own(child)
+							t.Fatal("closed plan accepted a constructor")
+						}
+					} else {
+						if _, err := h.Runtime().Run(h.Context(), api.Source{Content: "RETURN 2"}); err == nil {
+							t.Fatal("closed runtime accepted work")
+						}
+
+						extra, err := plan.NewSession(h.Context())
+						if err != nil {
+							t.Fatal(err)
+						}
+
+						h.Own(extra)
+
+						if err := extra.Close(); err != nil {
+							t.Fatal(err)
+						}
+					}
+
+					if ownership == "owned" {
+						select {
+						case <-h.TransportClosed():
+							t.Fatal("parent Close closed the channel with live children")
+						default:
+						}
+					}
+
+					run.Release()
+					command.Release()
+					for range 2 {
+						if err := harness.Await(t, results); err != nil {
+							t.Fatalf("parent Close cancelled caller work: %v", err)
+						}
+					}
+
+					if _, err := session.Run(h.Context()); err != nil {
+						t.Fatalf("surviving session cannot run again: %v", err)
+					}
+
+					for _, closeResource := range []func() error{debug.Close, session.Close, plan.Close, h.Runtime().Close} {
+						if err := closeResource(); err != nil {
+							t.Fatal(err)
+						}
+					}
+
+					if ownership == "owned" {
+						harness.Await(t, h.TransportClosed())
+					}
+
+					h.RuntimeSpy().Recorder().AssertClosed(t)
+				})
 			}
-
-			h.Own(plan)
-
-			session, err := plan.NewSession(h.Context())
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			h.Own(session)
-
-			debug, err := plan.NewDebugSession(h.Context())
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			h.Own(debug)
-
-			if _, err := debug.Start(h.Context()); err != nil {
-				t.Fatal(err)
-			}
-
-			results := make(chan error, 2)
-			go func() { _, err := session.Run(h.Context()); results <- err }()
-			go func() { _, err := debug.Continue(h.Context()); results <- err }()
-			harness.Await(t, run.Started)
-			harness.Await(t, command.Started)
-			closeParent := plan.Close
-
-			if owner == "runtime" {
-				closeParent = h.Runtime().Close
-			}
-
-			if err := closeParent(); err != nil {
-				t.Fatal(err)
-			}
-
-			snapshot := h.RuntimeSpy().Recorder().Snapshot()
-			for _, kind := range []string{"session", "debugger"} {
-				if snapshot.Count(snapshot.OfKind(kind)[0].ID, "Close") != 0 {
-					t.Fatalf("%s Close closed %s", owner, kind)
-				}
-			}
-
-			if owner == "plan" {
-				if child, err := plan.NewSession(h.Context()); err == nil {
-					h.Own(child)
-					t.Fatal("closed plan accepted a constructor")
-				}
-			} else {
-				if _, err := h.Runtime().Run(h.Context(), api.Source{Content: "RETURN 2"}); err == nil {
-					t.Fatal("closed runtime accepted work")
-				}
-
-				extra, err := plan.NewSession(h.Context())
-				if err != nil {
-					t.Fatal(err)
-				}
-
-				h.Own(extra)
-
-				if err := extra.Close(); err != nil {
-					t.Fatal(err)
-				}
-			}
-
-			run.Release()
-			command.Release()
-			for range 2 {
-				if err := harness.Await(t, results); err != nil {
-					t.Fatalf("parent Close cancelled caller work: %v", err)
-				}
-			}
-
-			if _, err := session.Run(h.Context()); err != nil {
-				t.Fatalf("surviving session cannot run again: %v", err)
-			}
-
-			for _, closeResource := range []func() error{debug.Close, session.Close, plan.Close, h.Runtime().Close} {
-				if err := closeResource(); err != nil {
-					t.Fatal(err)
-				}
-			}
-
-			h.RuntimeSpy().Recorder().AssertClosed(t)
 		})
 	}
 }
