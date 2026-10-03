@@ -73,7 +73,7 @@ func TestCompileOptionsApplyOnceBeforeDispatch(t *testing.T) {
 				env := newIntegrationEnv(t, hosted)
 				gate := &allocationResponseGate{ClientConnInterface: env.conn, calls: make(map[string]int)}
 
-				remote, err := client.New(testContext(t), gate)
+				remote, err := client.From(testContext(t), gate)
 				if err != nil {
 					t.Fatal(err)
 				}

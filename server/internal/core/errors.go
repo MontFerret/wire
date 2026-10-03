@@ -34,15 +34,6 @@ func resourceExhausted(message string) error {
 	return &DomainError{Kind: ErrorKindResourceExhausted, Message: message}
 }
 
-func ignoreMissingResource(err error, kind ErrorKind) error {
-	var domain *DomainError
-	if errors.As(err, &domain) && domain.Kind == kind {
-		return nil
-	}
-
-	return err
-}
-
 func failureFromError(category failure.Category, err error) *failure.Failure {
 	return &failure.Failure{
 		Category:    category,

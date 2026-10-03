@@ -172,3 +172,24 @@ with `h.Own` or closed explicitly; teardown asserts exact hosted cleanup before
 server shutdown. Explicit transport shutdown and lost-allocation recovery still
 cascade. Fault injection distinguishes non-owning watches from command-result
 streams: ending RunCommand before its result cancels that command, not the handle.
+
+## Secure hosting round trip
+
+`TestPublicTLSAuthenticatedRuntimeRoundTrip` uses the public server and client
+with mutually authenticated TLS and host-supplied unary/stream token middleware
+on an ephemeral loopback endpoint. It compiles a query, creates a session,
+executes, closes all logical resources, and checks that the borrowed runtime
+remains open. Certificates and middleware in `test/securityfixture` are test
+infrastructure only. Package-local server tests additionally exercise managed
+`Run`, all registered RPC middleware, TLS/mTLS rejection, limits, and shutdown races.
+
+## Owning client construction
+
+The default harness continues to use `client.From` over a shared caller-owned
+bufconn transport. `WithOwnedTransport` uses `client.New` and an open ephemeral
+loopback listener, observing actual socket closure before server teardown.
+`owning_constructor_test.go` covers targets, startup-context independence, admitted
+root work, retained plans and sessions, and deferred-error attribution. Parent-close
+coverage runs in both ownership modes, including normal and debugger descendants.
+Client contract tests also cover constructor rollback, exactly-once teardown,
+TLS/mTLS, per-RPC authentication refresh, cleanup credentials, and plaintext rejection.

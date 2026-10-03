@@ -31,14 +31,20 @@ type (
 		behavior      RuntimeBehavior
 		serverOptions []server.Option
 		unavailable   bool
+		owned         bool
+		clientOptions []client.Option
 	}
 
-	// Harness owns its listener and transport. Wire borrows the hosted Runtime.
+	// Harness owns its listener and optional borrowed-client transport. New owns
+	// independent channels in owning fixtures; Wire borrows the hosted Runtime.
 	Harness struct {
 		t               testing.TB
 		ctx             context.Context
 		server          *server.Server
-		listener        *bufconn.Listener
+		listener        net.Listener
+		endpoint        string
+		clientOptions   []client.Option
+		transportEnds   chan struct{}
 		connection      *grpc.ClientConn
 		faults          *Faults
 		spy             *RuntimeSpy
@@ -68,6 +74,17 @@ func WithServerOptions(options ...server.Option) Option {
 	return func(c *configuration) { c.serverOptions = append(c.serverOptions, options...) }
 }
 
+// WithOwnedTransport uses New with an ephemeral loopback server and independently
+// owned channels. The default fixture retains its shared borrowed bufconn path.
+func WithOwnedTransport(options ...client.Option) Option {
+	captured := append([]client.Option(nil), options...)
+
+	return func(c *configuration) {
+		c.owned = true
+		c.clientOptions = append(c.clientOptions, captured...)
+	}
+}
+
 // WithUnavailableServer leaves a closed listener for handshake failure tests.
 func WithUnavailableServer() Option {
 	return func(c *configuration) { c.unavailable = true }
@@ -95,12 +112,38 @@ func New(t testing.TB, options ...Option) *Harness {
 
 	var err error
 
-	h.server, err = server.NewServer(hosted, configured.serverOptions...)
+	h.server, err = server.New(hosted, configured.serverOptions...)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	h.listener = bufconn.Listen(1 << 20)
+	if configured.owned {
+		listener, listenErr := net.Listen("tcp", "127.0.0.1:0")
+		if listenErr != nil {
+			t.Fatal(listenErr)
+		}
+
+		h.transportEnds = make(chan struct{}, 32)
+		h.listener = &observedListener{Listener: listener, ends: h.transportEnds}
+		h.endpoint = listener.Addr().String()
+		h.clientOptions = configured.clientOptions
+	} else {
+		listener := bufconn.Listen(1 << 20)
+		h.listener = listener
+
+		h.connection, err = grpc.NewClient(
+			"passthrough:///wire-integration",
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
+			grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
+				return listener.DialContext(ctx)
+			}),
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		h.faults = newFaults(h.connection)
+	}
 
 	if configured.unavailable {
 		if err := h.listener.Close(); err != nil {
@@ -110,19 +153,6 @@ func New(t testing.TB, options ...Option) *Harness {
 		h.serveResult = make(chan error, 1)
 		go func() { h.serveResult <- h.server.Serve(context.Background(), h.listener) }()
 	}
-
-	h.connection, err = grpc.NewClient(
-		"passthrough:///wire-integration",
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
-			return h.listener.DialContext(ctx)
-		}),
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	h.faults = newFaults(h.connection)
 
 	if !configured.unavailable {
 		h.runtime, err = h.OpenRuntime()
@@ -149,14 +179,22 @@ func (h *Harness) Context() context.Context {
 	return h.ctx
 }
 
-// Faults returns the injector shared by this fixture's client connections.
+// Faults returns the shared borrowed-transport injector, or nil in owned fixtures.
 func (h *Harness) Faults() *Faults {
 	return h.faults
 }
 
-// OpenRuntime opens another logical runtime on the shared transport and registers its cleanup.
+// OpenRuntime opens a runtime using the fixture ownership mode and registers cleanup.
 func (h *Harness) OpenRuntime() (api.Runtime, error) {
-	runtime, err := client.New(h.ctx, h.faults)
+	var runtime api.Runtime
+	var err error
+
+	if h.endpoint != "" {
+		runtime, err = client.New(h.ctx, h.endpoint, h.clientOptions...)
+	} else {
+		runtime, err = client.From(h.ctx, h.faults)
+	}
+
 	if err != nil {
 		return nil, err
 	}
@@ -188,6 +226,10 @@ func (h *Harness) Shutdown() error {
 
 // CloseTransport closes the caller-owned gRPC connection once to exercise disconnection.
 func (h *Harness) CloseTransport() error {
+	if h.connection == nil {
+		return errors.New("owned fixture channels are released through runtime lifetimes")
+	}
+
 	h.mu.Lock()
 
 	if h.transportClosed {
@@ -273,7 +315,7 @@ func (h *Harness) cleanup() {
 	}
 
 	if h.listener != nil {
-		if err := h.listener.Close(); err != nil {
+		if err := h.listener.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
 			h.t.Errorf("close listener: %v", err)
 		}
 	}

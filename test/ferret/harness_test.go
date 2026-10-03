@@ -69,7 +69,7 @@ func newHarness(t *testing.T, options ...server.Option) *harness {
 		}
 	})
 
-	h.server, err = server.NewServer(h.hosted, options...)
+	h.server, err = server.New(h.hosted, options...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +98,7 @@ func newHarness(t *testing.T, options ...server.Option) *harness {
 }
 
 func (h *harness) openRuntime() (api.Runtime, error) {
-	remote, err := client.New(h.ctx, h.transport)
+	remote, err := client.From(h.ctx, h.transport)
 	if err != nil {
 		return nil, err
 	}

@@ -5,13 +5,11 @@ import (
 	"errors"
 	"sync"
 
-	"google.golang.org/grpc"
-
 	"github.com/MontFerret/api"
 )
 
 // remoteRuntime is a remote implementation of the Universal Ferret API. It owns
-// one logical Wire client and borrows the caller's gRPC transport.
+// one logical Wire connection, including any transport owned by its constructor.
 type remoteRuntime struct {
 	client     *connectionHandle
 	mu         sync.Mutex
@@ -21,21 +19,6 @@ type remoteRuntime struct {
 }
 
 var _ api.Runtime = (*remoteRuntime)(nil)
-
-// New opens a logical Wire connection and exposes it through the
-// canonical api.Runtime interface. Connect must include the hosted runtime version,
-// including presence for an empty value. The context bounds the handshake;
-// cancelling it after construction does not close the runtime. Close releases the
-// logical connection and its resources with bounded detached cleanup, leaving the
-// caller-owned transport open. On failure, New returns a nil interface.
-func New(ctx context.Context, connection grpc.ClientConnInterface) (api.Runtime, error) {
-	wireClient, err := newConnection(ctx, connection)
-	if err != nil {
-		return nil, err
-	}
-
-	return &remoteRuntime{client: wireClient}, nil
-}
 
 // Version returns the immutable hosted version captured during Connect, including
 // after Close or transport loss. Reading it does not retain the connection.

@@ -98,12 +98,14 @@ func boundedCleanup(ctx context.Context, timeout time.Duration, close func(conte
 }
 
 func retainedContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	retained := context.WithoutCancel(ctx)
+
 	deadline, ok := ctx.Deadline()
 	if !ok {
-		return context.Background(), func() {}
+		return retained, func() {}
 	}
 
-	return context.WithDeadline(context.Background(), deadline)
+	return context.WithDeadline(retained, deadline)
 }
 
 func settleHandleClose(ctx context.Context, kind string, state *closeState, release func(context.Context) error) {

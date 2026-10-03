@@ -488,7 +488,7 @@ func TestHandleOperationsUseBoundOwnerResources(t *testing.T) {
 func openHandleClient(t *testing.T, connection grpc.ClientConnInterface) *connectionHandle {
 	t.Helper()
 
-	client, err := newConnection(testClientContext(t), connection)
+	client, err := newConnection(testClientContext(t), connection, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

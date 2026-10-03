@@ -433,7 +433,7 @@ func TestRuntimeRunOwnsItsExecution(t *testing.T) {
 func openTestClient(t *testing.T, connection grpc.ClientConnInterface) *connectionHandle {
 	t.Helper()
 
-	client, err := newConnection(testClientContext(t), connection)
+	client, err := newConnection(testClientContext(t), connection, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -496,7 +496,7 @@ func startClientTestServer(t *testing.T, implementation *clientTestServer) *grpc
 func openTestRuntime(t *testing.T, connection grpc.ClientConnInterface) api.Runtime {
 	t.Helper()
 
-	runtime, err := New(testClientContext(t), connection)
+	runtime, err := From(testClientContext(t), connection)
 	if err != nil {
 		t.Fatal(err)
 	}

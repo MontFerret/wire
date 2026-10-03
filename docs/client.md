@@ -1,9 +1,47 @@
 # Client API
 
-`client.New(ctx, conn)` returns a remote implementation of `api.Runtime`.
-The caller configures the endpoint, credentials, TLS, dialer, and transport
-limits on the supplied `grpc.ClientConnInterface` and retains its ownership.
+`client.New(ctx, target, options...)` creates a gRPC channel, completes and
+validates the Wire handshake, and returns a remote `api.Runtime`.
+`client.From(ctx, connection)` performs the same handshake over a caller-configured
+`grpc.ClientConnInterface` and never takes ownership of that transport.
 There is no second handwritten Wire resource API.
+
+| Constructor | Logical Wire connection | gRPC channel |
+| --- | --- | --- |
+| `New(ctx, target, options...)` | Managed by Wire | Created and eventually closed by Wire |
+| `From(ctx, connection)` | Managed by Wire | Always caller-owned |
+
+Both require a non-nil, uncanceled startup context. `From` rejects nil and typed-nil
+connections without requiring a transport `Close` method. Both return a genuinely
+nil runtime interface on failure and retain decoded startup and rollback errors.
+The target is required and passed unchanged to gRPC; only empty or whitespace-only
+targets are rejected locally. Ordinary endpoints and resolver-qualified targets
+use gRPC semantics. Each `New` creates its own independent channel.
+
+### Transport options
+
+`New` defaults to fresh TLS credentials with system trust roots and normal chain
+and server-identity verification. There is no plaintext fallback. `WithInsecure`
+explicitly selects plaintext, disabling encryption and peer authentication; it
+does not mean TLS without certificate verification.
+
+`WithTransportCredentials` replaces the default and passes custom TLS, mTLS, or
+other credential policy through gRPC without modifying or owning the provider.
+`WithPerRPCCredentials` installs providers on the channel for the handshake,
+subsequent unary and streaming RPCs, and detached cleanup. Providers may refresh
+values between calls; gRPC enforces `RequireTransportSecurity`.
+
+Options run once in order. Nil options and nil/typed-nil credentials fail before
+channel creation. Repeated transport credentials use the last valid value;
+per-RPC providers append in registration order; repeated `WithInsecure` is
+idempotent. Explicit insecure and custom transport options conflict in either
+order. A later override cannot erase earlier validation errors. Reusing an
+option does not accumulate configuration across runtimes. Provider implementations
+must support concurrent calls; arbitrary provider state is not deep-copied.
+
+`From` takes no transport options. Use it for custom dialers, interceptors,
+message limits, or other specialized gRPC configuration. See the
+[security examples](security.md) for connected TLS, mTLS, and authentication examples.
 
 ## Resource model
 
@@ -16,8 +54,10 @@ api.Runtime
 
 All implementations remain private. Sources, options, output, diagnostics,
 breakpoints, locations, frames, variables, reasons, and debugger events use
-their canonical Universal API types directly. `client` exports only `New`,
-`Error`, `ErrClosed`, and `ErrExecutionCancelled`.
+their canonical Universal API types directly. The constructor surface is `New`,
+`From`, `Option`, `WithTransportCredentials`, `WithPerRPCCredentials`, and
+`WithInsecure`; the remaining exports are `Error`, `ErrClosed`, and
+`ErrExecutionCancelled`.
 
 `Runtime.Run` invokes the hosted `api.Runtime.Run` directly, once per call.
 `Compile` and `CompileDebug` create reusable plans through the corresponding
@@ -91,9 +131,9 @@ func runQuery(ctx context.Context, runtime api.Runtime) (out *api.Output, err er
 }
 ```
 
-Create the remote runtime with `client.New(ctx, conn)` and close it after its
-resources. Closing it never closes `conn`. Constructor failure returns a nil
-`api.Runtime` interface and the decoded error.
+Create a remote runtime with `client.New(ctx, target, options...)` or
+`client.From(ctx, conn)` and close it after its resources. Only `From` leaves
+`conn` caller-owned on every path, including startup failure, closure, and recovery.
 
 ## Debugger
 
@@ -165,14 +205,19 @@ remain until the caller explicitly closes its ancestor; a durable Session can
 therefore remain busy. If only the release acknowledgement was lost after
 server cleanup, the same durable Session can run again.
 
-Operation and cleanup errors remain joined. The caller-owned physical transport
-and other logical clients on it remain open. These bounds limit client waiting;
+Operation and cleanup errors remain joined. Narrow recovery preserves the channel.
+Recovery that invalidates the whole logical connection also closes a `New`-owned
+channel; a `From` transport and other logical clients sharing it remain open. These bounds limit client waiting;
 the hosted implementation must still honor its cancellation and Close contracts.
 
 ## Closing resources
 
 The constructor context bounds the handshake, not the lifetime of the returned
-runtime. Cancelling it after construction does not close the runtime.
+runtime. Cancelling it after construction does not close the runtime. Startup cancellation
+covers stream creation and initial receive, then detaches before successful
+publication. Context values and outgoing metadata survive that separation.
+Rollback uses fresh bounded detached cleanup and can add time after the startup
+deadline; there is no constructor timeout option. Caller deadlines control startup.
 
 Public resources implement `Close() error`. Closing uses a detached context
 with a 30-second bound. The first close commits teardown exactly once.
@@ -189,8 +234,11 @@ retained until the last child finishes, then `ReleasePlan` removes it.
 calls and descendants. Its logical connection is released after the last
 retained operation or plan finishes. If teardown was deferred, its later error
 belongs to the operation or child close that performs the final release; it
-never changes an earlier runtime-close result. The borrowed physical transport
-and hosted runtime stay open.
+never changes an earlier runtime-close result. Final release attempts bounded
+logical cleanup and cancels the Connect stream before closing a `New`-owned channel.
+Channel closure still occurs when cleanup fails or times out; independent errors
+are joined. Definitive Connect termination follows the same exactly-once teardown.
+Borrowed physical transport and the hosted runtime stay open.
 
 `ReleasePlan`, `CloseConnection`, disconnect, and lost-allocation recovery
 retain cascading semantics. Child admission ignores ordinary ancestor API
@@ -225,7 +273,9 @@ and contained implementation panic details remain sanitized.
 
 ## Migration
 
-Call `client.New` instead of `NewRuntime`. Use `api.Runtime`, `api.Session`,
+The Go constructor change is intentional: replace `client.New(ctx, conn)` with
+`client.From(ctx, conn)` to preserve borrowed ownership. `NewRuntime` callers also
+use `From`. Use `New(ctx, target, options...)` for an owned channel. Use `api.Runtime`, `api.Session`,
 and `api.Output` instead of client aliases. The old `Client`, `Plan`,
 `Execution`, `DebugSession`, and event receiver types, semantic option structs,
 `Parameters`, `RuntimeInfo`, and `Capabilities` have been removed without

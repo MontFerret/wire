@@ -135,7 +135,7 @@ func TestConstructionCancellationReachesRuntimeVersion(t *testing.T) {
 
 			finished := make(chan error, 1)
 			go func() {
-				remote, err := client.New(ctx, h.Faults())
+				remote, err := client.From(ctx, h.Faults())
 				if remote != nil {
 					err = errors.Join(errors.New("canceled handshake returned a runtime"), remote.Close())
 				}

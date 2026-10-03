@@ -19,7 +19,7 @@ require (
 	github.com/rs/zerolog v1.35.1 // indirect
 	github.com/vmihailenco/msgpack/v5 v5.4.1 // indirect
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
-	github.com/ziflex/go-options v1.6.1 // indirect
+	github.com/ziflex/go-options v1.7.0 // indirect
 	golang.org/x/exp v0.0.0-20240506185415-9bf2ced13842 // indirect
 	golang.org/x/net v0.57.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect

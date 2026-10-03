@@ -4,7 +4,7 @@ This focused ecosystem suite exercises the complete public boundary:
 
 ```text
 native engine.New → ferret/uapi.Wrap(native, version) → api.Runtime → wire/server
-→ protobuf and real gRPC over bufconn → wire/client.New → api.Runtime consumer
+→ protobuf and real gRPC over bufconn → wire/client.From → api.Runtime consumer
 ```
 
 The nested module pins Ferret `v2.0.0-alpha.57` and Universal API

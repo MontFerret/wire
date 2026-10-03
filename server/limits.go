@@ -1,8 +1,6 @@
 package server
 
-import (
-	"fmt"
-)
+import gooptions "github.com/ziflex/go-options"
 
 // Limits bounds all client-controlled resource and message classes.
 // A custom value replaces the complete default set and every field must be
@@ -19,7 +17,7 @@ type Limits struct {
 	MaxOutboundMessageBytes       int
 }
 
-// DefaultLimits returns the secure finite limits used by NewServer.
+// DefaultLimits returns the secure finite limits used by New.
 func DefaultLimits() Limits {
 	return Limits{
 		MaxConnections:                64,
@@ -35,26 +33,17 @@ func DefaultLimits() Limits {
 }
 
 func (limits Limits) validate() error {
-	values := []struct {
-		name  string
-		value int
-	}{
-		{name: "max connections", value: limits.MaxConnections},
-		{name: "max plans per connection", value: limits.MaxPlansPerConnection},
-		{name: "max sessions per connection", value: limits.MaxSessionsPerConnection},
-		{name: "max executions per connection", value: limits.MaxExecutionsPerConnection},
-		{name: "max debug sessions per connection", value: limits.MaxDebugSessionsPerConnection},
-		{name: "max watchers per resource", value: limits.MaxWatchersPerResource},
-		{name: "max breakpoints per debug session", value: limits.MaxBreakpointsPerDebugSession},
-		{name: "max inbound message bytes", value: limits.MaxInboundMessageBytes},
-		{name: "max outbound message bytes", value: limits.MaxOutboundMessageBytes},
+	values := map[string]int{
+		"max connections":                   limits.MaxConnections,
+		"max plans per connection":          limits.MaxPlansPerConnection,
+		"max sessions per connection":       limits.MaxSessionsPerConnection,
+		"max executions per connection":     limits.MaxExecutionsPerConnection,
+		"max debug sessions per connection": limits.MaxDebugSessionsPerConnection,
+		"max watchers per resource":         limits.MaxWatchersPerResource,
+		"max breakpoints per debug session": limits.MaxBreakpointsPerDebugSession,
+		"max inbound message bytes":         limits.MaxInboundMessageBytes,
+		"max outbound message bytes":        limits.MaxOutboundMessageBytes,
 	}
 
-	for _, value := range values {
-		if value.value <= 0 {
-			return fmt.Errorf("%s must be positive", value.name)
-		}
-	}
-
-	return nil
+	return gooptions.MapValues[map[string]int](gooptions.Positive[int]())(values)
 }

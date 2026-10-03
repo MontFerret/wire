@@ -57,8 +57,12 @@ settles its active Execution, and closes its hosted `api.Session`. Releasing a
 Plan settles direct executions, normal sessions, and debug sessions before
 closing the Plan. Closing a connection or losing its Connect
 stream first prevents new children, waits for in-flight creation, then settles
-executions, normal sessions, debug sessions, and plans. Wire borrows the configured `api.Runtime`
-and listener and never closes either.
+executions, normal sessions, debug sessions, and plans. Wire borrows the
+configured `api.Runtime` and never closes it. `Run` explicitly
+creates and manages a TCP listener; `Serve` accepts a caller-created listener
+that gRPC closes when serving returns. Both use constructor-configured security.
+See [public serving lifecycle](architecture.md#public-serving-lifecycle) and
+[security configuration](security.md).
 
 `Compile` and `CompileDebug` create reusable Plans. Each `Execute` creates a new
 temporary `api.Session`. `CreateSession` instead constructs one durable
