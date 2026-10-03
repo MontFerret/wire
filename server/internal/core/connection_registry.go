@@ -98,21 +98,31 @@ func (r *ConnectionRegistry) remove(id ConnectionID, expected *Connection) {
 	r.mu.Unlock()
 }
 
-func (r *ConnectionRegistry) beginShutdown() []ConnectionID {
+func (r *ConnectionRegistry) beginShutdown() []*Connection {
 	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	r.closed = true
-	ids := make([]ConnectionID, 0, len(r.active)+len(r.closing))
-	for id := range r.active {
-		ids = append(ids, id)
+	connections := make([]*Connection, 0, len(r.active)+len(r.closing))
+	for id, connection := range r.active {
+		delete(r.active, id)
+		r.closing[id] = connection
 	}
 
-	for id := range r.closing {
-		ids = append(ids, id)
+	for _, connection := range r.closing {
+		connections = append(connections, connection)
+		if connection.beginClose() {
+			go r.settleConnection(connection)
+		}
 	}
 
-	r.mu.Unlock()
+	return connections
+}
 
-	return ids
+func (r *ConnectionRegistry) settleConnection(connection *Connection) {
+	closeErr := connection.settleClose()
+	r.remove(connection.ID(), connection)
+	connection.finishClose(closeErr)
 }
 
 // CloseConnection commits teardown once and waits using the caller's context.
@@ -124,11 +134,7 @@ func (r *ConnectionRegistry) CloseConnection(ctx context.Context, id ConnectionI
 	}
 
 	if started {
-		go func() {
-			closeErr := connection.settleClose()
-			r.remove(id, connection)
-			connection.finishClose(closeErr)
-		}()
+		go r.settleConnection(connection)
 	}
 
 	return connection.waitClose(ctx)
@@ -138,9 +144,10 @@ func (r *ConnectionRegistry) CloseConnection(ctx context.Context, id ConnectionI
 // The caller's context bounds waiting, not ownership of teardown.
 func (r *ConnectionRegistry) Close(ctx context.Context) error {
 	var result error
-	for _, id := range r.beginShutdown() {
-		err := r.CloseConnection(ctx, id)
-		result = errors.Join(result, ignoreMissingResource(err, ErrorKindConnectionNotFound))
+	// Retain the owners themselves: removal racing this wait must not lose a
+	// committed cleanup result. Every scope is cancelled before any wait.
+	for _, connection := range r.beginShutdown() {
+		result = errors.Join(result, connection.waitClose(ctx))
 	}
 
 	return result

@@ -1,6 +1,6 @@
 # Ferret Wire
 
-Ferret Wire is a versioned gRPC boundary for hosting an implementation of the [Unified Ferret API](https://github.com/MontFerret/api) in another process. It lets a host expose compilation, execution, and source-level debugging without moving runtime construction, configuration, policy, or listener security into this library.
+Ferret Wire is a versioned gRPC boundary for hosting an implementation of the [Unified Ferret API](https://github.com/MontFerret/api) in another process. It lets a host expose compilation, execution, and source-level debugging while the host retains runtime construction, configuration, and security policy.
 
 This module targets Go 1.25 and Unified API `v1.0.0-alpha.20`. The v1 protobuf package is `ferret.wire.v1`; its sources live in `proto/ferret/wire/v1`, and the checked-in Go bindings live in `gen/ferret/wire/v1`.
 
@@ -9,7 +9,7 @@ This module targets Go 1.25 and Unified API `v1.0.0-alpha.20`. The v1 protobuf p
 ```text
 host application                         client application
   owns configured api.Runtime              owns grpc.ClientConnInterface
-  owns and secures net.Listener             owns transport lifetime
+  chooses endpoint and security policy     owns transport lifetime
              |                                         |
              v                                         v
      server.Server  <-------- ferret.wire.v1 ------ api.Runtime via client.New
@@ -23,7 +23,7 @@ host application                         client application
              └── Debug sessions
 ```
 
-`New` only constructs state. It does not listen, dial, inspect the environment, or close the supplied runtime. `Serve` is the only operation that accepts a listener, and the caller retains responsibility for the endpoint. `Shutdown` releases Wire-owned resources while leaving the runtime open.
+`New` only constructs state. It does not listen, dial, inspect the environment, or close the supplied runtime. `Run` explicitly creates a TCP listener at the supplied address and manages serving and shutdown. `Serve` accepts a caller-created listener, including Unix sockets and custom transports; gRPC closes that listener when serving returns. Both use the same constructor-configured security policy. `Shutdown` releases Wire-owned resources while leaving the runtime open.
 
 Every `Connect` server stream creates one logical ownership scope. It is deliberately independent of the physical HTTP/2 connection: several logical connections can share one `grpc.ClientConn`, but their IDs and resources remain isolated. Cancelling the Connect stream or calling `CloseConnection` first cancels and waits for pending creation, then settles executions, normal sessions, debug sessions, and plans in descendants-first order. Concurrent callers that observe the same in-flight release wait for its retained result. Once cleanup completes, the ID is stale and returns the corresponding structured not-found error. Cancelling one waiter does not abandon committed cleanup.
 
@@ -59,20 +59,74 @@ See [Wire Protocol](docs/protocol.md) for every RPC/message/enum, lifecycle and 
 
 ## Runtime host example
 
-The host chooses and configures both the runtime implementation and endpoint. This function accepts caller-owned values and does not close either one:
+The host chooses and configures the runtime implementation and endpoint. The minimal managed TCP path is:
 
 ```go
-func serveRuntime(ctx context.Context, hostRuntime api.Runtime, listener net.Listener) error {
-    wireServer, err := server.New(hostRuntime, server.WithRuntimeIdentity(server.RuntimeIdentity{
-        Name: "my-app", Version: "1.0.0", InstanceID: "worker-1",
-    }))
+func serveRuntime(ctx context.Context, hostRuntime api.Runtime) error {
+    wireServer, err := server.New(hostRuntime)
     if err != nil {
         return err
     }
 
-    return wireServer.Serve(ctx, listener)
+    return wireServer.Run(ctx, "127.0.0.1:50051")
 }
 ```
+
+This example uses **unencrypted, unauthenticated transport**, even on loopback.
+The matching client executes through the public runtime and closes its logical
+resources before the transport:
+
+```go
+func runLoopback(ctx context.Context) (out *api.Output, err error) {
+    conn, err := grpc.NewClient("127.0.0.1:50051",
+        grpc.WithTransportCredentials(insecure.NewCredentials()),
+    )
+    if err != nil {
+        return nil, err
+    }
+    defer func() { err = errors.Join(err, conn.Close()) }()
+
+    remote, err := client.New(ctx, conn)
+    if err != nil {
+        return nil, err
+    }
+    defer func() { err = errors.Join(err, remote.Close()) }()
+
+    return remote.Run(ctx, api.NewAnonymousSource("RETURN 1"))
+}
+```
+
+`Run` returns after managed shutdown settles. Serving-context cancellation or
+explicit shutdown returns `nil` when cleanup succeeds; serving and cleanup errors
+are returned together. Its default shutdown budget is 30 seconds, starting when
+shutdown begins. Override it with
+`wireServer.Run(ctx, "127.0.0.1:50051", server.WithShutdownTimeout(10*time.Second))`.
+An earlier explicit `Shutdown` deadline shortens that budget; a later deadline or
+`Shutdown(context.Background())` cannot extend it. The canceled serving context
+is not the cleanup context.
+
+A timeout matches `context.DeadlineExceeded`: transport is forced to stop, but
+uncooperative hosted cleanup may still be running. Later `Shutdown` calls wait
+for its retained result without repeating cleanup. The host must allow that
+cleanup to settle before closing its borrowed runtime.
+
+For caller-created listeners, retain the explicit serving/waiting path:
+
+```go
+func serveListener(ctx context.Context, hostRuntime api.Runtime, listener net.Listener) error {
+    wireServer, err := server.New(hostRuntime)
+    if err != nil {
+        return err
+    }
+
+    serveErr := wireServer.Serve(ctx, listener)
+    return errors.Join(serveErr, wireServer.Shutdown(context.Background()))
+}
+```
+
+`Serve` has no managed default timeout; the host chooses its shutdown context.
+Concurrent/repeated starts are rejected without disturbing the accepted start.
+A failed bind permits retry until serving or shutdown commits.
 
 `New` accepts the canonical `api.Runtime` directly. `server.RuntimeIdentity`
 is optional host-supplied handshake metadata.
@@ -82,7 +136,7 @@ For existing hosts, replace `server.Runtime` with `api.Runtime` and
 type were removed without compatibility shims; protocol and ownership behavior
 are unchanged.
 
-For an application-private Unix socket, the caller creates `net.Listen("unix", socket)`, applies appropriate directory and socket permissions, and closes both the listener and runtime after the Wire server has shut down.
+For an application-private Unix socket, the caller creates `net.Listen("unix", socket)`, applies appropriate directory and socket permissions, and closes its runtime after Wire cleanup settles. gRPC closes the accepted listener; a rejected `Serve` leaves it untouched.
 
 ## Remote runtime example
 
@@ -190,11 +244,30 @@ values shared by both sides. The module root has no Go compatibility package.
 
 ## Security and trust model
 
-Wire supplies no default endpoint, authentication, authorization, TLS policy, TCP listener, named-pipe implementation, listener discovery, or externally reachable binding. Callers must choose and secure the listener, authenticate peers where required, enforce filesystem permissions for local sockets, and decide which runtime capabilities and host functions are safe for those peers. FQL source and parameters are trusted according to the host's policy; parameters may contain secrets and therefore require a confidential transport.
+Hosts configure TLS or mTLS with `server.WithTransportCredentials`, and
+per-call authentication/authorization with `server.WithUnaryInterceptors` and
+`server.WithStreamInterceptors`. These options apply to every corresponding RPC
+across all Wire services, through both `Run` and `Serve`. Wire recovery wraps host
+middleware, and configured message/resource limits remain enforced. Without
+transport credentials, Wire provides no encryption or authentication. Configured
+credentials have no fallback to plaintext.
+
+See [Security configuration](docs/security.md) for connected TLS, mTLS, and
+TLS-plus-token host/client examples. Tokens belong in connection-level client
+`PerRPCCredentials` requiring transport security, so subsequent unary and
+streaming operations carry them too.
+
+Authentication is not tenant isolation: Wire does not bind resource ownership to
+an authenticated principal. Stream authentication occurs at establishment;
+revocation and expiry enforcement for already-open streams remain host policy.
+Hosts choose listener exposure, filesystem permissions for local sockets, and
+runtime capabilities safe to expose. Wire supplies no default endpoint,
+certificate management, built-in token validation, or implicit public binding.
+Source and parameters may contain secrets and require a confidential transport.
 
 Compilation failures, execution failures, generic internal errors, and cleanup panics are sanitized and do not expose runtime error text, raw causes, panic values, filesystem paths, environment data, or host internals. Portable typed diagnostics may preserve the source content and semantic source name supplied to the runtime; source names are not assumed to be filesystem paths. Server limits reduce accidental and hostile resource exhaustion, but hosts must still decide which runtime capabilities are safe to expose.
 
-Windows named pipes and remote TCP/TLS can be added later by supplying ordinary `net.Listener` and gRPC dialer implementations. Transport choice does not change the logical connection or protocol semantics.
+Custom transports such as Windows named pipes use caller-supplied `net.Listener` and gRPC dialer implementations. Managed `Run` serves TCP; TLS is constructor configuration for either path. Transport choice does not change the logical connection or protocol semantics.
 
 ## Non-goals and current limitations
 

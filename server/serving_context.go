@@ -2,7 +2,10 @@ package server
 
 import (
 	"context"
+	"errors"
 	"time"
+
+	"google.golang.org/grpc"
 )
 
 func deadlineFrom(ctx context.Context) time.Time {
@@ -12,4 +15,12 @@ func deadlineFrom(ctx context.Context) time.Time {
 	}
 
 	return deadline
+}
+
+func normalizeServeError(err error) error {
+	if errors.Is(err, grpc.ErrServerStopped) {
+		return nil
+	}
+
+	return err
 }

@@ -172,3 +172,13 @@ with `h.Own` or closed explicitly; teardown asserts exact hosted cleanup before
 server shutdown. Explicit transport shutdown and lost-allocation recovery still
 cascade. Fault injection distinguishes non-owning watches from command-result
 streams: ending RunCommand before its result cancels that command, not the handle.
+
+## Secure hosting round trip
+
+`TestPublicTLSAuthenticatedRuntimeRoundTrip` uses the public server and client
+with mutually authenticated TLS and host-supplied unary/stream token middleware
+on an ephemeral loopback endpoint. It compiles a query, creates a session,
+executes, closes all logical resources, and checks that the borrowed runtime
+remains open. Certificates and middleware in `test/securityfixture` are test
+infrastructure only. Package-local server tests additionally exercise managed
+`Run`, all registered RPC middleware, TLS/mTLS rejection, limits, and shutdown races.

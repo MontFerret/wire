@@ -28,9 +28,11 @@ host → server → server/internal ──┘→ Unified API → runtime impleme
 | Physical transport, listener, authentication, and TLS | Host and Wire server layer |
 | DAP translation, LSP, and language intelligence | ferretd and compiler tooling |
 
-Runtime implementations must never depend on Wire. Wire must not absorb DAP, LSP,
-transport-security, or host-configuration semantics for downstream
-convenience.
+Runtime implementations must never depend on Wire. Wire must not absorb DAP,
+LSP, or host security/configuration policy for downstream convenience. The server
+integrates host-supplied gRPC credentials and middleware;
+certificate identities, trust roots, authentication, and authorization policy
+remain host responsibilities.
 
 `client.New(ctx, conn)` returns the canonical `api.Runtime` interface.
 Private adapters implement `api.Plan`, `api.Session`, and `api/debugger.Session`;
@@ -41,7 +43,7 @@ private within the owning client package.
 
 The caller supplies and owns the physical transport. Runtime and resource
 `Close` methods release logical resources with bounded detached cleanup.
-`server.NewServer` accepts `api.Runtime` directly. Optional host identity is
+`server.New` accepts `api.Runtime` directly. Optional host identity is
 `server.RuntimeIdentity`, supplied through `WithRuntimeIdentity`.
 
 ## gRPC service composition
@@ -91,18 +93,56 @@ Plan executions use `api.Plan` and `api.Session`; the direct-runtime operation
 calls the borrowed `api.Runtime.Run` exactly once. Debugger values are the
 separate structured boundary defined by `api/debugger`.
 
-The host supplies both the configured runtime and listener:
+The host supplies the configured runtime and explicitly selects its endpoint:
 
 ```go
-hostRuntime := createApplicationRuntime()
-wireServer, err := server.NewServer(hostRuntime)
-err = wireServer.Serve(ctx, listener)
+wireServer, err := server.New(hostRuntime)
+if err != nil {
+    return err
+}
+return wireServer.Run(ctx, "127.0.0.1:50051")
 ```
 
-Wire borrows both. It does not close the runtime, construct or secure a
-listener, or reconstruct the application's modules, functions, policies,
-resources, or configuration. Importing Wire has no side effects, and
-`NewServer` does not listen, bind, dial, or inspect the environment.
+Construction never listens, binds, dials, or inspects the environment. `Run`
+creates a TCP listener only at its supplied address, while `Serve` accepts
+caller-created listeners for custom transports. gRPC closes accepted listeners
+when serving returns. Both paths borrow the runtime and share constructor
+security configuration. Wire never reconstructs host modules, functions,
+policies, resources, or runtime configuration.
+
+### Public serving lifecycle
+
+Server admission has one mutex-protected state: idle, starting, serving, or
+terminal shutdown. Reservation precedes managed listening; no network operation,
+hosted call, listener close, or cleanup wait holds that mutex. Bind/pre-serving
+cancellation failure releases a reservation only while shutdown has not committed.
+Successful serving commitment is single-use. Competing starts cannot close the
+accepted invocation's listener or initiate its shutdown. Startup racing shutdown
+cancels listening, closes any late managed listener, and never restores idle state.
+
+`Run` manages shutdown on serving-context cancellation, explicit `Shutdown`, or
+serving failure. Its default budget is 30 seconds, overridable with a positive
+`WithShutdownTimeout`. The budget starts at shared shutdown commitment, including
+when an explicit background shutdown wins first. Shared deadline updates only
+shorten the effective deadline. Serving-context deadlines trigger shutdown but
+are not reused as managed cleanup deadlines. `Serve` retains caller-coordinated
+cleanup and receives no default budget.
+
+Registry shutdown seals connection admission and commits cancellation of every
+retained scope before waiting. Captured connection owners retain cleanup results
+even if membership is removed concurrently. Descendant cleanup remains detached,
+exactly once, and independent of waiter cancellation. Logical scopes are cancelled
+before graceful transport shutdown so long-lived Connect streams cannot prevent
+teardown from starting.
+
+At deadline expiry transport is forced to stop independently of hosted cleanup
+and the managed wait ends. Transport stopping and resource settlement are
+separate facts: an uncooperative hosted Close still belongs to the committed
+cleanup owner. Later Shutdown calls observe eventual settlement and its retained
+result. A successful Run return means serving and managed cleanup settled;
+timeout matches context.DeadlineExceeded and makes no settlement guarantee.
+Genuine serving errors survive cancellation races, and independent known serving
+and cleanup failures remain joined. Neither path closes the borrowed runtime.
 
 The Connect handshake contains the logical connection ID, Wire protocol identity,
 the exact portable runtime version, and optional host-supplied identity. Runtime
@@ -384,7 +424,7 @@ local IPC. Requests and lifecycle identifiers are untrusted.
 | Inbound gRPC message | 4 MiB |
 | Outbound gRPC message | 4 MiB |
 
-Hosts may replace the complete positive set with `WithServerLimits`. Pending,
+Hosts may replace the complete positive set with `WithLimits`. Pending,
 active, and closing resources all count. Implementations validate identifiers,
 required fields, ranges, and state; bound client-controlled allocations; and
 sanitize internal failures and panic values. They do not leak unnecessary host
@@ -396,9 +436,20 @@ the runtime. Hosts should treat those fields like the original request. Runtime
 error strings, panic values, stacks, and implementation-specific diagnostic
 objects remain behind the sanitization boundary.
 
-Listener exposure, peer authentication, authorization, and TLS remain host
-transport concerns until separately specified. Wire never creates an unsafe
-default endpoint.
+`WithTransportCredentials` passes validated non-nil host credentials to gRPC;
+without them, Wire provides no encryption or authentication. Host unary and
+stream middleware applies globally with recovery outermost, then host registration
+order, then Wire handlers. Empty lists are no-ops, nil entries fail construction,
+and captured lists are copied. Middleware contexts, metadata, and authenticated
+peer information retain gRPC semantics. Message/resource limits cannot be replaced
+through these options.
+
+Authentication is not tenant isolation: logical connection/resource IDs are not
+bound to a principal introduced by middleware. Stream establishment authentication
+does not automatically enforce later token expiry or revocation. Listener exposure,
+certificate/trust policy, authentication, authorization, and host runtime policy
+remain host concerns. Wire supplies no default endpoint or plaintext fallback.
+See [Security configuration](security.md) for host/client examples.
 
 ## Scope
 
