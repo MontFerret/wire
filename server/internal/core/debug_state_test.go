@@ -17,20 +17,20 @@ func TestDebugSessionStateBuildsDefensiveSnapshots(t *testing.T) {
 		location: &source.Range{Location: source.Location{SourceName: "query.fql"}},
 		hitIDs:   []debugger.BreakpointID{1},
 		depth:    2,
-		output:   &api.Output{ContentType: "application/json", Content: []byte("1")},
+		output:   &api.Content{Metadata: api.Metadata{ContentType: "application/json"}, Data: []byte("1")},
 		failure:  &failure.Failure{Category: failure.CategoryExecution, Message: "runtime operation failed"},
 	}
 
 	snapshot := state.snapshot()
 	state.hitIDs[0] = 2
 
-	state.output.Content[0] = '2'
-	if snapshot.HitBreakpointIDs[0] != 1 || string(snapshot.Output.Content) != "1" {
+	state.output.Data[0] = '2'
+	if snapshot.HitBreakpointIDs[0] != 1 || string(snapshot.Output.Data) != "1" {
 		t.Fatalf("snapshot retained live state storage: %#v", snapshot)
 	}
 
 	snapshot.HitBreakpointIDs[0] = 3
-	snapshot.Output.Content[0] = '3'
+	snapshot.Output.Data[0] = '3'
 
 	retained := state.snapshot()
 	if retained.State != wiredebugger.StateStopped || retained.StopReason != debugger.ReasonBreakpoint ||
@@ -38,7 +38,7 @@ func TestDebugSessionStateBuildsDefensiveSnapshots(t *testing.T) {
 		t.Fatalf("unexpected debug snapshot: %#v", retained)
 	}
 
-	if retained.HitBreakpointIDs[0] != 2 || string(retained.Output.Content) != "2" {
+	if retained.HitBreakpointIDs[0] != 2 || string(retained.Output.Data) != "2" {
 		t.Fatalf("snapshot did not own mutable values: %#v", retained)
 	}
 }
@@ -50,7 +50,7 @@ func TestDebugSessionStateTransitionsPreserveSupportingValues(t *testing.T) {
 		location: &source.Range{Location: source.Location{SourceName: "query.fql"}},
 		hitIDs:   []debugger.BreakpointID{1},
 		depth:    2,
-		output:   &api.Output{Content: []byte("1")},
+		output:   &api.Content{Data: []byte("1")},
 		failure:  &failure.Failure{Category: failure.CategoryExecution},
 	}
 

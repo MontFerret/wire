@@ -19,11 +19,12 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	ExecutionService_Execute_FullMethodName          = "/ferret.wire.v1.ExecutionService/Execute"
-	ExecutionService_RunSession_FullMethodName       = "/ferret.wire.v1.ExecutionService/RunSession"
-	ExecutionService_CancelExecution_FullMethodName  = "/ferret.wire.v1.ExecutionService/CancelExecution"
-	ExecutionService_ReleaseExecution_FullMethodName = "/ferret.wire.v1.ExecutionService/ReleaseExecution"
-	ExecutionService_WatchExecution_FullMethodName   = "/ferret.wire.v1.ExecutionService/WatchExecution"
+	ExecutionService_ReadExecutionOutput_FullMethodName = "/ferret.wire.v1.ExecutionService/ReadExecutionOutput"
+	ExecutionService_Execute_FullMethodName             = "/ferret.wire.v1.ExecutionService/Execute"
+	ExecutionService_RunSession_FullMethodName          = "/ferret.wire.v1.ExecutionService/RunSession"
+	ExecutionService_CancelExecution_FullMethodName     = "/ferret.wire.v1.ExecutionService/CancelExecution"
+	ExecutionService_ReleaseExecution_FullMethodName    = "/ferret.wire.v1.ExecutionService/ReleaseExecution"
+	ExecutionService_WatchExecution_FullMethodName      = "/ferret.wire.v1.ExecutionService/WatchExecution"
 )
 
 // ExecutionServiceClient is the client API for ExecutionService service.
@@ -32,6 +33,9 @@ const (
 //
 // ExecutionService owns asynchronous runtime and session invocations.
 type ExecutionServiceClient interface {
+	// ReadExecutionOutput exclusively consumes output; disconnect abandons consumption.
+	// The header is sent only after hosted Run has returned a usable output.
+	ReadExecutionOutput(ctx context.Context, in *ReadExecutionOutputRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ReadExecutionOutputResponse], error)
 	// Execute publishes an asynchronous execution of an existing reusable plan.
 	Execute(ctx context.Context, in *ExecuteRequest, opts ...grpc.CallOption) (*ExecuteResponse, error)
 	// RunSession publishes one execution of an existing reusable Session.
@@ -52,6 +56,25 @@ type executionServiceClient struct {
 func NewExecutionServiceClient(cc grpc.ClientConnInterface) ExecutionServiceClient {
 	return &executionServiceClient{cc}
 }
+
+func (c *executionServiceClient) ReadExecutionOutput(ctx context.Context, in *ReadExecutionOutputRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ReadExecutionOutputResponse], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &ExecutionService_ServiceDesc.Streams[0], ExecutionService_ReadExecutionOutput_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[ReadExecutionOutputRequest, ReadExecutionOutputResponse]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type ExecutionService_ReadExecutionOutputClient = grpc.ServerStreamingClient[ReadExecutionOutputResponse]
 
 func (c *executionServiceClient) Execute(ctx context.Context, in *ExecuteRequest, opts ...grpc.CallOption) (*ExecuteResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
@@ -95,7 +118,7 @@ func (c *executionServiceClient) ReleaseExecution(ctx context.Context, in *Relea
 
 func (c *executionServiceClient) WatchExecution(ctx context.Context, in *WatchExecutionRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[WatchExecutionResponse], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &ExecutionService_ServiceDesc.Streams[0], ExecutionService_WatchExecution_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &ExecutionService_ServiceDesc.Streams[1], ExecutionService_WatchExecution_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -118,6 +141,9 @@ type ExecutionService_WatchExecutionClient = grpc.ServerStreamingClient[WatchExe
 //
 // ExecutionService owns asynchronous runtime and session invocations.
 type ExecutionServiceServer interface {
+	// ReadExecutionOutput exclusively consumes output; disconnect abandons consumption.
+	// The header is sent only after hosted Run has returned a usable output.
+	ReadExecutionOutput(*ReadExecutionOutputRequest, grpc.ServerStreamingServer[ReadExecutionOutputResponse]) error
 	// Execute publishes an asynchronous execution of an existing reusable plan.
 	Execute(context.Context, *ExecuteRequest) (*ExecuteResponse, error)
 	// RunSession publishes one execution of an existing reusable Session.
@@ -139,6 +165,9 @@ type ExecutionServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedExecutionServiceServer struct{}
 
+func (UnimplementedExecutionServiceServer) ReadExecutionOutput(*ReadExecutionOutputRequest, grpc.ServerStreamingServer[ReadExecutionOutputResponse]) error {
+	return status.Error(codes.Unimplemented, "method ReadExecutionOutput not implemented")
+}
 func (UnimplementedExecutionServiceServer) Execute(context.Context, *ExecuteRequest) (*ExecuteResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Execute not implemented")
 }
@@ -174,6 +203,17 @@ func RegisterExecutionServiceServer(s grpc.ServiceRegistrar, srv ExecutionServic
 	}
 	s.RegisterService(&ExecutionService_ServiceDesc, srv)
 }
+
+func _ExecutionService_ReadExecutionOutput_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(ReadExecutionOutputRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(ExecutionServiceServer).ReadExecutionOutput(m, &grpc.GenericServerStream[ReadExecutionOutputRequest, ReadExecutionOutputResponse]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type ExecutionService_ReadExecutionOutputServer = grpc.ServerStreamingServer[ReadExecutionOutputResponse]
 
 func _ExecutionService_Execute_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ExecuteRequest)
@@ -283,6 +323,11 @@ var ExecutionService_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "ReadExecutionOutput",
+			Handler:       _ExecutionService_ReadExecutionOutput_Handler,
+			ServerStreams: true,
+		},
 		{
 			StreamName:    "WatchExecution",
 			Handler:       _ExecutionService_WatchExecution_Handler,

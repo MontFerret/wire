@@ -9,6 +9,7 @@ import (
 
 	"github.com/MontFerret/api"
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
+	"github.com/MontFerret/wire/internal/testoutput"
 	"github.com/MontFerret/wire/pkg/failure"
 )
 
@@ -56,8 +57,8 @@ func TestSessionRunPreservesCallerOwnedPlan(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		output, err := session.Run(testClientContext(t))
-		if err != nil || string(output.Content) != "done" {
+		output, err := testoutput.Collect(session.Run(testClientContext(t)))
+		if err != nil || string(output.Data) != "done" {
 			t.Fatalf("unexpected Session.Run result: %#v, %v", output, err)
 		}
 
@@ -109,11 +110,11 @@ func TestSessionRunPreservesCallerOwnedPlan(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		output, err := session.Run(testClientContext(t))
+		output, err := testoutput.Collect(session.Run(testClientContext(t)))
 		var terminalFailure *failure.Failure
 
 		var wireErr *Error
-		if string(output.Content) != "partial" || !errors.As(err, &terminalFailure) || !errors.As(err, &wireErr) ||
+		if string(output.Data) != "partial" || !errors.As(err, &terminalFailure) || !errors.As(err, &wireErr) ||
 			terminalFailure.Message != "execution failed" || wireErr.Message != "execution cleanup failed" {
 			t.Fatalf("Session.Run did not preserve joined errors: %#v, %v", output, err)
 		}

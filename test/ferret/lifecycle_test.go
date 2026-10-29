@@ -9,6 +9,7 @@ import (
 
 	"github.com/MontFerret/api"
 	"github.com/MontFerret/wire/client"
+	"github.com/MontFerret/wire/internal/testoutput"
 	"github.com/MontFerret/wire/server"
 )
 
@@ -52,7 +53,7 @@ func TestPlanClosePreservesSession(t *testing.T) {
 
 	requireDetachedParams(t, plan)
 
-	output, err := session.Run(h.ctx)
+	output, err := testoutput.Collect(session.Run(h.ctx))
 	if err != nil {
 		t.Fatalf("session lost its independent lifetime: %v", err)
 	}
@@ -84,7 +85,7 @@ func TestRuntimeCloseDefersConnectionRelease(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if output, err := h.runtime.Run(h.ctx, src); output != nil || !errors.Is(err, client.ErrClosed) {
+	if output, err := testoutput.Collect(h.runtime.Run(h.ctx, src)); output != nil || !errors.Is(err, client.ErrClosed) {
 		t.Fatalf("closed runtime Run = %+v, %v", output, err)
 	}
 
@@ -109,7 +110,7 @@ func TestRuntimeCloseDefersConnectionRelease(t *testing.T) {
 
 	h.own(extra)
 
-	output, err := extra.Run(h.ctx)
+	output, err := testoutput.Collect(extra.Run(h.ctx))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +125,7 @@ func TestRuntimeCloseDefersConnectionRelease(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	output, err = session.Run(h.ctx)
+	output, err = testoutput.Collect(session.Run(h.ctx))
 	if err != nil {
 		t.Fatalf("session lost its independent lifetime: %v", err)
 	}
@@ -149,7 +150,7 @@ func TestRuntimeCloseDefersConnectionRelease(t *testing.T) {
 		t.Fatalf("final descendant did not release connection: %v", err)
 	}
 
-	output, err = other.Run(h.ctx, src, api.WithOutputContentType("application/json"))
+	output, err = testoutput.Collect(other.Run(h.ctx, src, api.WithOutputContentType("application/json")))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,7 +176,7 @@ func TestWireShutdownBorrowsNativeRuntime(t *testing.T) {
 
 	h.own(session)
 
-	output, err := session.Run(h.ctx)
+	output, err := testoutput.Collect(session.Run(h.ctx))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,7 +187,7 @@ func TestWireShutdownBorrowsNativeRuntime(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	output, err = h.hosted.Run(h.ctx, src, api.WithOutputContentType("application/json"))
+	output, err = testoutput.Collect(h.hosted.Run(h.ctx, src, api.WithOutputContentType("application/json")))
 	if err != nil {
 		t.Fatalf("Wire shutdown closed the borrowed native runtime: %v", err)
 	}

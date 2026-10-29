@@ -224,6 +224,10 @@ func TestPlanCloseSettlesAdmittedConstructorWithoutCancellingChildren(t *testing
 					t.Fatalf("closed ancestor rejected child execution: %v", err)
 				}
 
+				if err := run.ReadOutput(ctx, func(api.Metadata) error { return nil }, func(context.Context, []byte) error { return nil }); err != nil {
+					t.Fatal(err)
+				}
+
 				select {
 				case <-run.done:
 				case <-ctx.Done():
@@ -234,6 +238,10 @@ func TestPlanCloseSettlesAdmittedConstructorWithoutCancellingChildren(t *testing
 					t.Fatalf("child inherited plan close error: %v", err)
 				}
 			} else {
+				if err := run.ReadOutput(ctx, func(api.Metadata) error { return nil }, func(context.Context, []byte) error { return nil }); err != nil {
+					t.Fatal(err)
+				}
+
 				select {
 				case <-run.done:
 				case <-ctx.Done():

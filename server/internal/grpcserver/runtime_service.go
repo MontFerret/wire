@@ -6,6 +6,7 @@ import (
 
 	"github.com/MontFerret/api"
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
+	"github.com/MontFerret/wire/internal/outputstream"
 	wireexecution "github.com/MontFerret/wire/pkg/execution"
 	"github.com/MontFerret/wire/server/internal/core"
 	"github.com/MontFerret/wire/server/internal/panicboundary"
@@ -22,7 +23,11 @@ type RuntimeService struct {
 var _ wirev1.RuntimeServiceServer = (*RuntimeService)(nil)
 
 // Connect keeps a logical connection alive for the stream and reclaims it when the stream ends.
-func (s *RuntimeService) Connect(_ *wirev1.ConnectRequest, stream wirev1.RuntimeService_ConnectServer) error {
+func (s *RuntimeService) Connect(request *wirev1.ConnectRequest, stream wirev1.RuntimeService_ConnectServer) error {
+	if request.GetOutputFramingVersion() != outputstream.Version {
+		return rpcError(&core.DomainError{Kind: core.ErrorKindUnsupported, Message: "unsupported output framing version"})
+	}
+
 	connection, err := s.connections.Open()
 	if err != nil {
 		return rpcError(err)
@@ -51,10 +56,11 @@ func (s *RuntimeService) Connect(_ *wirev1.ConnectRequest, stream wirev1.Runtime
 	}
 
 	response := &wirev1.ConnectResponse{
-		ConnectionId:    &wirev1.ConnectionId{Value: string(connection.ID())},
-		Protocol:        protocolInfo(s.info),
-		RuntimeIdentity: runtimeIdentity(s.info),
-		RuntimeVersion:  []byte(version),
+		ConnectionId:         &wirev1.ConnectionId{Value: string(connection.ID())},
+		Protocol:             protocolInfo(s.info),
+		RuntimeIdentity:      runtimeIdentity(s.info),
+		RuntimeVersion:       []byte(version),
+		OutputFramingVersion: outputstream.Version,
 	}
 
 	if err := stream.Send(response); err != nil {

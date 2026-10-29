@@ -14,27 +14,44 @@ import (
 	"github.com/MontFerret/wire/server/internal/panicboundary"
 )
 
-// Execution owns one asynchronous run and retains its terminal result until release.
-type Execution struct {
-	mu          sync.Mutex
-	id          ExecutionID
-	store       *ResourceStore
-	plan        *Plan
-	session     *Session
-	operation   func(context.Context) (*api.Output, error)
-	ctx         context.Context
-	cancel      context.CancelCauseFunc
-	options     []api.SessionOption
-	state       wireexecution.State
-	output      *api.Output
-	failure     *failure.Failure
-	events      *eventStream[wireexecution.Event]
-	done        chan struct{}
-	release     lifecycle.Close
-	constructed chan struct{}
-}
+type (
+	// Execution owns preparation, one output consumer, and output cleanup until release.
+	Execution struct {
+		mu          sync.Mutex
+		id          ExecutionID
+		store       *ResourceStore
+		plan        *Plan
+		session     *Session
+		operation   func(context.Context) (api.Output, error)
+		ctx         context.Context
+		cancel      context.CancelCauseFunc
+		options     []api.SessionOption
+		state       wireexecution.State
+		metadata    *api.Metadata
+		failure     *failure.Failure
+		events      *eventStream[wireexecution.Event]
+		ready       chan struct{}
+		delivery    chan outputDelivery
+		claimed     bool
+		prepareErr  error
+		outcome     error
+		cleanupErr  error
+		done        chan struct{}
+		release     lifecycle.Close
+		constructed chan struct{}
+	}
 
-func newExecution(store *ResourceStore, plan *Plan, session *Session, operation func(context.Context) (*api.Output, error), options []api.SessionOption) *Execution {
+	outputDelivery struct {
+		ctx     context.Context
+		header  func(api.Metadata) error
+		consume api.Consumer
+	}
+
+	// outputCallbackPanic distinguishes Wire callback defects from hosted panics.
+	outputCallbackPanic struct{ value any }
+)
+
+func newExecution(store *ResourceStore, plan *Plan, session *Session, operation func(context.Context) (api.Output, error), options []api.SessionOption) *Execution {
 	lifetime := store.ctx
 
 	if session != nil {
@@ -44,17 +61,11 @@ func newExecution(store *ResourceStore, plan *Plan, session *Session, operation 
 	ctx, cancel := context.WithCancelCause(lifetime)
 
 	execution := &Execution{
-		id:        ExecutionID(uuid.NewString()),
-		store:     store,
-		plan:      plan,
-		session:   session,
-		operation: operation,
-		options:   options,
-		ctx:       ctx,
-		cancel:    cancel,
-		state:     wireexecution.StateRunning,
-		events:    newEventStream(store.limits.Watchers, cloneExecutionEvent, sequenceExecutionEvent),
-		done:      make(chan struct{}),
+		id: ExecutionID(uuid.NewString()), store: store, plan: plan, session: session,
+		operation: operation, ctx: ctx, cancel: cancel, options: options,
+		state:  wireexecution.StateRunning,
+		events: newEventStream(store.limits.Watchers, cloneExecutionEvent, sequenceExecutionEvent),
+		ready:  make(chan struct{}), delivery: make(chan outputDelivery), done: make(chan struct{}),
 	}
 	if plan != nil && session == nil && operation == nil {
 		execution.constructed = make(chan struct{})
@@ -65,8 +76,8 @@ func newExecution(store *ResourceStore, plan *Plan, session *Session, operation 
 	return execution
 }
 
-// Release cancels and joins the run, closes its event stream, and removes its handle.
-// Caller cancellation stops waiting without abandoning teardown.
+// Release cancels and joins output cleanup before removing the handle. A canceled
+// waiter never abandons committed cleanup.
 func (e *Execution) Release(ctx context.Context) error {
 	e.store.mu.Lock()
 	started := e.release.Begin()
@@ -89,82 +100,197 @@ func (e *Execution) settleRelease() {
 		e.store.removeExecution(e)
 		e.release.Finish(err)
 	}()
-
 	e.cancel(context.Canceled)
 	<-e.done
+	e.mu.Lock()
+	err = e.cleanupErr
+	e.mu.Unlock()
 	e.events.close()
 }
 
-func (e *Execution) run() {
-	if e.operation != nil {
-		e.runOperation()
+// Context ends on cancellation or release, independently of output settlement.
+func (e *Execution) Context() context.Context { return e.ctx }
 
-		return
+// ReadOutput claims the only delivery. Header and consumer run outside resource
+// locks. The consumer must honor its context; it must not retain borrowed bytes.
+func (e *Execution) ReadOutput(ctx context.Context, header func(api.Metadata) error, consumer api.Consumer) error {
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 
-	session, err := panicboundary.Call(func() (api.Session, error) {
-		return e.plan.plan.NewSession(e.ctx, e.options...)
-	})
+	e.mu.Lock()
+	if e.claimed {
+		e.mu.Unlock()
+
+		return invalidState("execution output is no longer available", nil)
+	}
+
+	e.claimed = true
+	e.mu.Unlock()
+	stop := context.AfterFunc(ctx, func() { e.cancel(ctx.Err()) })
+	defer stop()
+	select {
+	case <-e.ready:
+	case <-ctx.Done():
+		e.cancel(ctx.Err())
+
+		return ctx.Err()
+	}
+
+	e.mu.Lock()
+	err := e.prepareErr
+	running := e.state == wireexecution.StateRunning
+	e.mu.Unlock()
+
 	if err != nil {
-		if !isNil(session) {
-			err = errors.Join(err, closeAPISession(session))
-		}
+		return err
+	}
+
+	if !running {
+		return invalidState("execution output is no longer available", nil)
+	}
+
+	select {
+	case e.delivery <- outputDelivery{ctx: ctx, header: header, consume: consumer}:
+	case <-e.done:
+	case <-ctx.Done():
+		e.cancel(ctx.Err())
+	}
+
+	<-e.done
+	e.mu.Lock()
+	err = e.outcome
+	e.mu.Unlock()
+
+	return err
+}
+
+func (e *Execution) run() {
+	var temporary api.Session
+	var output api.Output
+	var err error
+
+	if e.operation != nil {
+		output, err = e.operation(e.ctx)
+	} else {
+		temporary, err = panicboundary.Call(func() (api.Session, error) { return e.plan.plan.NewSession(e.ctx, e.options...) })
 
 		if e.constructed != nil {
 			close(e.constructed)
 		}
 
-		e.finish(nil, err, failure.CategoryInternalRuntime)
+		if err != nil {
+			err = internalError(err)
+		}
+
+		if err == nil && isNil(temporary) {
+			err = internalError(errors.New("runtime returned no session"))
+		}
+
+		if err == nil {
+			output, err = panicboundary.Call(func() (api.Output, error) { return temporary.Run(e.ctx) })
+		}
+	}
+
+	if err == nil && isNil(output) {
+		err = internalError(errors.New("runtime returned no output"))
+	}
+
+	var metadata api.Metadata
+
+	if err == nil {
+		metadata, err = panicboundary.Call(func() (api.Metadata, error) { return output.Metadata(), nil })
+		if err == nil && metadata.LengthKnown && metadata.Length < 0 {
+			err = internalError(errors.New("runtime returned invalid output metadata"))
+		}
+	}
+
+	if err != nil {
+		cleanup := e.closeOutput(output, temporary)
+		e.mu.Lock()
+		e.prepareErr = errors.Join(err, cleanup)
+		e.mu.Unlock()
+		e.finish(errors.Join(err, cleanup), cleanup)
+		close(e.ready)
 
 		return
 	}
 
-	if e.constructed != nil {
-		close(e.constructed)
+	e.mu.Lock()
+	e.metadata = &metadata
+	e.mu.Unlock()
+	close(e.ready)
+	select {
+	case delivery := <-e.delivery:
+		operation, cancel := OperationContext(delivery.ctx, e.ctx)
+
+		err = delivery.header(metadata)
+		if err == nil {
+			err = panicboundary.Do(func() error {
+				return output.Consume(operation, func(ctx context.Context, chunk []byte) (result error) {
+					completed := false
+					defer func() {
+						if !completed {
+							panic(outputCallbackPanic{value: recover()})
+						}
+					}()
+					result = delivery.consume(ctx, chunk)
+					completed = true
+
+					return result
+				})
+			})
+		}
+
+		cancel()
+	case <-e.ctx.Done():
+		err = context.Cause(e.ctx)
 	}
 
-	if isNil(session) {
-		e.finish(nil, errors.New("runtime returned no session"), failure.CategoryInternalRuntime)
+	cleanup := e.closeOutput(output, temporary)
 
-		return
+	var boundary *panicboundary.Error
+	if errors.As(err, &boundary) {
+		if callback, ok := boundary.Value.(outputCallbackPanic); ok {
+			e.finish(internalError(errors.New("Wire output callback panicked")), cleanup)
+			panic(callback.value)
+		}
 	}
 
-	output, runErr := panicboundary.Call(func() (*api.Output, error) {
-		return session.Run(e.ctx)
-	})
-	result := cloneOutput(output)
-	closeErr := closeAPISession(session)
-	err = errors.Join(runErr, closeErr)
-
-	var panicErr *panicboundary.Error
-	if errors.As(runErr, &panicErr) {
-		result = nil
+	if err == nil && cleanup != nil {
+		err = internalError(cleanup)
 	}
 
-	category := failure.CategoryInternalRuntime
-
-	if runErr != nil && panicErr == nil {
-		category = failure.CategoryExecution
-	}
-
-	e.finish(result, err, category)
+	e.finish(errors.Join(err, cleanup), cleanup)
 }
 
-func (e *Execution) runOperation() {
-	output, runErr := e.operation(e.ctx)
-	result := cloneOutput(output)
+func (e *Execution) closeOutput(output api.Output, temporary api.Session) error {
+	var err error
+
+	if !isNil(output) {
+		err = panicboundary.Do(output.Close)
+	}
+
+	if !isNil(temporary) {
+		err = errors.Join(err, closeAPISession(temporary))
+	}
+
+	return err
+}
+
+func (e *Execution) finish(err, cleanup error) {
+	var boundary *panicboundary.Error
+	if errors.As(err, &boundary) && e.session != nil {
+		e.session.poisoned.Store(true)
+	}
+
 	category := failure.CategoryExecution
 
 	var domain *DomainError
-	if errors.As(runErr, &domain) && domain.Kind == ErrorKindInternal {
+	if boundary != nil || errors.As(err, &domain) && domain.Kind == ErrorKindInternal {
 		category = failure.CategoryInternalRuntime
-		result = nil
 	}
 
-	e.finish(result, runErr, category)
-}
-
-func (e *Execution) finish(output *api.Output, err error, category failure.Category) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
@@ -172,24 +298,21 @@ func (e *Execution) finish(output *api.Output, err error, category failure.Categ
 		return
 	}
 
-	if output == nil && err == nil {
-		err = errors.New("runtime returned no output")
-		category = failure.CategoryInternalRuntime
+	e.outcome, e.cleanupErr = err, cleanup
+	if err != nil {
+		e.failure = failureFromError(category, err)
 	}
 
-	e.output = output
 	switch {
 	case errors.Is(err, context.Canceled) || errors.Is(context.Cause(e.ctx), context.Canceled):
 		e.state = wireexecution.StateCancelled
-		e.publishLocked(true)
 	case err != nil:
 		e.state = wireexecution.StateFailed
-		e.failure = failureFromError(category, err)
-		e.publishLocked(true)
 	default:
 		e.state = wireexecution.StateCompleted
-		e.publishLocked(true)
 	}
+
+	e.publishLocked(true)
 }
 
 // Cancel requests cancellation and returns the current snapshot without waiting for termination.
@@ -204,7 +327,7 @@ func (e *Execution) ID() ExecutionID {
 	return e.id
 }
 
-// Snapshot returns execution state with mutable output and diagnostics detached.
+// Snapshot returns execution state with metadata and diagnostics detached.
 func (e *Execution) Snapshot() wireexecution.Snapshot {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -230,9 +353,9 @@ func (e *Execution) Watch() (ExecutionSubscription, error) {
 
 func (e *Execution) snapshotLocked() wireexecution.Snapshot {
 	return cloneExecutionSnapshot(wireexecution.Snapshot{
-		State:   e.state,
-		Output:  e.output,
-		Failure: e.failure,
+		State:    e.state,
+		Metadata: e.metadata,
+		Failure:  e.failure,
 	})
 }
 

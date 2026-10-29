@@ -2,6 +2,7 @@ package grpcserver
 
 import (
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
+	"github.com/MontFerret/wire/internal/outputstream"
 	wireexecution "github.com/MontFerret/wire/pkg/execution"
 	"github.com/MontFerret/wire/server/internal/core"
 )
@@ -17,12 +18,18 @@ func execution(id core.ExecutionID, value wireexecution.Snapshot) (*wirev1.Execu
 		return nil, err
 	}
 
-	return &wirev1.Execution{
-		Id:      &wirev1.ExecutionId{Value: string(id)},
-		State:   state,
-		Output:  output(value.Output),
+	result := &wirev1.Execution{
+		Id:    &wirev1.ExecutionId{Value: string(id)},
+		State: state,
+
 		Failure: convertedFailure,
-	}, nil
+	}
+
+	if value.Metadata != nil {
+		result.Metadata = outputstream.Descriptor(*value.Metadata)
+	}
+
+	return result, nil
 }
 
 func executionState(value wireexecution.State) (wirev1.ExecutionState, error) {

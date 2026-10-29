@@ -69,13 +69,30 @@ sequential `Session.Run` calls reuse it. A concurrent run on that session is
 rejected until the previous invocation's temporary execution has been released.
 Distinct sessions and plans may execute concurrently.
 
-Each runtime/session invocation privately acquires, watches, and releases an
-execution. Output is `*api.Output`: its content type and encoded bytes are
-copied without interpretation. Nil output differs from present empty output,
-and available output survives execution or cleanup errors. A hosted `(nil, nil)`
-result is invalid. No IDs, RPC handles, Wire execution snapshots, or protocol/host
-identity metadata are exposed by the returned API interfaces. `Runtime.Version(ctx)` exposes only
-the portable UAPI runtime version captured during Connect.
+Each runtime/session invocation privately allocates an execution and opens its
+exclusive output stream. `Run` reads metadata before returning `api.Output` and
+transfers the runtime reference to that handle. Hosted preparation failures return
+no handle; later failures belong to consumption. A non-nil handle may yield absent
+content. `Collect` returns detached `*api.Content`, including a received prefix with
+an error; `Consume` delivers synchronous borrowed chunks with backpressure. Close
+abandons unread bytes without draining, waits for any active callback, releases the
+execution/reference, and retains cleanup errors. It never closes a caller-owned
+session. Metadata remains immutable and locally readable after closure.
+
+Admission checks context presence, consumer presence, consumption cancellation,
+then invocation cancellation before claiming the handle. Competing consumers match
+`api.ErrOutputInUse`; stopping/closed handles match `api.ErrOutputClosed`. Both
+contexts and their earliest deadline bound callbacks. Callback errors and panics
+finalize resources; panics propagate unchanged. Explicit Close before outcome
+commitment adds ErrOutputClosed while preserving other observed failures. Callbacks
+must not call Close synchronously on their own output because Close waits for them.
+
+No IDs, RPC handles, Wire snapshots, or protocol/host identity metadata are exposed
+by the API interfaces. `Runtime.Version(ctx)` exposes the portable version captured
+during Connect. Both peers must exchange framing version 1; there is no inline-output
+fallback. Debugger events remain detached materialized content, reconstructed before
+publication. Interrupted transfers return errors joined with semantic errors already
+observed, without publishing an incomplete completion event.
 
 The Connect snapshot requires a present `runtime_version`, including when empty.
 Its bytes are converted to `api.Version` unchanged, including invalid UTF-8.
@@ -114,7 +131,7 @@ any local or remote Universal API runtime, borrowing it while owning the plan
 and session it creates:
 
 ```go
-func runQuery(ctx context.Context, runtime api.Runtime) (out *api.Output, err error) {
+func runQuery(ctx context.Context, runtime api.Runtime) (out *api.Content, err error) {
     plan, err := runtime.Compile(ctx, api.NewSource("query.fql", "RETURN @input"))
     if err != nil {
         return nil, err
@@ -127,7 +144,12 @@ func runQuery(ctx context.Context, runtime api.Runtime) (out *api.Output, err er
     }
     defer func() { err = errors.Join(err, session.Close()) }()
 
-    return session.Run(ctx)
+    output, err := session.Run(ctx)
+    if err != nil {
+        return nil, err
+    }
+    defer func() { err = errors.Join(err, output.Close()) }()
+    return output.Collect(ctx)
 }
 ```
 
@@ -276,13 +298,34 @@ and contained implementation panic details remain sanitized.
 The Go constructor change is intentional: replace `client.New(ctx, conn)` with
 `client.From(ctx, conn)` to preserve borrowed ownership. `NewRuntime` callers also
 use `From`. Use `New(ctx, target, options...)` for an owned channel. Use `api.Runtime`, `api.Session`,
-and `api.Output` instead of client aliases. The old `Client`, `Plan`,
+and `api.Output` / `api.Content` instead of client aliases. The old `Client`, `Plan`,
 `Execution`, `DebugSession`, and event receiver types, semantic option structs,
 `Parameters`, `RuntimeInfo`, and `Capabilities` have been removed without
 compatibility shims.
 
 Use canonical runtime/plan/session operations, cancellation contexts, and
 debugger events. The versioned protobuf services and shared domain packages
-are extended additively for alpha.19 and alpha.20; callers implementing protocol
+are extended additively through alpha.21; callers implementing protocol
 tooling may still use the generated bindings directly. See the
-[alpha.20 protocol contract](protocol.md#alpha20-metadata-adoption).
+[alpha.21 chunked output contract](protocol.md#alpha21-chunked-output).
+
+### Consuming without materializing
+
+```go
+output, err := remote.Run(ctx, source)
+if err != nil {
+    return err
+}
+// Consume finalizes, including on callback failure; Close also covers abandonment.
+defer output.Close()
+metadata := output.Metadata()
+_ = metadata // available without I/O, even after Close
+return output.Consume(ctx, func(ctx context.Context, chunk []byte) error {
+    _, err := destination.Write(chunk)
+    return err
+})
+```
+
+For code with a fallible cleanup path, join `output.Close()` into the returned
+error as in the materializing example above. No aggregate size cap is imposed;
+applications choosing Collect or debugger output must budget for materialization.

@@ -6,7 +6,6 @@ import (
 
 	"github.com/MontFerret/api"
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
-	"github.com/MontFerret/wire/pkg/execution"
 )
 
 // executionHandle is one asynchronous operation owned by a logical connection
@@ -57,53 +56,15 @@ func (e *executionHandle) Watch(ctx context.Context) (*executionEvents, error) {
 	return &executionEvents{stream: stream, cancel: cancel}, nil
 }
 
-// Wait observes execution events until the remote execution reaches a terminal
-// state. A failed execution returns *failure.Failure, while remote cancellation
-// returns ErrExecutionCancelled. Caller cancellation returns the waiting
-// context's error. Wait does not release the execution or retain mutable
-// snapshot state.
-func (e *executionHandle) Wait(ctx context.Context) (*api.Output, error) {
-	events, err := e.Watch(ctx)
+// Wait consumes the execution's one-shot output and releases its resources.
+// Available partial content accompanies terminal and cleanup failures.
+func (e *executionHandle) Wait(ctx context.Context) (*api.Content, error) {
+	output, err := e.openOutput(ctx, nil)
 	if err != nil {
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return nil, ctxErr
-		}
-
 		return nil, err
 	}
 
-	for {
-		event, receiveErr := events.Recv()
-		if receiveErr != nil {
-			if ctxErr := ctx.Err(); ctxErr != nil {
-				return nil, ctxErr
-			}
-
-			return nil, receiveErr
-		}
-
-		if !event.Snapshot.State.Terminal() {
-			continue
-		}
-
-		output := executionOutput(event.Snapshot)
-		switch event.Snapshot.State {
-		case execution.StateCompleted:
-			if event.Snapshot.Output == nil {
-				return nil, errors.New("Wire server returned a completed execution without output")
-			}
-
-			return output, nil
-		case execution.StateFailed:
-			if event.Snapshot.Failure == nil {
-				return output, errors.New("Wire server returned a failed execution without failure details")
-			}
-
-			return output, event.Snapshot.Failure
-		case execution.StateCancelled:
-			return output, ErrExecutionCancelled
-		}
-	}
+	return output.Collect(ctx)
 }
 
 // Close commits cancellation and remote execution cleanup. Concurrent and
@@ -151,16 +112,4 @@ func (e *executionHandle) release(ctx context.Context) error {
 	})
 
 	return decodeError(err)
-}
-
-// waitAndRelease is the adapter's one-shot invocation lifecycle. Release itself
-// cancels running work and waits for teardown; a separate Cancel RPC is redundant.
-func (e *executionHandle) waitAndRelease(ctx context.Context) (*api.Output, error) {
-	output, waitErr := e.Wait(ctx)
-
-	// The ID is known: a failed release is retained on this handle and does
-	// not invalidate its session, plan, or logical runtime.
-	closeErr := boundedCleanup(ctx, convenienceCleanupTimeout, e.Close)
-
-	return output, errors.Join(waitErr, closeErr)
 }

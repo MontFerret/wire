@@ -13,8 +13,8 @@ import (
 )
 
 func TestDurableSessionRunsSequentiallyOnOneHostedSession(t *testing.T) {
-	runtimeSession := &spySession{run: func(context.Context) (*api.Output, error) {
-		return &api.Output{ContentType: "application/json", Content: []byte(`{"ok":true}`)}, nil
+	runtimeSession := &spySession{run: func(context.Context) (*api.Content, error) {
+		return &api.Content{Metadata: api.Metadata{ContentType: "application/json"}, Data: []byte(`{"ok":true}`)}, nil
 	}}
 	plan := &spyPlan{
 		params: []string{"input"},
@@ -52,7 +52,7 @@ func TestDurableSessionRunsSequentiallyOnOneHostedSession(t *testing.T) {
 
 		terminal := waitExecution(t, connection, run.ID)
 		if terminal.State != wireexecution.StateCompleted || terminal.Output == nil ||
-			string(terminal.Output.Content) != `{"ok":true}` {
+			string(terminal.Output.Data) != `{"ok":true}` {
 			t.Fatalf("unexpected terminal execution: %#v", terminal)
 		}
 
@@ -86,7 +86,7 @@ func TestDurableSessionRunsSequentiallyOnOneHostedSession(t *testing.T) {
 
 func TestDurableSessionRejectsOverlappingRunsUntilExecutionRelease(t *testing.T) {
 	started := make(chan struct{})
-	runtimeSession := &spySession{run: func(ctx context.Context) (*api.Output, error) {
+	runtimeSession := &spySession{run: func(ctx context.Context) (*api.Content, error) {
 		close(started)
 		<-ctx.Done()
 
@@ -124,7 +124,7 @@ func TestDurableSessionReleaseCancelsRunBeforeExactlyOnceClose(t *testing.T) {
 	var orderMu sync.Mutex
 	var order []string
 	runtimeSession := &spySession{
-		run: func(ctx context.Context) (*api.Output, error) {
+		run: func(ctx context.Context) (*api.Content, error) {
 			close(started)
 			<-ctx.Done()
 			orderMu.Lock()
@@ -309,7 +309,7 @@ func TestSessionCreationFailureDoesNotLeakLimit(t *testing.T) {
 }
 
 func TestDurableSessionIsNotReusedAfterRuntimePanic(t *testing.T) {
-	runtimeSession := &spySession{run: func(context.Context) (*api.Output, error) {
+	runtimeSession := &spySession{run: func(context.Context) (*api.Content, error) {
 		panic("runtime defect")
 	}}
 	connection, _, created := openTestSession(t, runtimeSession)

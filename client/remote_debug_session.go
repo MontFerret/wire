@@ -93,6 +93,30 @@ func (d *remoteDebugSession) runCommand(ctx context.Context, command wirev1.Debu
 		return nil, invalidDebuggerResponse("command result is missing")
 	}
 
+	if response.GetOutputFrame() != nil {
+		return nil, errors.Join(invalidDebuggerResponse("command result contains an output frame"), commandResultError(result))
+	}
+
+	if result.Event != nil && result.Event.Output != nil {
+		content, err := receiveDebugContent(result.Event.Output.Metadata, func() (*wirev1.OutputFrame, error) {
+			response, err := stream.Recv()
+			if err != nil {
+				return nil, err
+			}
+
+			if response.GetResult() != nil || response.GetOutputFrame() == nil {
+				return nil, invalidDebuggerResponse("expected command output frame")
+			}
+
+			return response.GetOutputFrame(), nil
+		})
+		if err != nil {
+			return nil, errors.Join(d.commandError(ctx, err), commandResultError(result))
+		}
+
+		result.Event.Output = content
+	}
+
 	if command == wirev1.DebugCommand_DEBUG_COMMAND_START && result.Event != nil &&
 		result.Event.Reason != debugger.ReasonCompleted && result.Event.Reason != debugger.ReasonTerminated {
 		retained = true

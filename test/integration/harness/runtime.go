@@ -4,13 +4,15 @@ import (
 	"context"
 
 	"github.com/MontFerret/api"
+	"github.com/MontFerret/wire/internal/testoutput"
 )
 
 type (
 	// RuntimeBehavior is configured before the server starts. Hooks run outside locks.
 	RuntimeBehavior struct {
 		Version func(context.Context) (api.Version, error)
-		Run     func(context.Context, api.Source, SessionOptions) (*api.Output, error)
+		Output  func(context.Context, api.Source, SessionOptions) (api.Output, error)
+		Run     func(context.Context, api.Source, SessionOptions) (*api.Content, error)
 		Compile func(context.Context, api.Source, bool, CompileOptions) error
 		Plan    PlanBehavior
 	}
@@ -55,7 +57,7 @@ func (r *RuntimeSpy) Version(ctx context.Context) (api.Version, error) {
 }
 
 // Run records source and applied options before invoking the configured direct-run hook.
-func (r *RuntimeSpy) Run(ctx context.Context, src api.Source, options ...api.SessionOption) (*api.Output, error) {
+func (r *RuntimeSpy) Run(ctx context.Context, src api.Source, options ...api.SessionOption) (api.Output, error) {
 	configured, err := applyOptions(options)
 	if err != nil {
 		return nil, err
@@ -64,11 +66,17 @@ func (r *RuntimeSpy) Run(ctx context.Context, src api.Source, options ...api.Ses
 	r.recorder.record(Call{Resource: r.id, Method: "Run", Source: src, Options: configured})
 	defer r.recorder.record(Call{Resource: r.id, Method: "RunFinished"})
 
-	if r.behavior.Run != nil {
-		return r.behavior.Run(ctx, src, configured)
+	if r.behavior.Output != nil {
+		return r.behavior.Output(ctx, src, configured)
 	}
 
-	return &api.Output{}, nil
+	if r.behavior.Run != nil {
+		content, err := r.behavior.Run(ctx, src, configured)
+
+		return testoutput.New(ctx, content, err), nil
+	}
+
+	return testoutput.New(ctx, &api.Content{}, nil), nil
 }
 
 // Compile records normal compilation and returns a child plan after the hook succeeds.

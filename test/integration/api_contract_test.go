@@ -15,6 +15,7 @@ import (
 	"github.com/MontFerret/api/debugger"
 	"github.com/MontFerret/api/source"
 	"github.com/MontFerret/wire/client"
+	"github.com/MontFerret/wire/internal/testoutput"
 	"github.com/MontFerret/wire/server"
 	"github.com/MontFerret/wire/test/integration/harness"
 )
@@ -23,24 +24,24 @@ func TestOutputPresenceAndCleanupErrors(t *testing.T) {
 	for _, direct := range []bool{true, false} {
 		for _, test := range []struct {
 			name   string
-			output *api.Output
+			output *api.Content
 			err    error
 		}{
 			{"absent failure", nil, errors.New("private execution failure")},
-			{"absent success invalid", nil, nil},
-			{"present empty", &api.Output{}, nil},
-			{"present failure", &api.Output{Content: []byte("partial")}, errors.New("private failure")},
+			{"absent success", nil, nil},
+			{"present empty", &api.Content{}, nil},
+			{"present failure", &api.Content{Data: []byte("partial")}, errors.New("private failure")},
 		} {
 			t.Run(map[bool]string{true: "runtime/", false: "session/"}[direct]+test.name, func(t *testing.T) {
 				h := harness.New(t, harness.WithBehavior(harness.RuntimeBehavior{
-					Run: func(context.Context, api.Source, harness.SessionOptions) (*api.Output, error) {
+					Run: func(context.Context, api.Source, harness.SessionOptions) (*api.Content, error) {
 						return test.output, test.err
 					},
 					Plan: harness.PlanBehavior{Session: func(harness.SessionOptions) harness.SessionBehavior {
-						return harness.SessionBehavior{Run: func(context.Context, int) (*api.Output, error) { return test.output, test.err }}
+						return harness.SessionBehavior{Run: func(context.Context, int) (*api.Content, error) { return test.output, test.err }}
 					}},
 				}))
-				run := func() (*api.Output, error) { return h.Runtime().Run(h.Context(), api.Source{}) }
+				run := func() (*api.Content, error) { return testoutput.Collect(h.Runtime().Run(h.Context(), api.Source{})) }
 
 				if !direct {
 					plan, err := h.Runtime().Compile(h.Context(), api.Source{})
@@ -56,11 +57,11 @@ func TestOutputPresenceAndCleanupErrors(t *testing.T) {
 					}
 
 					h.Own(session)
-					run = func() (*api.Output, error) { return session.Run(h.Context()) }
+					run = func() (*api.Content, error) { return testoutput.Collect(session.Run(h.Context())) }
 				}
 
 				output, err := run()
-				if !reflect.DeepEqual(output, test.output) || (err != nil) != (test.err != nil || test.output == nil) {
+				if !reflect.DeepEqual(output, test.output) || (err != nil) != (test.err != nil) {
 					t.Fatalf("output=%#v error=%v", output, err)
 				}
 
@@ -136,7 +137,7 @@ func TestOptionPresenceAndAnonymousSources(t *testing.T) {
 				method := "Run"
 
 				if mode == "runtime" {
-					if _, err := h.Runtime().Run(h.Context(), api.Source{}, options...); err != nil {
+					if _, err := testoutput.Collect(h.Runtime().Run(h.Context(), api.Source{}, options...)); err != nil {
 						t.Fatal(err)
 					}
 				} else {
@@ -311,7 +312,7 @@ func TestDebuggerCommandEventAndError(t *testing.T) {
 	for _, commandErr := range []error{errors.New("private cleanup"), context.Canceled, context.DeadlineExceeded, errors.Join(errors.New("private joined cleanup"), context.Canceled)} {
 		t.Run(commandErr.Error(), func(t *testing.T) {
 			h := harness.New(t, harness.WithBehavior(harness.RuntimeBehavior{Plan: harness.PlanBehavior{Debugger: harness.DebuggerBehavior{Command: func(context.Context, string, int) (*debugger.Event, error) {
-				return &debugger.Event{Reason: debugger.ReasonCompleted, Output: &api.Output{Content: []byte("done")}}, commandErr
+				return &debugger.Event{Reason: debugger.ReasonCompleted, Output: &api.Content{Data: []byte("done")}}, commandErr
 			}}}}))
 
 			plan, err := h.Runtime().CompileDebug(h.Context(), api.Source{})
@@ -329,7 +330,7 @@ func TestDebuggerCommandEventAndError(t *testing.T) {
 			h.Own(session)
 
 			event, err := session.Start(h.Context())
-			if event == nil || event.Output == nil || string(event.Output.Content) != "done" || event.Error != nil || err == nil || strings.Contains(err.Error(), "private") {
+			if event == nil || event.Output == nil || string(event.Output.Data) != "done" || event.Error != nil || err == nil || strings.Contains(err.Error(), "private") {
 				t.Fatalf("event=%+v error=%v", event, err)
 			}
 
@@ -590,7 +591,7 @@ func TestRuntimeClosePreservesAdmittedCompile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := session.Run(h.Context()); err != nil {
+	if _, err := testoutput.Collect(session.Run(h.Context())); err != nil {
 		t.Fatal(err)
 	}
 

@@ -1,5 +1,5 @@
-github.com/MontFerret/api v1.0.0-alpha.20 h1:s09YgY0ndHudo7WY/XWIJACKdUCBt0bTA3XP8bhhmBI=
-github.com/MontFerret/api v1.0.0-alpha.20/go.mod h1:wz5bfUIGYkED8Hqz9CdsW0o2jSgagotbVLOCbHHacSI=
+github.com/MontFerret/api v1.0.0-alpha.21 h1:gEdhL2JdVAPTkc5bmoPp4nev2rrQDl6qztY/1JQ4a7w=
+github.com/MontFerret/api v1.0.0-alpha.21/go.mod h1:wz5bfUIGYkED8Hqz9CdsW0o2jSgagotbVLOCbHHacSI=
 github.com/golang/protobuf v1.5.4 h1:i7eJL8qZTpSEXOPTxNKhASYpMn+8e5Q6AdndVa1dWek=
 github.com/golang/protobuf v1.5.4/go.mod h1:lnTiLA8Wa4RWRcIUkrtSVa5nRhsEGBg48fD6rSs7xps=
 github.com/google/go-cmp v0.7.0 h1:wk8382ETsv4JYUZwIsn6YpYiWiBsYLSJiTsyBybVuN8=

@@ -11,6 +11,7 @@ import (
 
 	"github.com/MontFerret/api"
 	"github.com/MontFerret/wire/client"
+	"github.com/MontFerret/wire/internal/testoutput"
 	"github.com/MontFerret/wire/test/integration/harness"
 )
 
@@ -69,7 +70,7 @@ func TestRuntimeLostAllocationReclaimsNearestParentAndPreservesSiblings(t *testi
 				}
 
 				if root {
-					if _, err := f.remote.Run(harness.Context(t), api.Source{Content: "RETURN 1"}); !errors.Is(err, client.ErrClosed) {
+					if _, err := testoutput.Collect(f.remote.Run(harness.Context(t), api.Source{Content: "RETURN 1"})); !errors.Is(err, client.ErrClosed) {
 						t.Fatalf("indeterminate root allocation left Runtime usable: %v", err)
 					}
 
@@ -84,18 +85,18 @@ func TestRuntimeLostAllocationReclaimsNearestParentAndPreservesSiblings(t *testi
 					f.assertNarrowParentClosed()
 
 					if operation.name == "session run" {
-						if _, err := f.session.Run(harness.Context(t)); !errors.Is(err, client.ErrClosed) {
+						if _, err := testoutput.Collect(f.session.Run(harness.Context(t))); !errors.Is(err, client.ErrClosed) {
 							t.Fatalf("Session parent remained usable: %v", err)
 						}
 					} else if _, err := f.plan.NewSession(harness.Context(t)); !errors.Is(err, client.ErrClosed) {
 						t.Fatalf("Plan parent remained usable: %v", err)
 					}
 
-					if _, err := sibling.Run(harness.Context(t)); err != nil {
+					if _, err := testoutput.Collect(sibling.Run(harness.Context(t))); err != nil {
 						t.Fatalf("unrelated sibling was invalidated: %v", err)
 					}
 
-					if _, err := f.remote.Run(harness.Context(t), api.Source{Content: "RETURN 1"}); err != nil {
+					if _, err := testoutput.Collect(f.remote.Run(harness.Context(t), api.Source{Content: "RETURN 1"})); err != nil {
 						t.Fatalf("logical Runtime was invalidated: %v", err)
 					}
 				}
@@ -173,16 +174,16 @@ func TestRuntimeCancelledKnownAllocationPreservesParentsOnReleaseFailure(t *test
 
 				fail(operation.release, nil)
 
-				if _, err := sibling.Run(harness.Context(t)); err != nil {
+				if _, err := testoutput.Collect(sibling.Run(harness.Context(t))); err != nil {
 					t.Fatalf("known allocation release failure invalidated its sibling: %v", err)
 				}
 
-				if _, err := f.remote.Run(harness.Context(t), api.Source{Content: "RETURN 3"}); err != nil {
+				if _, err := testoutput.Collect(f.remote.Run(harness.Context(t), api.Source{Content: "RETURN 3"})); err != nil {
 					t.Fatalf("known allocation release failure invalidated Runtime: %v", err)
 				}
 
 				if operation.name == "session run" {
-					_, err := f.session.Run(harness.Context(t))
+					_, err := testoutput.Collect(f.session.Run(harness.Context(t)))
 					if acknowledged && err != nil {
 						t.Fatalf("Session could not run after committed execution release: %v", err)
 					}
@@ -251,11 +252,11 @@ func TestRuntimeLostExecutionTriesPlanBeforeRuntime(t *testing.T) {
 		t.Fatalf("Plan fallback returned before hosted Plan cleanup: closes=%d", planCloses)
 	}
 
-	if _, err := sibling.Run(harness.Context(t)); err != nil {
+	if _, err := testoutput.Collect(sibling.Run(harness.Context(t))); err != nil {
 		t.Fatalf("another Plan's Session was invalidated: %v", err)
 	}
 
-	if _, err := f.remote.Run(harness.Context(t), api.Source{Content: "RETURN 3"}); err != nil {
+	if _, err := testoutput.Collect(f.remote.Run(harness.Context(t), api.Source{Content: "RETURN 3"})); err != nil {
 		t.Fatalf("successful Plan reclamation invalidated Runtime: %v", err)
 	}
 }

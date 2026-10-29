@@ -47,7 +47,7 @@ func TestProtocolConnectionsHaveIndependentStoresAndLimits(t *testing.T) {
 		connectCtx, cancel := context.WithCancel(ctx)
 		defer cancel()
 
-		stream, err := runtimes.Connect(connectCtx, &wirev1.ConnectRequest{})
+		stream, err := runtimes.Connect(connectCtx, &wirev1.ConnectRequest{OutputFramingVersion: 1})
 		if err != nil {
 			t.Fatal(err)
 		}

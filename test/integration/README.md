@@ -8,7 +8,8 @@ api.Runtime caller → wire/client → protobuf and real gRPC over bufconn
 ```
 
 The suite depends on the API version pinned in the root `go.mod` (currently
-`v1.0.0-alpha.20`). It imports neither native Ferret nor Wire internal packages.
+`v1.0.0-alpha.21`). It imports no native Ferret or Wire implementation packages; the shared
+`internal/testoutput` fixture supplies buffered hosted test outputs.
 Existing component, conversion, low-level facade/protocol tests, and benchmarks
 remain beside their owning packages. The former server-package Universal API
 adapter, allocation, cancellation, and transport tests are consolidated here.
@@ -55,7 +56,7 @@ transport/closed-handle errors. Wire must never close the hosted runtime.
 
 ## Interface coverage
 
-Every current interface method has end-to-end coverage. The alpha.20 metadata
+Every current interface method has end-to-end coverage. The alpha.21 output and metadata
 suite covers opaque/empty runtime versions (including invalid UTF-8 and NUL bytes),
 one hosted call per connection, handshake failure and capacity reclamation,
 constructor cancellation, cached metadata context errors, detached normal/debug
@@ -97,7 +98,7 @@ names; each linked file contains the complete scenario and assertions.
 | | `EvaluateFrame` | [TestDebuggerRoundTrip](debugger_test.go) |
 | | `Close` | [TestDebuggerRoundTrip](debugger_test.go), [TestParentClosePreservesChildrenAndActiveWork](lifecycle_test.go) |
 
-Output has content and content type, without structured metadata. Diagnostics
+Output is a one-shot handle with immutable metadata, Consume, Collect, and Close. Debugger events carry detached Content. Diagnostics
 have an open `Kind`, source, annotations, hint, and note, without a separate
 severity field. Debugger frames use indices and function IDs. Default and indexed inspection/evaluation operations, and default and explicit
 breakpoint binding operations, invoke their corresponding hosted methods. Successful stopped events have nil
@@ -193,3 +194,14 @@ root work, retained plans and sessions, and deferred-error attribution. Parent-c
 coverage runs in both ownership modes, including normal and debugger descendants.
 Client contract tests also cover constructor rollback, exactly-once teardown,
 TLS/mTLS, per-RPC authentication refresh, cleanup credentials, and plaintext rejection.
+
+### Alpha.21 output and chunked transport
+
+`output_stream_test.go` and `output_contract_test.go` cover large chunks through
+small message limits, known/unknown lengths, absent/empty/partial content, rejected
+and competing consumers, callback panic/error cleanup, Close races, invocation and
+consumption cancellation, retained runtime ownership, hosted output panics, durable
+session reuse, and interrupted execution/debugger transfers. `output_benchmark_test.go`
+measures small and large streaming execution. Server protocol tests separately cover
+large WatchDebug replay and slow observers; client framing tests cover malformed
+frames. Chunks are transport data, not debugger events. There is no aggregate cap.

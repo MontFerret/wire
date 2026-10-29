@@ -272,8 +272,10 @@ type ConnectResponse struct {
 	// Bytes preserve opaque values without requiring valid UTF-8.
 	// Presence is required by alpha.20 peers; an empty but present value is valid.
 	RuntimeVersion []byte `protobuf:"bytes,6,opt,name=runtime_version,json=runtimeVersion,proto3,oneof" json:"runtime_version,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// output_framing_version must equal the requested, supported version (currently 1).
+	OutputFramingVersion uint32 `protobuf:"varint,7,opt,name=output_framing_version,json=outputFramingVersion,proto3" json:"output_framing_version,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *ConnectResponse) Reset() {
@@ -334,11 +336,20 @@ func (x *ConnectResponse) GetRuntimeVersion() []byte {
 	return nil
 }
 
+func (x *ConnectResponse) GetOutputFramingVersion() uint32 {
+	if x != nil {
+		return x.OutputFramingVersion
+	}
+	return 0
+}
+
 // ConnectRequest has no transport- or client-identity fields.
 type ConnectRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Version 1 is required; incompatible peers fail before allocating a connection.
+	OutputFramingVersion uint32 `protobuf:"varint,2,opt,name=output_framing_version,json=outputFramingVersion,proto3" json:"output_framing_version,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *ConnectRequest) Reset() {
@@ -369,6 +380,13 @@ func (x *ConnectRequest) ProtoReflect() protoreflect.Message {
 // Deprecated: Use ConnectRequest.ProtoReflect.Descriptor instead.
 func (*ConnectRequest) Descriptor() ([]byte, []int) {
 	return file_ferret_wire_v1_runtime_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *ConnectRequest) GetOutputFramingVersion() uint32 {
+	if x != nil {
+		return x.OutputFramingVersion
+	}
+	return 0
 }
 
 type CloseConnectionRequest struct {
@@ -694,12 +712,15 @@ func (x *DiagnosticSet) GetDiagnostics() []*Diagnostic {
 	return nil
 }
 
-// Output is the Unified API encoded output contract. Wire does not expose runtime values.
+// Output describes detached debugger content. Presence is independent of its length.
+// Its bytes follow the semantic envelope as OutputFrame messages.
 type Output struct {
-	state       protoimpl.MessageState `protogen:"open.v1"`
-	ContentType string                 `protobuf:"bytes,1,opt,name=content_type,json=contentType,proto3" json:"content_type,omitempty"`
-	// content is already encoded by the runtime using content_type.
-	Content       []byte `protobuf:"bytes,2,opt,name=content,proto3" json:"content,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Deprecated: Marked as deprecated in ferret/wire/v1/runtime.proto.
+	ContentType string `protobuf:"bytes,1,opt,name=content_type,json=contentType,proto3" json:"content_type,omitempty"`
+	// Deprecated: Marked as deprecated in ferret/wire/v1/runtime.proto.
+	Content       []byte          `protobuf:"bytes,2,opt,name=content,proto3" json:"content,omitempty"`
+	Metadata      *OutputMetadata `protobuf:"bytes,3,opt,name=metadata,proto3" json:"metadata,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -734,6 +755,7 @@ func (*Output) Descriptor() ([]byte, []int) {
 	return file_ferret_wire_v1_runtime_proto_rawDescGZIP(), []int{11}
 }
 
+// Deprecated: Marked as deprecated in ferret/wire/v1/runtime.proto.
 func (x *Output) GetContentType() string {
 	if x != nil {
 		return x.ContentType
@@ -741,11 +763,251 @@ func (x *Output) GetContentType() string {
 	return ""
 }
 
+// Deprecated: Marked as deprecated in ferret/wire/v1/runtime.proto.
 func (x *Output) GetContent() []byte {
 	if x != nil {
 		return x.Content
 	}
 	return nil
+}
+
+func (x *Output) GetMetadata() *OutputMetadata {
+	if x != nil {
+		return x.Metadata
+	}
+	return nil
+}
+
+// OutputMetadata describes the complete encoded payload, including for partial results.
+type OutputMetadata struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ContentType   string                 `protobuf:"bytes,1,opt,name=content_type,json=contentType,proto3" json:"content_type,omitempty"`
+	Length        int64                  `protobuf:"varint,2,opt,name=length,proto3" json:"length,omitempty"`
+	LengthKnown   bool                   `protobuf:"varint,3,opt,name=length_known,json=lengthKnown,proto3" json:"length_known,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OutputMetadata) Reset() {
+	*x = OutputMetadata{}
+	mi := &file_ferret_wire_v1_runtime_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OutputMetadata) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OutputMetadata) ProtoMessage() {}
+
+func (x *OutputMetadata) ProtoReflect() protoreflect.Message {
+	mi := &file_ferret_wire_v1_runtime_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OutputMetadata.ProtoReflect.Descriptor instead.
+func (*OutputMetadata) Descriptor() ([]byte, []int) {
+	return file_ferret_wire_v1_runtime_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *OutputMetadata) GetContentType() string {
+	if x != nil {
+		return x.ContentType
+	}
+	return ""
+}
+
+func (x *OutputMetadata) GetLength() int64 {
+	if x != nil {
+		return x.Length
+	}
+	return 0
+}
+
+func (x *OutputMetadata) GetLengthKnown() bool {
+	if x != nil {
+		return x.LengthKnown
+	}
+	return false
+}
+
+// OutputFrame is transport framing, never an execution or debugger event.
+// Each transfer has one header, zero or more chunks, and exactly one terminal.
+// No chunks means absent content; an empty chunk establishes present empty content.
+type OutputFrame struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Frame:
+	//
+	//	*OutputFrame_Header
+	//	*OutputFrame_Chunk
+	//	*OutputFrame_Terminal
+	Frame         isOutputFrame_Frame `protobuf_oneof:"frame"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OutputFrame) Reset() {
+	*x = OutputFrame{}
+	mi := &file_ferret_wire_v1_runtime_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OutputFrame) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OutputFrame) ProtoMessage() {}
+
+func (x *OutputFrame) ProtoReflect() protoreflect.Message {
+	mi := &file_ferret_wire_v1_runtime_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OutputFrame.ProtoReflect.Descriptor instead.
+func (*OutputFrame) Descriptor() ([]byte, []int) {
+	return file_ferret_wire_v1_runtime_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *OutputFrame) GetFrame() isOutputFrame_Frame {
+	if x != nil {
+		return x.Frame
+	}
+	return nil
+}
+
+func (x *OutputFrame) GetHeader() *OutputMetadata {
+	if x != nil {
+		if x, ok := x.Frame.(*OutputFrame_Header); ok {
+			return x.Header
+		}
+	}
+	return nil
+}
+
+func (x *OutputFrame) GetChunk() []byte {
+	if x != nil {
+		if x, ok := x.Frame.(*OutputFrame_Chunk); ok {
+			return x.Chunk
+		}
+	}
+	return nil
+}
+
+func (x *OutputFrame) GetTerminal() *OutputTerminal {
+	if x != nil {
+		if x, ok := x.Frame.(*OutputFrame_Terminal); ok {
+			return x.Terminal
+		}
+	}
+	return nil
+}
+
+type isOutputFrame_Frame interface {
+	isOutputFrame_Frame()
+}
+
+type OutputFrame_Header struct {
+	Header *OutputMetadata `protobuf:"bytes,1,opt,name=header,proto3,oneof"`
+}
+
+type OutputFrame_Chunk struct {
+	Chunk []byte `protobuf:"bytes,2,opt,name=chunk,proto3,oneof"`
+}
+
+type OutputFrame_Terminal struct {
+	Terminal *OutputTerminal `protobuf:"bytes,3,opt,name=terminal,proto3,oneof"`
+}
+
+func (*OutputFrame_Header) isOutputFrame_Frame() {}
+
+func (*OutputFrame_Chunk) isOutputFrame_Frame() {}
+
+func (*OutputFrame_Terminal) isOutputFrame_Frame() {}
+
+// OutputTerminal commits delivery independently of the encoded representation.
+// Failure and context identity can coexist with already delivered content.
+type OutputTerminal struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	TransferredBytes uint64                 `protobuf:"varint,1,opt,name=transferred_bytes,json=transferredBytes,proto3" json:"transferred_bytes,omitempty"`
+	Failure          *Failure               `protobuf:"bytes,2,opt,name=failure,proto3" json:"failure,omitempty"`
+	Cancelled        bool                   `protobuf:"varint,3,opt,name=cancelled,proto3" json:"cancelled,omitempty"`
+	DeadlineExceeded bool                   `protobuf:"varint,4,opt,name=deadline_exceeded,json=deadlineExceeded,proto3" json:"deadline_exceeded,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *OutputTerminal) Reset() {
+	*x = OutputTerminal{}
+	mi := &file_ferret_wire_v1_runtime_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OutputTerminal) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OutputTerminal) ProtoMessage() {}
+
+func (x *OutputTerminal) ProtoReflect() protoreflect.Message {
+	mi := &file_ferret_wire_v1_runtime_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OutputTerminal.ProtoReflect.Descriptor instead.
+func (*OutputTerminal) Descriptor() ([]byte, []int) {
+	return file_ferret_wire_v1_runtime_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *OutputTerminal) GetTransferredBytes() uint64 {
+	if x != nil {
+		return x.TransferredBytes
+	}
+	return 0
+}
+
+func (x *OutputTerminal) GetFailure() *Failure {
+	if x != nil {
+		return x.Failure
+	}
+	return nil
+}
+
+func (x *OutputTerminal) GetCancelled() bool {
+	if x != nil {
+		return x.Cancelled
+	}
+	return false
+}
+
+func (x *OutputTerminal) GetDeadlineExceeded() bool {
+	if x != nil {
+		return x.DeadlineExceeded
+	}
+	return false
 }
 
 // Failure is a sanitized asynchronous runtime failure.
@@ -762,7 +1024,7 @@ type Failure struct {
 
 func (x *Failure) Reset() {
 	*x = Failure{}
-	mi := &file_ferret_wire_v1_runtime_proto_msgTypes[12]
+	mi := &file_ferret_wire_v1_runtime_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -774,7 +1036,7 @@ func (x *Failure) String() string {
 func (*Failure) ProtoMessage() {}
 
 func (x *Failure) ProtoReflect() protoreflect.Message {
-	mi := &file_ferret_wire_v1_runtime_proto_msgTypes[12]
+	mi := &file_ferret_wire_v1_runtime_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -787,7 +1049,7 @@ func (x *Failure) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Failure.ProtoReflect.Descriptor instead.
 func (*Failure) Descriptor() ([]byte, []int) {
-	return file_ferret_wire_v1_runtime_proto_rawDescGZIP(), []int{12}
+	return file_ferret_wire_v1_runtime_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *Failure) GetCategory() ErrorCategory {
@@ -825,14 +1087,16 @@ const file_ferret_wire_v1_runtime_proto_rawDesc = "" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\tR\aversion\x12\x1f\n" +
 	"\vinstance_id\x18\x03 \x01(\tR\n" +
-	"instanceId\"\xb9\x02\n" +
+	"instanceId\"\xef\x02\n" +
 	"\x0fConnectResponse\x12A\n" +
 	"\rconnection_id\x18\x03 \x01(\v2\x1c.ferret.wire.v1.ConnectionIdR\fconnectionId\x128\n" +
 	"\bprotocol\x18\x04 \x01(\v2\x1c.ferret.wire.v1.ProtocolInfoR\bprotocol\x12J\n" +
 	"\x10runtime_identity\x18\x05 \x01(\v2\x1f.ferret.wire.v1.RuntimeIdentityR\x0fruntimeIdentity\x12,\n" +
-	"\x0fruntime_version\x18\x06 \x01(\fH\x00R\x0eruntimeVersion\x88\x01\x01B\x12\n" +
-	"\x10_runtime_versionJ\x04\b\x01\x10\x02J\x04\b\x02\x10\x03R\x06openedR\aclosing\"'\n" +
-	"\x0eConnectRequestJ\x04\b\x01\x10\x02R\x0fclient_identity\"[\n" +
+	"\x0fruntime_version\x18\x06 \x01(\fH\x00R\x0eruntimeVersion\x88\x01\x01\x124\n" +
+	"\x16output_framing_version\x18\a \x01(\rR\x14outputFramingVersionB\x12\n" +
+	"\x10_runtime_versionJ\x04\b\x01\x10\x02J\x04\b\x02\x10\x03R\x06openedR\aclosing\"]\n" +
+	"\x0eConnectRequest\x124\n" +
+	"\x16output_framing_version\x18\x02 \x01(\rR\x14outputFramingVersionJ\x04\b\x01\x10\x02R\x0fclient_identity\"[\n" +
 	"\x16CloseConnectionRequest\x12A\n" +
 	"\rconnection_id\x18\x01 \x01(\v2\x1c.ferret.wire.v1.ConnectionIdR\fconnectionId\"\x19\n" +
 	"\x17CloseConnectionResponse\"\x8d\x01\n" +
@@ -851,10 +1115,25 @@ const file_ferret_wire_v1_runtime_proto_rawDesc = "" +
 	"\x06source\x18\a \x01(\v2\x16.ferret.wire.v1.SourceR\x06source\x12F\n" +
 	"\vannotations\x18\b \x03(\v2$.ferret.wire.v1.DiagnosticAnnotationR\vannotationsJ\x04\b\x05\x10\x06J\x04\b\x06\x10\aR\x0fsource_identityR\x05spans\"M\n" +
 	"\rDiagnosticSet\x12<\n" +
-	"\vdiagnostics\x18\x01 \x03(\v2\x1a.ferret.wire.v1.DiagnosticR\vdiagnostics\"K\n" +
-	"\x06Output\x12!\n" +
-	"\fcontent_type\x18\x01 \x01(\tR\vcontentType\x12\x18\n" +
-	"\acontent\x18\x02 \x01(\fR\acontentR\x04data\"\xb7\x01\n" +
+	"\vdiagnostics\x18\x01 \x03(\v2\x1a.ferret.wire.v1.DiagnosticR\vdiagnostics\"\x8f\x01\n" +
+	"\x06Output\x12%\n" +
+	"\fcontent_type\x18\x01 \x01(\tB\x02\x18\x01R\vcontentType\x12\x1c\n" +
+	"\acontent\x18\x02 \x01(\fB\x02\x18\x01R\acontent\x12:\n" +
+	"\bmetadata\x18\x03 \x01(\v2\x1e.ferret.wire.v1.OutputMetadataR\bmetadataR\x04data\"n\n" +
+	"\x0eOutputMetadata\x12!\n" +
+	"\fcontent_type\x18\x01 \x01(\tR\vcontentType\x12\x16\n" +
+	"\x06length\x18\x02 \x01(\x03R\x06length\x12!\n" +
+	"\flength_known\x18\x03 \x01(\bR\vlengthKnown\"\xa6\x01\n" +
+	"\vOutputFrame\x128\n" +
+	"\x06header\x18\x01 \x01(\v2\x1e.ferret.wire.v1.OutputMetadataH\x00R\x06header\x12\x16\n" +
+	"\x05chunk\x18\x02 \x01(\fH\x00R\x05chunk\x12<\n" +
+	"\bterminal\x18\x03 \x01(\v2\x1e.ferret.wire.v1.OutputTerminalH\x00R\bterminalB\a\n" +
+	"\x05frame\"\xbb\x01\n" +
+	"\x0eOutputTerminal\x12+\n" +
+	"\x11transferred_bytes\x18\x01 \x01(\x04R\x10transferredBytes\x121\n" +
+	"\afailure\x18\x02 \x01(\v2\x17.ferret.wire.v1.FailureR\afailure\x12\x1c\n" +
+	"\tcancelled\x18\x03 \x01(\bR\tcancelled\x12+\n" +
+	"\x11deadline_exceeded\x18\x04 \x01(\bR\x10deadlineExceeded\"\xb7\x01\n" +
 	"\aFailure\x129\n" +
 	"\bcategory\x18\x01 \x01(\x0e2\x1d.ferret.wire.v1.ErrorCategoryR\bcategory\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12D\n" +
@@ -887,7 +1166,7 @@ func file_ferret_wire_v1_runtime_proto_rawDescGZIP() []byte {
 }
 
 var file_ferret_wire_v1_runtime_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_ferret_wire_v1_runtime_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
+var file_ferret_wire_v1_runtime_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
 var file_ferret_wire_v1_runtime_proto_goTypes = []any{
 	(ErrorCategory)(0),              // 0: ferret.wire.v1.ErrorCategory
 	(*ConnectionId)(nil),            // 1: ferret.wire.v1.ConnectionId
@@ -902,9 +1181,12 @@ var file_ferret_wire_v1_runtime_proto_goTypes = []any{
 	(*Diagnostic)(nil),              // 10: ferret.wire.v1.Diagnostic
 	(*DiagnosticSet)(nil),           // 11: ferret.wire.v1.DiagnosticSet
 	(*Output)(nil),                  // 12: ferret.wire.v1.Output
-	(*Failure)(nil),                 // 13: ferret.wire.v1.Failure
-	(*Range)(nil),                   // 14: ferret.wire.v1.Range
-	(*Source)(nil),                  // 15: ferret.wire.v1.Source
+	(*OutputMetadata)(nil),          // 13: ferret.wire.v1.OutputMetadata
+	(*OutputFrame)(nil),             // 14: ferret.wire.v1.OutputFrame
+	(*OutputTerminal)(nil),          // 15: ferret.wire.v1.OutputTerminal
+	(*Failure)(nil),                 // 16: ferret.wire.v1.Failure
+	(*Range)(nil),                   // 17: ferret.wire.v1.Range
+	(*Source)(nil),                  // 18: ferret.wire.v1.Source
 }
 var file_ferret_wire_v1_runtime_proto_depIdxs = []int32{
 	1,  // 0: ferret.wire.v1.ConnectResponse.connection_id:type_name -> ferret.wire.v1.ConnectionId
@@ -912,17 +1194,21 @@ var file_ferret_wire_v1_runtime_proto_depIdxs = []int32{
 	3,  // 2: ferret.wire.v1.ConnectResponse.runtime_identity:type_name -> ferret.wire.v1.RuntimeIdentity
 	1,  // 3: ferret.wire.v1.CloseConnectionRequest.connection_id:type_name -> ferret.wire.v1.ConnectionId
 	0,  // 4: ferret.wire.v1.ErrorDetail.category:type_name -> ferret.wire.v1.ErrorCategory
-	14, // 5: ferret.wire.v1.DiagnosticAnnotation.range:type_name -> ferret.wire.v1.Range
-	15, // 6: ferret.wire.v1.Diagnostic.source:type_name -> ferret.wire.v1.Source
+	17, // 5: ferret.wire.v1.DiagnosticAnnotation.range:type_name -> ferret.wire.v1.Range
+	18, // 6: ferret.wire.v1.Diagnostic.source:type_name -> ferret.wire.v1.Source
 	9,  // 7: ferret.wire.v1.Diagnostic.annotations:type_name -> ferret.wire.v1.DiagnosticAnnotation
 	10, // 8: ferret.wire.v1.DiagnosticSet.diagnostics:type_name -> ferret.wire.v1.Diagnostic
-	0,  // 9: ferret.wire.v1.Failure.category:type_name -> ferret.wire.v1.ErrorCategory
-	11, // 10: ferret.wire.v1.Failure.diagnostic_set:type_name -> ferret.wire.v1.DiagnosticSet
-	11, // [11:11] is the sub-list for method output_type
-	11, // [11:11] is the sub-list for method input_type
-	11, // [11:11] is the sub-list for extension type_name
-	11, // [11:11] is the sub-list for extension extendee
-	0,  // [0:11] is the sub-list for field type_name
+	13, // 9: ferret.wire.v1.Output.metadata:type_name -> ferret.wire.v1.OutputMetadata
+	13, // 10: ferret.wire.v1.OutputFrame.header:type_name -> ferret.wire.v1.OutputMetadata
+	15, // 11: ferret.wire.v1.OutputFrame.terminal:type_name -> ferret.wire.v1.OutputTerminal
+	16, // 12: ferret.wire.v1.OutputTerminal.failure:type_name -> ferret.wire.v1.Failure
+	0,  // 13: ferret.wire.v1.Failure.category:type_name -> ferret.wire.v1.ErrorCategory
+	11, // 14: ferret.wire.v1.Failure.diagnostic_set:type_name -> ferret.wire.v1.DiagnosticSet
+	15, // [15:15] is the sub-list for method output_type
+	15, // [15:15] is the sub-list for method input_type
+	15, // [15:15] is the sub-list for extension type_name
+	15, // [15:15] is the sub-list for extension extendee
+	0,  // [0:15] is the sub-list for field type_name
 }
 
 func init() { file_ferret_wire_v1_runtime_proto_init() }
@@ -932,13 +1218,18 @@ func file_ferret_wire_v1_runtime_proto_init() {
 	}
 	file_ferret_wire_v1_source_proto_init()
 	file_ferret_wire_v1_runtime_proto_msgTypes[3].OneofWrappers = []any{}
+	file_ferret_wire_v1_runtime_proto_msgTypes[13].OneofWrappers = []any{
+		(*OutputFrame_Header)(nil),
+		(*OutputFrame_Chunk)(nil),
+		(*OutputFrame_Terminal)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_ferret_wire_v1_runtime_proto_rawDesc), len(file_ferret_wire_v1_runtime_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   13,
+			NumMessages:   16,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

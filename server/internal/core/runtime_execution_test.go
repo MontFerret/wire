@@ -12,8 +12,8 @@ import (
 )
 
 func TestRunUsesBorrowedRuntimeWithoutPlan(t *testing.T) {
-	hosted := &spyRuntime{run: func(_ context.Context, _ api.Source, options sessionOptions) (*api.Output, error) {
-		return &api.Output{ContentType: options.contentType, Content: []byte("direct")}, nil
+	hosted := &spyRuntime{run: func(_ context.Context, _ api.Source, options sessionOptions) (*api.Content, error) {
+		return &api.Content{Metadata: api.Metadata{ContentType: options.contentType}, Data: []byte("direct")}, nil
 	}}
 	connection := newTestConnection(t, hosted)
 
@@ -32,7 +32,7 @@ func TestRunUsesBorrowedRuntimeWithoutPlan(t *testing.T) {
 
 	terminal := waitExecution(t, connection, run.ID)
 	if terminal.State != wireexecution.StateCompleted || terminal.Output == nil ||
-		terminal.Output.ContentType != "text/plain" || string(terminal.Output.Content) != "direct" {
+		terminal.Output.Metadata.ContentType != "text/plain" || string(terminal.Output.Data) != "direct" {
 		t.Fatalf("unexpected direct runtime execution: %#v", terminal)
 	}
 
@@ -58,7 +58,7 @@ func TestRunUsesBorrowedRuntimeWithoutPlan(t *testing.T) {
 }
 
 func TestRunPanicIsContainedAsInternalFailure(t *testing.T) {
-	hosted := &spyRuntime{run: func(context.Context, api.Source, sessionOptions) (*api.Output, error) {
+	hosted := &spyRuntime{run: func(context.Context, api.Source, sessionOptions) (*api.Content, error) {
 		panic("runtime secret")
 	}}
 	connection := newTestConnection(t, hosted)

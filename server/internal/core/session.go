@@ -99,8 +99,8 @@ func (s *Session) Execute(ctx context.Context) (*Execution, error) {
 	return created, nil
 }
 
-func (s *Session) run(ctx context.Context) (*api.Output, error) {
-	output, err := panicboundary.Call(func() (*api.Output, error) {
+func (s *Session) run(ctx context.Context) (api.Output, error) {
+	output, err := panicboundary.Call(func() (api.Output, error) {
 		return s.session.Run(ctx)
 	})
 

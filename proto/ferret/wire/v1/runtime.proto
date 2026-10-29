@@ -42,12 +42,17 @@ message ConnectResponse {
   // Bytes preserve opaque values without requiring valid UTF-8.
   // Presence is required by alpha.20 peers; an empty but present value is valid.
   optional bytes runtime_version = 6;
+  // output_framing_version must equal the requested, supported version (currently 1).
+  uint32 output_framing_version = 7;
 }
 
 // ConnectRequest has no transport- or client-identity fields.
 message ConnectRequest {
   reserved 1;
   reserved "client_identity";
+
+  // Version 1 is required; incompatible peers fail before allocating a connection.
+  uint32 output_framing_version = 2;
 }
 
 message CloseConnectionRequest {
@@ -115,13 +120,41 @@ message DiagnosticSet {
   repeated Diagnostic diagnostics = 1;
 }
 
-// Output is the Unified API encoded output contract. Wire does not expose runtime values.
+// Output describes detached debugger content. Presence is independent of its length.
+// Its bytes follow the semantic envelope as OutputFrame messages.
 message Output {
   reserved "data";
 
+  string content_type = 1 [deprecated = true];
+  bytes content = 2 [deprecated = true];
+  OutputMetadata metadata = 3;
+}
+
+// OutputMetadata describes the complete encoded payload, including for partial results.
+message OutputMetadata {
   string content_type = 1;
-  // content is already encoded by the runtime using content_type.
-  bytes content = 2;
+  int64 length = 2;
+  bool length_known = 3;
+}
+
+// OutputFrame is transport framing, never an execution or debugger event.
+// Each transfer has one header, zero or more chunks, and exactly one terminal.
+// No chunks means absent content; an empty chunk establishes present empty content.
+message OutputFrame {
+  oneof frame {
+    OutputMetadata header = 1;
+    bytes chunk = 2;
+    OutputTerminal terminal = 3;
+  }
+}
+
+// OutputTerminal commits delivery independently of the encoded representation.
+// Failure and context identity can coexist with already delivered content.
+message OutputTerminal {
+  uint64 transferred_bytes = 1;
+  Failure failure = 2;
+  bool cancelled = 3;
+  bool deadline_exceeded = 4;
 }
 
 // Failure is a sanitized asynchronous runtime failure.

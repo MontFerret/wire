@@ -14,6 +14,7 @@ import (
 
 	"github.com/MontFerret/api"
 	"github.com/MontFerret/wire/client"
+	"github.com/MontFerret/wire/internal/testoutput"
 	"github.com/MontFerret/wire/server/internal/core"
 )
 
@@ -21,7 +22,7 @@ type (
 	managedRuntime struct {
 		api.Runtime
 		version       func(context.Context) (api.Version, error)
-		run           func(context.Context) (*api.Output, error)
+		run           func(context.Context) (*api.Content, error)
 		compile       func(context.Context) (api.Plan, error)
 		plan          *managedPlan
 		shutdownError error
@@ -61,15 +62,20 @@ func (r *managedRuntime) Version(ctx context.Context) (api.Version, error) {
 
 	return api.Version("managed-test"), ctx.Err()
 }
-func (r *managedRuntime) Run(ctx context.Context, _ api.Source, _ ...api.SessionOption) (*api.Output, error) {
-	r.calls.Add(1)
+func (r *managedRuntime) Run(ctx context.Context, _ api.Source, _ ...api.SessionOption) (api.Output, error) {
+	content, terminalErr := func() (*api.Content, error) {
+		r.calls.Add(1)
 
-	if r.run != nil {
-		return r.run(ctx)
-	}
+		if r.run != nil {
+			return r.run(ctx)
+		}
 
-	return &api.Output{ContentType: "application/json", Content: []byte("[1]")}, ctx.Err()
+		return &api.Content{Metadata: api.Metadata{ContentType: "application/json"}, Data: []byte("[1]")}, ctx.Err()
+	}()
+
+	return testoutput.New(ctx, content, terminalErr), nil
 }
+
 func (r *managedRuntime) Compile(ctx context.Context, _ api.Source, _ ...api.PlanOption) (api.Plan, error) {
 	r.calls.Add(1)
 

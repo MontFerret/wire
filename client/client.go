@@ -11,6 +11,7 @@ import (
 
 	"github.com/MontFerret/api"
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
+	"github.com/MontFerret/wire/internal/outputstream"
 	"github.com/MontFerret/wire/pkg/failure"
 )
 
@@ -90,7 +91,7 @@ func newConnection(ctx context.Context, connection grpc.ClientConnInterface, tra
 		return nil, err
 	}
 
-	stream, err := client.runtimeClient.Connect(streamCtx, &wirev1.ConnectRequest{})
+	stream, err := client.runtimeClient.Connect(streamCtx, &wirev1.ConnectRequest{OutputFramingVersion: outputstream.Version})
 	if err != nil {
 		return nil, errors.Join(ctx.Err(), decodeError(err))
 	}
@@ -104,7 +105,7 @@ func newConnection(ctx context.Context, connection grpc.ClientConnInterface, tra
 
 	client.connectionID = response.GetConnectionId().GetValue()
 	if client.connectionID == "" || response.GetProtocol() == nil ||
-		response.GetProtocol().GetName() == "" || response.GetProtocol().GetVersion() == "" || response.RuntimeVersion == nil {
+		response.GetProtocol().GetName() == "" || response.GetProtocol().GetVersion() == "" || response.RuntimeVersion == nil || response.GetOutputFramingVersion() != outputstream.Version {
 		return nil, errors.Join(ctx.Err(), errors.New("Wire server returned an invalid Connect handshake"))
 	}
 

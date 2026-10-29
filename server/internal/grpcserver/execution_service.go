@@ -12,6 +12,7 @@ import (
 type ExecutionService struct {
 	wirev1.UnimplementedExecutionServiceServer
 	connections *core.ConnectionRegistry
+	maxOutbound int
 }
 
 var _ wirev1.ExecutionServiceServer = (*ExecutionService)(nil)

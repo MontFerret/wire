@@ -8,6 +8,7 @@ import (
 
 	"github.com/MontFerret/api"
 	"github.com/MontFerret/wire/client"
+	"github.com/MontFerret/wire/internal/testoutput"
 	"github.com/MontFerret/wire/test/integration/harness"
 )
 
@@ -163,8 +164,8 @@ func TestCompileOptionsApplyOnceBeforeDispatch(t *testing.T) {
 
 func TestReusablePlanAndDurableSessions(t *testing.T) {
 	h := harness.New(t, harness.WithBehavior(harness.RuntimeBehavior{Plan: harness.PlanBehavior{Session: func(options harness.SessionOptions) harness.SessionBehavior {
-		return harness.SessionBehavior{Run: func(context.Context, int) (*api.Output, error) {
-			return &api.Output{ContentType: options.ContentType, Content: []byte(options.Params["input"].(string))}, nil
+		return harness.SessionBehavior{Run: func(context.Context, int) (*api.Content, error) {
+			return &api.Content{Metadata: api.Metadata{ContentType: options.ContentType}, Data: []byte(options.Params["input"].(string))}, nil
 		}}
 	}}}))
 
@@ -188,8 +189,8 @@ func TestReusablePlanAndDurableSessions(t *testing.T) {
 		sessions = append(sessions, session)
 
 		for range 2 {
-			output, err := session.Run(h.Context())
-			if err != nil || string(output.Content) != value || output.ContentType != "text/plain" {
+			output, err := testoutput.Collect(session.Run(h.Context()))
+			if err != nil || string(output.Data) != value || output.Metadata.ContentType != "text/plain" {
 				t.Fatalf("durable output=%+v err=%v", output, err)
 			}
 		}
@@ -209,8 +210,8 @@ func TestReusablePlanAndDurableSessions(t *testing.T) {
 	}
 
 	for index, session := range sessions {
-		output, err := session.Run(h.Context())
-		if err != nil || string(output.Content) != []string{"first", "second", "third"}[index] {
+		output, err := testoutput.Collect(session.Run(h.Context()))
+		if err != nil || string(output.Data) != []string{"first", "second", "third"}[index] {
 			t.Fatalf("later session creation changed an earlier session's parameters: %+v, %v", output, err)
 		}
 	}
@@ -223,11 +224,11 @@ func TestReusablePlanAndDurableSessions(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := sessions[0].Run(h.Context()); !errors.Is(err, client.ErrClosed) {
+	if _, err := testoutput.Collect(sessions[0].Run(h.Context())); !errors.Is(err, client.ErrClosed) {
 		t.Fatalf("Run after Close: %v", err)
 	}
 
-	if _, err := sessions[1].Run(h.Context()); err != nil {
+	if _, err := testoutput.Collect(sessions[1].Run(h.Context())); err != nil {
 		t.Fatalf("sibling session invalidated: %v", err)
 	}
 

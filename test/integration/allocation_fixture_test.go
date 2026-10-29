@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/MontFerret/api"
+	"github.com/MontFerret/wire/internal/testoutput"
 	"github.com/MontFerret/wire/test/integration/harness"
 )
 
@@ -124,11 +125,11 @@ func (f *runtimeAllocationFixture) allocate(ctx context.Context, cancelInOption 
 
 		return session.Close, nil
 	case harness.RunSession:
-		_, err := f.session.Run(ctx)
+		_, err := testoutput.Collect(f.session.Run(ctx))
 
 		return nil, err
 	default:
-		_, err := f.remote.Run(ctx, api.Source{Content: "RETURN 1"}, sessionOptions...)
+		_, err := testoutput.Collect(f.remote.Run(ctx, api.Source{Content: "RETURN 1"}, sessionOptions...))
 
 		return nil, err
 	}

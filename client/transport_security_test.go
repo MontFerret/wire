@@ -17,6 +17,7 @@ import (
 
 	"github.com/MontFerret/api"
 	"github.com/MontFerret/wire/client"
+	"github.com/MontFerret/wire/internal/testoutput"
 	"github.com/MontFerret/wire/server"
 	"github.com/MontFerret/wire/test/integration/harness"
 	"github.com/MontFerret/wire/test/securityfixture"
@@ -109,7 +110,7 @@ func TestOwningConstructorTransportSecurity(t *testing.T) {
 
 						h.Own(remote)
 
-						if _, err := remote.Run(h.Context(), api.NewAnonymousSource("RETURN 1")); err != nil {
+						if _, err := testoutput.Collect(remote.Run(h.Context(), api.NewAnonymousSource("RETURN 1"))); err != nil {
 							t.Fatal(err)
 						}
 
@@ -118,7 +119,7 @@ func TestOwningConstructorTransportSecurity(t *testing.T) {
 						}
 					}
 
-					if _, err := h.Runtime().Run(h.Context(), api.NewAnonymousSource("RETURN 2")); err != nil {
+					if _, err := testoutput.Collect(h.Runtime().Run(h.Context(), api.NewAnonymousSource("RETURN 2"))); err != nil {
 						t.Fatalf("constructor failure damaged independent channel: %v", err)
 					}
 				})
@@ -199,7 +200,7 @@ func TestOwningCredentialsRefreshForOperationsStreamsAndCleanup(t *testing.T) {
 		server.WithTransportCredentials(credentials.NewTLS(certs.ServerConfig(true))),
 		server.WithUnaryInterceptors(unary), server.WithStreamInterceptors(stream),
 	))
-	if _, err := h.Runtime().Run(h.Context(), api.NewAnonymousSource("RETURN 1")); err != nil {
+	if _, err := testoutput.Collect(h.Runtime().Run(h.Context(), api.NewAnonymousSource("RETURN 1"))); err != nil {
 		t.Fatal(err)
 	}
 
@@ -221,7 +222,7 @@ func TestOwningCredentialsRefreshForOperationsStreamsAndCleanup(t *testing.T) {
 
 	h.Own(session)
 
-	if _, err := session.Run(h.Context()); err != nil {
+	if _, err := testoutput.Collect(session.Run(h.Context())); err != nil {
 		t.Fatal(err)
 	}
 
@@ -254,7 +255,7 @@ func TestOwningCredentialsRefreshForOperationsStreamsAndCleanup(t *testing.T) {
 		"/ferret.wire.v1.RuntimeService/Run",
 		"/ferret.wire.v1.PlanService/CompileDebug",
 		"/ferret.wire.v1.SessionService/CreateSession",
-		"/ferret.wire.v1.ExecutionService/WatchExecution",
+		"/ferret.wire.v1.ExecutionService/ReadExecutionOutput",
 		"/ferret.wire.v1.DebugService/RunCommand",
 		"/ferret.wire.v1.ExecutionService/ReleaseExecution",
 		"/ferret.wire.v1.DebugService/ReleaseDebugSession",

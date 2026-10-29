@@ -40,36 +40,38 @@ type (
 	}
 
 	watchFailure struct {
-		err   error
-		after <-chan struct{}
+		frames int
+		err    error
+		after  <-chan struct{}
 	}
 
 	failingStream struct {
 		grpc.ClientStream
-		cancel   context.CancelFunc
-		err      error
-		received bool
-		after    <-chan struct{}
+		cancel    context.CancelFunc
+		err       error
+		remaining int
+		after     <-chan struct{}
 	}
 )
 
 // Operations identify intercepted RPCs; outcomes describe delivery after server commitment.
 const (
-	Compile          Operation = "compile"
-	CompileDebug     Operation = "compile debug"
-	CreateSession    Operation = "session"
-	CreateDebugger   Operation = "debug session"
-	RunSession       Operation = "session run"
-	RunRuntime       Operation = "runtime run"
-	ReleasePlan      Operation = "release plan"
-	ReleaseSession   Operation = "release session"
-	ReleaseDebugger  Operation = "release debugger"
-	ReleaseExecution Operation = "release execution"
-	CloseRuntime     Operation = "close runtime"
-	CancelExecution  Operation = "cancel execution"
-	WatchExecution   Operation = "watch execution"
-	WatchDebugger    Operation = "watch debugger"
-	RunDebugCommand  Operation = "run debug command"
+	Compile             Operation = "compile"
+	CompileDebug        Operation = "compile debug"
+	CreateSession       Operation = "session"
+	CreateDebugger      Operation = "debug session"
+	RunSession          Operation = "session run"
+	RunRuntime          Operation = "runtime run"
+	ReleasePlan         Operation = "release plan"
+	ReleaseSession      Operation = "release session"
+	ReleaseDebugger     Operation = "release debugger"
+	ReleaseExecution    Operation = "release execution"
+	CloseRuntime        Operation = "close runtime"
+	CancelExecution     Operation = "cancel execution"
+	WatchExecution      Operation = "watch execution"
+	ReadExecutionOutput Operation = "read execution output"
+	WatchDebugger       Operation = "watch debugger"
+	RunDebugCommand     Operation = "run debug command"
 
 	Deliver         Outcome = "success"
 	LostDeadline    Outcome = "deadline"
@@ -105,6 +107,8 @@ func operationFor(method string) Operation {
 		return CloseRuntime
 	case wirev1.ExecutionService_CancelExecution_FullMethodName:
 		return CancelExecution
+	case wirev1.ExecutionService_ReadExecutionOutput_FullMethodName:
+		return ReadExecutionOutput
 	case wirev1.ExecutionService_WatchExecution_FullMethodName:
 		return WatchExecution
 	case wirev1.DebugService_RunCommand_FullMethodName:
@@ -212,11 +216,11 @@ func (f *Faults) NewStream(ctx context.Context, description *grpc.StreamDesc, me
 		return nil, err
 	}
 
-	return &failingStream{ClientStream: stream, cancel: cancel, err: failure.err, after: failure.after, received: operationFor(method) == RunDebugCommand}, nil
+	return &failingStream{ClientStream: stream, cancel: cancel, err: failure.err, after: failure.after, remaining: failure.frames}, nil
 }
 
 func (s *failingStream) RecvMsg(message any) error {
-	if s.received {
+	if s.remaining == 0 {
 		if s.after != nil {
 			select {
 			case <-s.after:
@@ -230,7 +234,7 @@ func (s *failingStream) RecvMsg(message any) error {
 		return s.err
 	}
 
-	s.received = true
+	s.remaining--
 
 	err := s.ClientStream.RecvMsg(message)
 	if err != nil {
@@ -258,7 +262,13 @@ func (f *Faults) FailResponse(operation Operation, err error) {
 // the next receive. A nil signal injects the failure immediately.
 func (f *Faults) EndWatch(operation Operation, err error, after <-chan struct{}) {
 	f.mu.Lock()
-	f.watchFailures[operation] = watchFailure{err: err, after: after}
+	frames := 1
+
+	if operation == RunDebugCommand || operation == ReadExecutionOutput {
+		frames = 0
+	}
+
+	f.watchFailures[operation] = watchFailure{err: err, after: after, frames: frames}
 	f.mu.Unlock()
 }
 
@@ -294,4 +304,11 @@ func (f *Faults) reset() {
 	clear(f.failures)
 	clear(f.responseFailures)
 	clear(f.watchFailures)
+}
+
+// InterruptStream fails after exactly frames successfully forwarded messages.
+func (f *Faults) InterruptStream(operation Operation, frames int, err error) {
+	f.mu.Lock()
+	f.watchFailures[operation] = watchFailure{err: err, frames: frames}
+	f.mu.Unlock()
 }

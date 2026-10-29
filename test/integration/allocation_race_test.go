@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/MontFerret/wire/internal/testoutput"
 	"github.com/MontFerret/wire/test/integration/harness"
 )
 
@@ -75,7 +76,7 @@ func TestRuntimeAllocationCancellationAfterCommitReleasesOnlyNewResource(t *test
 			}
 
 			if operation.name == "session run" {
-				if _, err := f.session.Run(harness.Context(t)); err != nil {
+				if _, err := testoutput.Collect(f.session.Run(harness.Context(t))); err != nil {
 					t.Fatalf("durable Session was not reusable after cancellation: %v", err)
 				}
 			}

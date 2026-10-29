@@ -44,7 +44,8 @@ type (
 	}
 
 	executionResult struct {
-		ID ExecutionID
+		Output *api.Content
+		ID     ExecutionID
 		wireexecution.Snapshot
 	}
 	debugResult struct {

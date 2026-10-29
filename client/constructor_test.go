@@ -10,6 +10,7 @@ import (
 
 	"github.com/MontFerret/api"
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
+	"github.com/MontFerret/wire/internal/testoutput"
 )
 
 func TestFromFailureReturnsNilRuntimeAndClosesHandshake(t *testing.T) {
@@ -18,13 +19,15 @@ func TestFromFailureReturnsNilRuntimeAndClosesHandshake(t *testing.T) {
 		handshake *wirev1.ConnectResponse
 		err       error
 	}{
+		{name: "missing framing version", handshake: &wirev1.ConnectResponse{RuntimeVersion: []byte{}, ConnectionId: &wirev1.ConnectionId{Value: "connection"}, Protocol: &wirev1.ProtocolInfo{Name: "ferret.wire", Version: "v1"}}},
+		{name: "unsupported framing version", handshake: &wirev1.ConnectResponse{OutputFramingVersion: 2, RuntimeVersion: []byte{}, ConnectionId: &wirev1.ConnectionId{Value: "connection"}, Protocol: &wirev1.ProtocolInfo{Name: "ferret.wire", Version: "v1"}}},
 		{name: "RPC failure", err: status.Error(codes.Unavailable, "handshake unavailable")},
-		{name: "empty handshake", handshake: &wirev1.ConnectResponse{}},
-		{name: "missing ID", handshake: &wirev1.ConnectResponse{RuntimeVersion: []byte{}, Protocol: &wirev1.ProtocolInfo{Name: "ferret.wire", Version: "v1"}}},
-		{name: "missing protocol", handshake: &wirev1.ConnectResponse{RuntimeVersion: []byte{}, ConnectionId: &wirev1.ConnectionId{Value: "connection"}}},
-		{name: "missing name", handshake: &wirev1.ConnectResponse{RuntimeVersion: []byte{}, ConnectionId: &wirev1.ConnectionId{Value: "connection"}, Protocol: &wirev1.ProtocolInfo{Version: "v1"}}},
-		{name: "missing protocol version", handshake: &wirev1.ConnectResponse{RuntimeVersion: []byte{}, ConnectionId: &wirev1.ConnectionId{Value: "connection"}, Protocol: &wirev1.ProtocolInfo{Name: "ferret.wire"}}},
-		{name: "missing runtime version", handshake: &wirev1.ConnectResponse{ConnectionId: &wirev1.ConnectionId{Value: "connection"}, Protocol: &wirev1.ProtocolInfo{Name: "ferret.wire", Version: "v1"}, RuntimeIdentity: &wirev1.RuntimeIdentity{Name: "host", Version: "host-7.1"}}},
+		{name: "empty handshake", handshake: &wirev1.ConnectResponse{OutputFramingVersion: 1}},
+		{name: "missing ID", handshake: &wirev1.ConnectResponse{OutputFramingVersion: 1, RuntimeVersion: []byte{}, Protocol: &wirev1.ProtocolInfo{Name: "ferret.wire", Version: "v1"}}},
+		{name: "missing protocol", handshake: &wirev1.ConnectResponse{OutputFramingVersion: 1, RuntimeVersion: []byte{}, ConnectionId: &wirev1.ConnectionId{Value: "connection"}}},
+		{name: "missing name", handshake: &wirev1.ConnectResponse{OutputFramingVersion: 1, RuntimeVersion: []byte{}, ConnectionId: &wirev1.ConnectionId{Value: "connection"}, Protocol: &wirev1.ProtocolInfo{Version: "v1"}}},
+		{name: "missing protocol version", handshake: &wirev1.ConnectResponse{OutputFramingVersion: 1, RuntimeVersion: []byte{}, ConnectionId: &wirev1.ConnectionId{Value: "connection"}, Protocol: &wirev1.ProtocolInfo{Name: "ferret.wire"}}},
+		{name: "missing runtime version", handshake: &wirev1.ConnectResponse{OutputFramingVersion: 1, ConnectionId: &wirev1.ConnectionId{Value: "connection"}, Protocol: &wirev1.ProtocolInfo{Name: "ferret.wire", Version: "v1"}, RuntimeIdentity: &wirev1.RuntimeIdentity{Name: "host", Version: "host-7.1"}}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			ended := make(chan struct{})
@@ -77,8 +80,8 @@ func TestFromBorrowsTransportAndDetachesConstructionContext(t *testing.T) {
 	})
 	cancel()
 
-	output, err := remote.Run(testClientContext(t), api.NewAnonymousSource("RETURN 1"))
-	if err != nil || string(output.Content) != "done" {
+	output, err := testoutput.Collect(remote.Run(testClientContext(t), api.NewAnonymousSource("RETURN 1")))
+	if err != nil || string(output.Data) != "done" {
 		t.Fatalf("construction cancellation affected runtime: %v, %v", output, err)
 	}
 

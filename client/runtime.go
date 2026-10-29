@@ -34,9 +34,9 @@ func (r *remoteRuntime) Version(ctx context.Context) (api.Version, error) {
 	return r.client.runtimeVersion, nil
 }
 
-// Run invokes the hosted api.Runtime.Run operation once and releases the temporary
-// Wire execution used to preserve cancellation, output, and failure semantics.
-func (r *remoteRuntime) Run(ctx context.Context, src api.Source, options ...api.SessionOption) (output *api.Output, resultErr error) {
+// Run invokes hosted preparation once and transfers the execution and runtime
+// reference to the returned output. Consumption or Close finalizes those owners.
+func (r *remoteRuntime) Run(ctx context.Context, src api.Source, options ...api.SessionOption) (output api.Output, resultErr error) {
 	if r == nil || r.client == nil {
 		return nil, ErrClosed
 	}
@@ -45,7 +45,12 @@ func (r *remoteRuntime) Run(ctx context.Context, src api.Source, options ...api.
 		return nil, err
 	}
 
-	defer func() { resultErr = errors.Join(resultErr, r.drop()) }()
+	transferred := false
+	defer func() {
+		if !transferred {
+			resultErr = errors.Join(resultErr, r.drop())
+		}
+	}()
 
 	if err := runtimeContextError(ctx); err != nil {
 		return nil, err
@@ -68,7 +73,14 @@ func (r *remoteRuntime) Run(ctx context.Context, src api.Source, options ...api.
 		return nil, r.client.reclaimAllocation(ctx, err)
 	}
 
-	return execution.waitAndRelease(ctx)
+	result, err := execution.openOutput(ctx, r.drop)
+	if err != nil {
+		return nil, err
+	}
+
+	transferred = true
+
+	return result, nil
 }
 
 // Compile creates a reusable remote Universal API plan.

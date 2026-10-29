@@ -28,7 +28,7 @@ type (
 		Location         *source.Range
 		HitBreakpointIDs []apidebugger.BreakpointID
 		Depth            int
-		Output           *api.Output
+		Output           *api.Content
 		Failure          *failure.Failure
 		CommandResult    *CommandResult
 	}

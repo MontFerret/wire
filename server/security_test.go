@@ -25,6 +25,7 @@ import (
 	"github.com/MontFerret/api"
 	"github.com/MontFerret/wire/client"
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
+	"github.com/MontFerret/wire/internal/testoutput"
 	"github.com/MontFerret/wire/test/securityfixture"
 )
 
@@ -166,7 +167,7 @@ func TestTransportCredentialsTLSAndMTLS(t *testing.T) {
 						t.Fatal(err)
 					}
 
-					if _, err := remote.Run(managedContext(t), api.NewAnonymousSource("RETURN 1")); err != nil {
+					if _, err := testoutput.Collect(remote.Run(managedContext(t), api.NewAnonymousSource("RETURN 1"))); err != nil {
 						t.Fatal(err)
 					}
 
@@ -189,7 +190,7 @@ func invokeRegisteredRPC(t testing.TB, conn *grpc.ClientConn, service string, me
 
 	full := "/" + service + "/" + method.Name
 	if !method.IsServerStream && !method.IsClientStream {
-		return conn.Invoke(ctx, full, &wirev1.ConnectRequest{}, &wirev1.ConnectRequest{})
+		return conn.Invoke(ctx, full, &wirev1.ConnectRequest{OutputFramingVersion: 1}, &wirev1.ConnectRequest{OutputFramingVersion: 1})
 	}
 
 	stream, err := conn.NewStream(ctx, &grpc.StreamDesc{ServerStreams: method.IsServerStream, ClientStreams: method.IsClientStream}, full)
@@ -197,7 +198,7 @@ func invokeRegisteredRPC(t testing.TB, conn *grpc.ClientConn, service string, me
 		return err
 	}
 
-	if err := stream.SendMsg(&wirev1.ConnectRequest{}); err != nil && !errors.Is(err, io.EOF) {
+	if err := stream.SendMsg(&wirev1.ConnectRequest{OutputFramingVersion: 1}); err != nil && !errors.Is(err, io.EOF) {
 		return err
 	}
 
@@ -205,7 +206,7 @@ func invokeRegisteredRPC(t testing.TB, conn *grpc.ClientConn, service string, me
 		return err
 	}
 
-	return stream.RecvMsg(&wirev1.ConnectRequest{})
+	return stream.RecvMsg(&wirev1.ConnectRequest{OutputFramingVersion: 1})
 }
 
 func TestHostInterceptorsRejectOrRecoverAcrossEveryService(t *testing.T) {
@@ -374,7 +375,7 @@ func TestTokenAuthenticationCoversOperationsAfterConnect(t *testing.T) {
 			token.value.Store("Bearer test-token")
 			conn := managedClient(t, listener, grpc.WithTransportCredentials(credentials.NewTLS(certs.ClientConfig(false))), grpc.WithPerRPCCredentials(token))
 
-			connect, err := wirev1.NewRuntimeServiceClient(conn).Connect(managedContext(t), &wirev1.ConnectRequest{})
+			connect, err := wirev1.NewRuntimeServiceClient(conn).Connect(managedContext(t), &wirev1.ConnectRequest{OutputFramingVersion: 1})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -406,8 +407,8 @@ func TestTokenAuthenticationCoversOperationsAfterConnect(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			output, err := remote.Run(managedContext(t), api.NewAnonymousSource("RETURN 1"))
-			if err != nil || string(output.Content) != "[1]" {
+			output, err := testoutput.Collect(remote.Run(managedContext(t), api.NewAnonymousSource("RETURN 1")))
+			if err != nil || string(output.Data) != "[1]" {
 				t.Fatalf("accepted operation: output=%v err=%v", output, err)
 			}
 
@@ -424,8 +425,8 @@ func TestHostMiddlewarePreservesMessageAndResourceLimits(t *testing.T) {
 	limits.MaxPlansPerConnection = 1
 	limits.MaxInboundMessageBytes = 256
 	limits.MaxOutboundMessageBytes = 256
-	runtime := &managedRuntime{plan: &managedPlan{}, run: func(context.Context) (*api.Output, error) {
-		return &api.Output{ContentType: "application/json", Content: []byte(strings.Repeat("x", 1024))}, nil
+	runtime := &managedRuntime{plan: &managedPlan{}, run: func(context.Context) (*api.Content, error) {
+		return &api.Content{Metadata: api.Metadata{ContentType: "application/json"}, Data: []byte(strings.Repeat("x", 1024))}, nil
 	}}
 	s := newManagedServer(t, runtime, WithLimits(limits), WithUnaryInterceptors(func(ctx context.Context, req any, _ *grpc.UnaryServerInfo, next grpc.UnaryHandler) (any, error) {
 		return next(ctx, req)
@@ -435,7 +436,7 @@ func TestHostMiddlewarePreservesMessageAndResourceLimits(t *testing.T) {
 	running := startManaged(t, s)
 	conn := managedClient(t, running.listener)
 
-	stream, err := wirev1.NewRuntimeServiceClient(conn).Connect(managedContext(t), &wirev1.ConnectRequest{})
+	stream, err := wirev1.NewRuntimeServiceClient(conn).Connect(managedContext(t), &wirev1.ConnectRequest{OutputFramingVersion: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -445,7 +446,7 @@ func TestHostMiddlewarePreservesMessageAndResourceLimits(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	other, err := wirev1.NewRuntimeServiceClient(conn).Connect(managedContext(t), &wirev1.ConnectRequest{})
+	other, err := wirev1.NewRuntimeServiceClient(conn).Connect(managedContext(t), &wirev1.ConnectRequest{OutputFramingVersion: 1})
 	if err == nil {
 		_, err = other.Recv()
 	}
@@ -479,8 +480,8 @@ func TestHostMiddlewarePreservesMessageAndResourceLimits(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := remote.Run(managedContext(t), api.NewAnonymousSource("RETURN 1")); status.Code(err) != codes.ResourceExhausted {
-		t.Fatalf("outbound message limit bypassed: %v", err)
+	if content, err := testoutput.Collect(remote.Run(managedContext(t), api.NewAnonymousSource("RETURN 1"))); err != nil || content == nil || len(content.Data) != 1024 {
+		t.Fatalf("chunked result failed under message limit: %v %v", content, err)
 	}
 
 	if err := remote.Close(); err != nil {

@@ -101,7 +101,7 @@ func New(runtime api.Runtime, options ...Option) (*Server, error) {
 	}
 
 	grpcServer := grpc.NewServer(grpcOptions...)
-	grpcserver.New(runtime, info, connections).Register(grpcServer)
+	grpcserver.New(runtime, info, connections, configured.limits.MaxOutboundMessageBytes).Register(grpcServer)
 
 	return &Server{
 		grpcServer: grpcServer, connections: connections,

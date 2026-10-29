@@ -5,11 +5,12 @@ import (
 	"sync"
 
 	"github.com/MontFerret/api"
+	"github.com/MontFerret/wire/internal/testoutput"
 )
 
 type spyRuntime struct {
 	mu                  sync.Mutex
-	run                 func(context.Context, api.Source, sessionOptions) (*api.Output, error)
+	run                 func(context.Context, api.Source, sessionOptions) (*api.Content, error)
 	compile             func(context.Context, api.Source, bool) (api.Plan, error)
 	runSources          []api.Source
 	runOptions          []sessionOptions
@@ -23,23 +24,27 @@ func (r *spyRuntime) Version(ctx context.Context) (api.Version, error) {
 	return api.Version("runtime-test"), ctx.Err()
 }
 
-func (r *spyRuntime) Run(ctx context.Context, src api.Source, options ...api.SessionOption) (*api.Output, error) {
-	configured, err := applySessionOptions(options)
-	if err != nil {
-		return nil, err
-	}
+func (r *spyRuntime) Run(ctx context.Context, src api.Source, options ...api.SessionOption) (api.Output, error) {
+	content, terminalErr := func() (*api.Content, error) {
+		configured, err := applySessionOptions(options)
+		if err != nil {
+			return nil, err
+		}
 
-	r.mu.Lock()
-	r.runSources = append(r.runSources, src)
-	r.runOptions = append(r.runOptions, configured.clone())
-	run := r.run
-	r.mu.Unlock()
+		r.mu.Lock()
+		r.runSources = append(r.runSources, src)
+		r.runOptions = append(r.runOptions, configured.clone())
+		run := r.run
+		r.mu.Unlock()
 
-	if run == nil {
-		return nil, nil
-	}
+		if run == nil {
+			return nil, nil
+		}
 
-	return run(ctx, src, configured)
+		return run(ctx, src, configured)
+	}()
+
+	return testoutput.New(ctx, content, terminalErr), nil
 }
 
 func (r *spyRuntime) Compile(ctx context.Context, src api.Source, options ...api.PlanOption) (api.Plan, error) {

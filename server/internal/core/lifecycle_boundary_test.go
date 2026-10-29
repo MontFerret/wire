@@ -237,7 +237,7 @@ func TestConcurrentPlanReleaseSharesResultAndClosesOnce(t *testing.T) {
 func TestResourceLimitsAndConnectionIsolationRemainWireOwned(t *testing.T) {
 	plan := &spyPlan{
 		newSession: func(context.Context, sessionOptions) (api.Session, error) {
-			return &spySession{run: func(ctx context.Context) (*api.Output, error) {
+			return &spySession{run: func(ctx context.Context) (*api.Content, error) {
 				<-ctx.Done()
 
 				return nil, ctx.Err()
@@ -457,7 +457,7 @@ func TestConnectionCloseCancelsExecutionAndReleasesWireResources(t *testing.T) {
 	started := make(chan struct{})
 	finished := make(chan struct{})
 	var finishOnce sync.Once
-	session := &spySession{run: func(ctx context.Context) (*api.Output, error) {
+	session := &spySession{run: func(ctx context.Context) (*api.Content, error) {
 		close(started)
 		<-ctx.Done()
 		finishOnce.Do(func() { close(finished) })
@@ -520,8 +520,8 @@ func TestConnectionCloseCancelsExecutionAndReleasesWireResources(t *testing.T) {
 
 func TestSessionClosePanicIsContainedAndAttemptedOnce(t *testing.T) {
 	session := &spySession{
-		run: func(context.Context) (*api.Output, error) {
-			return &api.Output{ContentType: "application/json", Content: []byte("1")}, nil
+		run: func(context.Context) (*api.Content, error) {
+			return &api.Content{Metadata: api.Metadata{ContentType: "application/json"}, Data: []byte("1")}, nil
 		},
 		close: func() error { panic("close secret") },
 	}
@@ -552,8 +552,8 @@ func TestSessionClosePanicIsContainedAndAttemptedOnce(t *testing.T) {
 		t.Fatalf("panicking session close attempted %d times", closeCalls)
 	}
 
-	if err := connection.ReleaseExecution(testContext(t), execution.ID); err != nil {
-		t.Fatal(err)
+	if err := connection.ReleaseExecution(testContext(t), execution.ID); err == nil {
+		t.Fatal("release lost the retained cleanup panic")
 	}
 }
 
@@ -614,7 +614,7 @@ func TestPlanReleaseSettlesChildrenBeforeClosingAPIPlan(t *testing.T) {
 	}
 	executionStarted := make(chan struct{})
 	executionSession := &spySession{
-		run: func(ctx context.Context) (*api.Output, error) {
+		run: func(ctx context.Context) (*api.Content, error) {
 			close(executionStarted)
 			<-ctx.Done()
 
@@ -704,7 +704,7 @@ func TestDebugUsesUnifiedSessionAndPreservesWireState(t *testing.T) {
 		resume: func(context.Context) (*debugger.Event, error) {
 			return &debugger.Event{
 				Reason: debugger.ReasonCompleted,
-				Output: &api.Output{ContentType: "application/json", Content: debugContent},
+				Output: &api.Content{Metadata: api.Metadata{ContentType: "application/json"}, Data: debugContent},
 			}, nil
 		},
 		frames: []debugger.Frame{{
@@ -804,15 +804,15 @@ func TestDebugUsesUnifiedSessionAndPreservesWireState(t *testing.T) {
 	}
 
 	completed := waitDebugState(t, connection, opened.ID, wiredebugger.StateCompleted)
-	if completed.Output == nil || completed.Output.ContentType != "application/json" || string(completed.Output.Content) != "7" {
+	if completed.Output == nil || completed.Output.Metadata.ContentType != "application/json" || string(completed.Output.Data) != "7" {
 		t.Fatalf("unexpected debug output: %#v", completed.Output)
 	}
 
 	debugContent[0] = '8'
-	completed.Output.Content[0] = '9'
+	completed.Output.Data[0] = '9'
 
 	retainedCompleted := waitDebugState(t, connection, opened.ID, wiredebugger.StateCompleted)
-	if retainedCompleted.Output == nil || string(retainedCompleted.Output.Content) != "7" {
+	if retainedCompleted.Output == nil || string(retainedCompleted.Output.Data) != "7" {
 		t.Fatalf("debug snapshot did not retain owned output bytes: %#v", retainedCompleted.Output)
 	}
 

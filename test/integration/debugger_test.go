@@ -35,7 +35,7 @@ func TestDebuggerRoundTrip(t *testing.T) {
 					return &debugger.Event{Reason: debugger.ReasonPause, Location: location, Depth: 2}, nil
 				}
 
-				return &debugger.Event{Reason: debugger.ReasonCompleted, Output: &api.Output{ContentType: "application/json", Content: []byte(`{"done":true}`)}}, nil
+				return &debugger.Event{Reason: debugger.ReasonCompleted, Output: &api.Content{Metadata: api.Metadata{ContentType: "application/json"}, Data: []byte(`{"done":true}`)}}, nil
 			case "StepOut":
 				return &debugger.Event{Reason: debugger.ReasonRuntimeError, Location: location, Depth: 1, Error: errors.New("hosted debugger secret")}, nil
 			default:
@@ -214,7 +214,7 @@ func TestDebuggerRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if !reflect.DeepEqual(completed, &debugger.Event{Reason: debugger.ReasonCompleted, Output: &api.Output{ContentType: "application/json", Content: []byte(`{"done":true}`)}}) {
+	if !reflect.DeepEqual(completed, &debugger.Event{Reason: debugger.ReasonCompleted, Output: &api.Content{Metadata: api.Metadata{ContentType: "application/json"}, Data: []byte(`{"done":true}`)}}) {
 		t.Fatalf("completion=%#v", completed)
 	}
 

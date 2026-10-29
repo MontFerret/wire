@@ -20,8 +20,8 @@ func Run(ctx context.Context, runtime api.Runtime, store *ResourceStore, source 
 	committed := false
 	defer func() { store.finishCreation(executionResource, nil, committed) }()
 
-	created := newExecution(store, nil, nil, func(runCtx context.Context) (*api.Output, error) {
-		output, err := panicboundary.Call(func() (*api.Output, error) {
+	created := newExecution(store, nil, nil, func(runCtx context.Context) (api.Output, error) {
+		output, err := panicboundary.Call(func() (api.Output, error) {
 			return runtime.Run(runCtx, source, options...)
 		})
 

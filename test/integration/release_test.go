@@ -8,6 +8,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/MontFerret/api"
+	"github.com/MontFerret/wire/internal/testoutput"
 	"github.com/MontFerret/wire/test/integration/harness"
 )
 
@@ -40,7 +41,7 @@ func TestRuntimeCompletedExecutionReleaseFailurePreservesParents(t *testing.T) {
 				fail(operation.release, nil)
 
 				if operation.name == "session run" {
-					_, err := f.session.Run(harness.Context(t))
+					_, err := testoutput.Collect(f.session.Run(harness.Context(t)))
 					if acknowledged && err != nil {
 						t.Fatalf("durable Session could not be reused after server committed release: %v", err)
 					}
@@ -56,12 +57,12 @@ func TestRuntimeCompletedExecutionReleaseFailurePreservesParents(t *testing.T) {
 						t.Fatalf("release failure invalidated Plan: %v", err)
 					}
 
-					if _, err := sibling.Run(harness.Context(t)); err != nil {
+					if _, err := testoutput.Collect(sibling.Run(harness.Context(t))); err != nil {
 						t.Fatalf("release failure prevented sibling execution: %v", err)
 					}
 				}
 
-				if _, err := f.remote.Run(harness.Context(t), api.Source{Content: "RETURN 3"}); err != nil {
+				if _, err := testoutput.Collect(f.remote.Run(harness.Context(t), api.Source{Content: "RETURN 3"})); err != nil {
 					t.Fatalf("release failure invalidated Runtime: %v", err)
 				}
 			})
@@ -118,11 +119,11 @@ func TestKnownResourceCloseFailurePreservesSiblings(t *testing.T) {
 
 				fail(operation.release, nil)
 
-				if _, err := sibling.Run(f.h.Context()); err != nil {
+				if _, err := testoutput.Collect(sibling.Run(f.h.Context())); err != nil {
 					t.Fatalf("known Close failure invalidated sibling: %v", err)
 				}
 
-				if _, err := f.remote.Run(f.h.Context(), api.Source{Content: "RETURN 3"}); err != nil {
+				if _, err := testoutput.Collect(f.remote.Run(f.h.Context(), api.Source{Content: "RETURN 3"})); err != nil {
 					t.Fatalf("known Close failure invalidated Runtime: %v", err)
 				}
 			})

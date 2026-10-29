@@ -11,9 +11,9 @@ type (
 
 	// Snapshot is the semantic state published for a remote execution.
 	Snapshot struct {
-		State   State
-		Output  *api.Output
-		Failure *failure.Failure
+		State    State
+		Metadata *api.Metadata
+		Failure  *failure.Failure
 	}
 
 	// Event carries an ordered execution snapshot.

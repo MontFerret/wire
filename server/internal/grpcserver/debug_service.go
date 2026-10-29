@@ -11,6 +11,7 @@ import (
 type DebugService struct {
 	wirev1.UnimplementedDebugServiceServer
 	connections *core.ConnectionRegistry
+	maxOutbound int
 }
 
 var _ wirev1.DebugServiceServer = (*DebugService)(nil)

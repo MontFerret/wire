@@ -19,6 +19,7 @@ import (
 
 	"github.com/MontFerret/api"
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
+	"github.com/MontFerret/wire/internal/testoutput"
 	"github.com/MontFerret/wire/pkg/failure"
 )
 
@@ -39,6 +40,7 @@ type (
 		mu                    sync.Mutex
 		handshake             *wirev1.ConnectResponse
 		connectErr            error
+		outputFrames          []*wirev1.OutputFrame
 		connectDone           chan struct{}
 		plans                 int
 		sessions              int
@@ -72,7 +74,7 @@ func (s *clientTestServer) Connect(_ *wirev1.ConnectRequest, stream wirev1.Runti
 
 	response := s.handshake
 	if response == nil {
-		response = &wirev1.ConnectResponse{
+		response = &wirev1.ConnectResponse{OutputFramingVersion: 1,
 			ConnectionId:   &wirev1.ConnectionId{Value: "connection"},
 			Protocol:       &wirev1.ProtocolInfo{Name: "ferret.wire", Version: "v1"},
 			RuntimeVersion: []byte{},
@@ -281,8 +283,8 @@ func TestRuntimeRunOwnsItsExecution(t *testing.T) {
 		}}}}
 		client := openTestRuntime(t, startClientTestServer(t, server))
 
-		output, err := client.Run(testClientContext(t), api.Source{Content: "RETURN 1"}, api.WithOutputContentType("application/json"))
-		if err != nil || string(output.Content) != `{"value":1}` {
+		output, err := testoutput.Collect(client.Run(testClientContext(t), api.Source{Content: "RETURN 1"}, api.WithOutputContentType("application/json")))
+		if err != nil || string(output.Data) != `{"value":1}` {
 			t.Fatalf("unexpected Runtime.Run result: %#v, %v", output, err)
 		}
 
@@ -323,7 +325,7 @@ func TestRuntimeRunOwnsItsExecution(t *testing.T) {
 		server := &clientTestServer{executeErr: status.Error(codes.InvalidArgument, "execute failed")}
 		client := openTestRuntime(t, startClientTestServer(t, server))
 
-		_, err := client.Run(testClientContext(t), api.Source{Content: "RETURN 1"})
+		_, err := testoutput.Collect(client.Run(testClientContext(t), api.Source{Content: "RETURN 1"}))
 
 		var wireErr *Error
 		if !errors.As(err, &wireErr) || wireErr.Message != "execute failed" {
@@ -351,7 +353,7 @@ func TestRuntimeRunOwnsItsExecution(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		result := make(chan error, 1)
 		go func() {
-			_, err := client.Run(ctx, api.Source{Content: "RETURN 1"})
+			_, err := testoutput.Collect(client.Run(ctx, api.Source{Content: "RETURN 1"}))
 			result <- err
 		}()
 		select {
@@ -390,7 +392,7 @@ func TestRuntimeRunOwnsItsExecution(t *testing.T) {
 		}}}
 		client := openTestRuntime(t, startClientTestServer(t, server))
 
-		_, err := client.Run(testClientContext(t), api.Source{Content: "RETURN 1"})
+		_, err := testoutput.Collect(client.Run(testClientContext(t), api.Source{Content: "RETURN 1"}))
 
 		var wireErr *Error
 		if !errors.As(err, &wireErr) || status.Code(err) != codes.Unavailable || wireErr.Message != "watch transport failed" {
@@ -415,10 +417,10 @@ func TestRuntimeRunOwnsItsExecution(t *testing.T) {
 		}
 		client := openTestRuntime(t, startClientTestServer(t, server))
 
-		output, err := client.Run(testClientContext(t), api.Source{Content: "RETURN 1"})
+		output, err := testoutput.Collect(client.Run(testClientContext(t), api.Source{Content: "RETURN 1"}))
 
 		var terminalFailure *failure.Failure
-		if string(output.Content) != "partial" || !errors.As(err, &terminalFailure) || terminalFailure.Message != "execution failed" ||
+		if string(output.Data) != "partial" || !errors.As(err, &terminalFailure) || terminalFailure.Message != "execution failed" ||
 			!strings.Contains(err.Error(), "execution cleanup failed") {
 			t.Fatalf("Runtime.Run did not preserve all errors: %#v, %v", output, err)
 		}
@@ -512,4 +514,83 @@ func openTestRuntime(t *testing.T, connection grpc.ClientConnInterface) api.Runt
 
 func (s *clientTestServer) ClosePlan(context.Context, *wirev1.ClosePlanRequest) (*wirev1.ClosePlanResponse, error) {
 	return &wirev1.ClosePlanResponse{}, nil
+}
+
+//nolint:staticcheck // Legacy snapshot fixtures are translated into framed output by this test server.
+func (s *clientTestServer) ReadExecutionOutput(request *wirev1.ReadExecutionOutputRequest, stream wirev1.ExecutionService_ReadExecutionOutputServer) error {
+	if s.outputFrames != nil {
+		for _, frame := range s.outputFrames {
+			if err := stream.Send(&wirev1.ReadExecutionOutputResponse{Frame: frame}); err != nil {
+				return err
+			}
+		}
+
+		return nil
+	}
+
+	s.mu.Lock()
+	s.calls = append(s.calls, call("watch", request.GetConnectionId().GetValue(), request.GetExecutionId().GetValue()))
+	index := s.watchCalls
+	s.watchCalls++
+	var script executionWatchScript
+
+	if index < len(s.watchScripts) {
+		script = s.watchScripts[index]
+	}
+
+	s.mu.Unlock()
+	var terminal *wirev1.Execution
+	for _, event := range script.events {
+		if event.GetExecution().GetState() != wirev1.ExecutionState_EXECUTION_STATE_RUNNING {
+			terminal = event.GetExecution()
+
+			break
+		}
+	}
+
+	metadata := &wirev1.OutputMetadata{}
+
+	if terminal.GetOutput() != nil {
+		metadata.ContentType = terminal.GetOutput().GetContentType()
+	}
+
+	if err := stream.Send(&wirev1.ReadExecutionOutputResponse{Frame: &wirev1.OutputFrame{Frame: &wirev1.OutputFrame_Header{Header: metadata}}}); err != nil {
+		return err
+	}
+
+	if terminal != nil {
+		var total uint64
+
+		if content := terminal.GetOutput(); content != nil {
+			total = uint64(len(content.GetContent()))
+			if err := stream.Send(&wirev1.ReadExecutionOutputResponse{Frame: &wirev1.OutputFrame{Frame: &wirev1.OutputFrame_Chunk{Chunk: content.GetContent()}}}); err != nil {
+				return err
+			}
+		}
+
+		result := &wirev1.OutputTerminal{TransferredBytes: total, Failure: terminal.GetFailure(), Cancelled: terminal.GetState() == wirev1.ExecutionState_EXECUTION_STATE_CANCELLED}
+		if terminal.GetState() == wirev1.ExecutionState_EXECUTION_STATE_FAILED && result.Failure == nil {
+			return status.Error(codes.Internal, "missing failure details")
+		}
+
+		if terminal.GetState() == wirev1.ExecutionState_EXECUTION_STATE_UNSPECIFIED || terminal.GetState() > wirev1.ExecutionState_EXECUTION_STATE_CANCELLED {
+			return status.Error(codes.Internal, "invalid execution state")
+		}
+
+		if err := stream.Send(&wirev1.ReadExecutionOutputResponse{Frame: &wirev1.OutputFrame{Frame: &wirev1.OutputFrame_Terminal{Terminal: result}}}); err != nil {
+			return err
+		}
+	}
+
+	if script.entered != nil {
+		close(script.entered)
+	}
+
+	if script.block {
+		<-stream.Context().Done()
+
+		return stream.Context().Err()
+	}
+
+	return script.err
 }

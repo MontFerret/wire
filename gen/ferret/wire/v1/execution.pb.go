@@ -126,10 +126,14 @@ type Execution struct {
 	Id    *ExecutionId           `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	// state is the only execution lifecycle discriminator.
 	State ExecutionState `protobuf:"varint,3,opt,name=state,proto3,enum=ferret.wire.v1.ExecutionState" json:"state,omitempty"`
-	// output is required on completion and may contain partial output on other terminal states.
+	// Bulk output is delivered only through ReadExecutionOutput.
+	//
+	// Deprecated: Marked as deprecated in ferret/wire/v1/execution.proto.
 	Output *Output `protobuf:"bytes,4,opt,name=output,proto3" json:"output,omitempty"`
-	// failure is present only for failed executions.
-	Failure       *Failure `protobuf:"bytes,5,opt,name=failure,proto3" json:"failure,omitempty"`
+	// failure preserves terminal errors, including errors accompanying cancellation.
+	Failure *Failure `protobuf:"bytes,5,opt,name=failure,proto3" json:"failure,omitempty"`
+	// metadata is available once hosted output preparation succeeds.
+	Metadata      *OutputMetadata `protobuf:"bytes,6,opt,name=metadata,proto3" json:"metadata,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -178,6 +182,7 @@ func (x *Execution) GetState() ExecutionState {
 	return ExecutionState_EXECUTION_STATE_UNSPECIFIED
 }
 
+// Deprecated: Marked as deprecated in ferret/wire/v1/execution.proto.
 func (x *Execution) GetOutput() *Output {
 	if x != nil {
 		return x.Output
@@ -188,6 +193,13 @@ func (x *Execution) GetOutput() *Output {
 func (x *Execution) GetFailure() *Failure {
 	if x != nil {
 		return x.Failure
+	}
+	return nil
+}
+
+func (x *Execution) GetMetadata() *OutputMetadata {
+	if x != nil {
+		return x.Metadata
 	}
 	return nil
 }
@@ -703,18 +715,115 @@ func (x *WatchExecutionRequest) GetExecutionId() *ExecutionId {
 	return nil
 }
 
+type ReadExecutionOutputRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ConnectionId  *ConnectionId          `protobuf:"bytes,1,opt,name=connection_id,json=connectionId,proto3" json:"connection_id,omitempty"`
+	ExecutionId   *ExecutionId           `protobuf:"bytes,2,opt,name=execution_id,json=executionId,proto3" json:"execution_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReadExecutionOutputRequest) Reset() {
+	*x = ReadExecutionOutputRequest{}
+	mi := &file_ferret_wire_v1_execution_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReadExecutionOutputRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReadExecutionOutputRequest) ProtoMessage() {}
+
+func (x *ReadExecutionOutputRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_ferret_wire_v1_execution_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReadExecutionOutputRequest.ProtoReflect.Descriptor instead.
+func (*ReadExecutionOutputRequest) Descriptor() ([]byte, []int) {
+	return file_ferret_wire_v1_execution_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *ReadExecutionOutputRequest) GetConnectionId() *ConnectionId {
+	if x != nil {
+		return x.ConnectionId
+	}
+	return nil
+}
+
+func (x *ReadExecutionOutputRequest) GetExecutionId() *ExecutionId {
+	if x != nil {
+		return x.ExecutionId
+	}
+	return nil
+}
+
+type ReadExecutionOutputResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Frame         *OutputFrame           `protobuf:"bytes,1,opt,name=frame,proto3" json:"frame,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReadExecutionOutputResponse) Reset() {
+	*x = ReadExecutionOutputResponse{}
+	mi := &file_ferret_wire_v1_execution_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReadExecutionOutputResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReadExecutionOutputResponse) ProtoMessage() {}
+
+func (x *ReadExecutionOutputResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_ferret_wire_v1_execution_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReadExecutionOutputResponse.ProtoReflect.Descriptor instead.
+func (*ReadExecutionOutputResponse) Descriptor() ([]byte, []int) {
+	return file_ferret_wire_v1_execution_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *ReadExecutionOutputResponse) GetFrame() *OutputFrame {
+	if x != nil {
+		return x.Frame
+	}
+	return nil
+}
+
 var File_ferret_wire_v1_execution_proto protoreflect.FileDescriptor
 
 const file_ferret_wire_v1_execution_proto_rawDesc = "" +
 	"\n" +
 	"\x1eferret/wire/v1/execution.proto\x12\x0eferret.wire.v1\x1a\x19ferret/wire/v1/plan.proto\x1a\x1cferret/wire/v1/runtime.proto\x1a\x1cferret/wire/v1/session.proto\x1a\x1aferret/wire/v1/value.proto\"#\n" +
 	"\vExecutionId\x12\x14\n" +
-	"\x05value\x18\x01 \x01(\tR\x05value\"\xe0\x01\n" +
+	"\x05value\x18\x01 \x01(\tR\x05value\"\xa0\x02\n" +
 	"\tExecution\x12+\n" +
 	"\x02id\x18\x01 \x01(\v2\x1b.ferret.wire.v1.ExecutionIdR\x02id\x124\n" +
-	"\x05state\x18\x03 \x01(\x0e2\x1e.ferret.wire.v1.ExecutionStateR\x05state\x12.\n" +
-	"\x06output\x18\x04 \x01(\v2\x16.ferret.wire.v1.OutputR\x06output\x121\n" +
-	"\afailure\x18\x05 \x01(\v2\x17.ferret.wire.v1.FailureR\afailureJ\x04\b\x02\x10\x03R\aplan_id\"\xce\x01\n" +
+	"\x05state\x18\x03 \x01(\x0e2\x1e.ferret.wire.v1.ExecutionStateR\x05state\x122\n" +
+	"\x06output\x18\x04 \x01(\v2\x16.ferret.wire.v1.OutputB\x02\x18\x01R\x06output\x121\n" +
+	"\afailure\x18\x05 \x01(\v2\x17.ferret.wire.v1.FailureR\afailure\x12:\n" +
+	"\bmetadata\x18\x06 \x01(\v2\x1e.ferret.wire.v1.OutputMetadataR\bmetadataJ\x04\b\x02\x10\x03R\aplan_id\"\xce\x01\n" +
 	"\x16WatchExecutionResponse\x12\x1a\n" +
 	"\bsequence\x18\x02 \x01(\x04R\bsequence\x127\n" +
 	"\texecution\x18\b \x01(\v2\x19.ferret.wire.v1.ExecutionR\texecutionJ\x04\b\x01\x10\x02J\x04\b\x03\x10\x04J\x04\b\x04\x10\x05J\x04\b\x05\x10\x06J\x04\b\x06\x10\aJ\x04\b\a\x10\bR\fexecution_idR\x06outputR\astartedR\tcompletedR\x06failedR\tcancelled\"\xd1\x02\n" +
@@ -747,14 +856,20 @@ const file_ferret_wire_v1_execution_proto_rawDesc = "" +
 	"\x18ReleaseExecutionResponse\"\x9a\x01\n" +
 	"\x15WatchExecutionRequest\x12A\n" +
 	"\rconnection_id\x18\x01 \x01(\v2\x1c.ferret.wire.v1.ConnectionIdR\fconnectionId\x12>\n" +
-	"\fexecution_id\x18\x02 \x01(\v2\x1b.ferret.wire.v1.ExecutionIdR\vexecutionId*\xa8\x01\n" +
+	"\fexecution_id\x18\x02 \x01(\v2\x1b.ferret.wire.v1.ExecutionIdR\vexecutionId\"\x9f\x01\n" +
+	"\x1aReadExecutionOutputRequest\x12A\n" +
+	"\rconnection_id\x18\x01 \x01(\v2\x1c.ferret.wire.v1.ConnectionIdR\fconnectionId\x12>\n" +
+	"\fexecution_id\x18\x02 \x01(\v2\x1b.ferret.wire.v1.ExecutionIdR\vexecutionId\"P\n" +
+	"\x1bReadExecutionOutputResponse\x121\n" +
+	"\x05frame\x18\x01 \x01(\v2\x1b.ferret.wire.v1.OutputFrameR\x05frame*\xa8\x01\n" +
 	"\x0eExecutionState\x12\x1f\n" +
 	"\x1bEXECUTION_STATE_UNSPECIFIED\x10\x00\x12\x1b\n" +
 	"\x17EXECUTION_STATE_RUNNING\x10\x01\x12\x1d\n" +
 	"\x19EXECUTION_STATE_COMPLETED\x10\x02\x12\x1a\n" +
 	"\x16EXECUTION_STATE_FAILED\x10\x03\x12\x1d\n" +
-	"\x19EXECUTION_STATE_CANCELLED\x10\x042\xe1\x03\n" +
-	"\x10ExecutionService\x12J\n" +
+	"\x19EXECUTION_STATE_CANCELLED\x10\x042\xd3\x04\n" +
+	"\x10ExecutionService\x12p\n" +
+	"\x13ReadExecutionOutput\x12*.ferret.wire.v1.ReadExecutionOutputRequest\x1a+.ferret.wire.v1.ReadExecutionOutputResponse0\x01\x12J\n" +
 	"\aExecute\x12\x1e.ferret.wire.v1.ExecuteRequest\x1a\x1f.ferret.wire.v1.ExecuteResponse\x12S\n" +
 	"\n" +
 	"RunSession\x12!.ferret.wire.v1.RunSessionRequest\x1a\".ferret.wire.v1.RunSessionResponse\x12b\n" +
@@ -775,62 +890,72 @@ func file_ferret_wire_v1_execution_proto_rawDescGZIP() []byte {
 }
 
 var file_ferret_wire_v1_execution_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_ferret_wire_v1_execution_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
+var file_ferret_wire_v1_execution_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
 var file_ferret_wire_v1_execution_proto_goTypes = []any{
-	(ExecutionState)(0),              // 0: ferret.wire.v1.ExecutionState
-	(*ExecutionId)(nil),              // 1: ferret.wire.v1.ExecutionId
-	(*Execution)(nil),                // 2: ferret.wire.v1.Execution
-	(*WatchExecutionResponse)(nil),   // 3: ferret.wire.v1.WatchExecutionResponse
-	(*ExecuteRequest)(nil),           // 4: ferret.wire.v1.ExecuteRequest
-	(*ExecuteResponse)(nil),          // 5: ferret.wire.v1.ExecuteResponse
-	(*RunSessionRequest)(nil),        // 6: ferret.wire.v1.RunSessionRequest
-	(*RunSessionResponse)(nil),       // 7: ferret.wire.v1.RunSessionResponse
-	(*CancelExecutionRequest)(nil),   // 8: ferret.wire.v1.CancelExecutionRequest
-	(*CancelExecutionResponse)(nil),  // 9: ferret.wire.v1.CancelExecutionResponse
-	(*ReleaseExecutionRequest)(nil),  // 10: ferret.wire.v1.ReleaseExecutionRequest
-	(*ReleaseExecutionResponse)(nil), // 11: ferret.wire.v1.ReleaseExecutionResponse
-	(*WatchExecutionRequest)(nil),    // 12: ferret.wire.v1.WatchExecutionRequest
-	(*Output)(nil),                   // 13: ferret.wire.v1.Output
-	(*Failure)(nil),                  // 14: ferret.wire.v1.Failure
-	(*ConnectionId)(nil),             // 15: ferret.wire.v1.ConnectionId
-	(*PlanId)(nil),                   // 16: ferret.wire.v1.PlanId
-	(*Parameters)(nil),               // 17: ferret.wire.v1.Parameters
-	(*SessionId)(nil),                // 18: ferret.wire.v1.SessionId
+	(ExecutionState)(0),                 // 0: ferret.wire.v1.ExecutionState
+	(*ExecutionId)(nil),                 // 1: ferret.wire.v1.ExecutionId
+	(*Execution)(nil),                   // 2: ferret.wire.v1.Execution
+	(*WatchExecutionResponse)(nil),      // 3: ferret.wire.v1.WatchExecutionResponse
+	(*ExecuteRequest)(nil),              // 4: ferret.wire.v1.ExecuteRequest
+	(*ExecuteResponse)(nil),             // 5: ferret.wire.v1.ExecuteResponse
+	(*RunSessionRequest)(nil),           // 6: ferret.wire.v1.RunSessionRequest
+	(*RunSessionResponse)(nil),          // 7: ferret.wire.v1.RunSessionResponse
+	(*CancelExecutionRequest)(nil),      // 8: ferret.wire.v1.CancelExecutionRequest
+	(*CancelExecutionResponse)(nil),     // 9: ferret.wire.v1.CancelExecutionResponse
+	(*ReleaseExecutionRequest)(nil),     // 10: ferret.wire.v1.ReleaseExecutionRequest
+	(*ReleaseExecutionResponse)(nil),    // 11: ferret.wire.v1.ReleaseExecutionResponse
+	(*WatchExecutionRequest)(nil),       // 12: ferret.wire.v1.WatchExecutionRequest
+	(*ReadExecutionOutputRequest)(nil),  // 13: ferret.wire.v1.ReadExecutionOutputRequest
+	(*ReadExecutionOutputResponse)(nil), // 14: ferret.wire.v1.ReadExecutionOutputResponse
+	(*Output)(nil),                      // 15: ferret.wire.v1.Output
+	(*Failure)(nil),                     // 16: ferret.wire.v1.Failure
+	(*OutputMetadata)(nil),              // 17: ferret.wire.v1.OutputMetadata
+	(*ConnectionId)(nil),                // 18: ferret.wire.v1.ConnectionId
+	(*PlanId)(nil),                      // 19: ferret.wire.v1.PlanId
+	(*Parameters)(nil),                  // 20: ferret.wire.v1.Parameters
+	(*SessionId)(nil),                   // 21: ferret.wire.v1.SessionId
+	(*OutputFrame)(nil),                 // 22: ferret.wire.v1.OutputFrame
 }
 var file_ferret_wire_v1_execution_proto_depIdxs = []int32{
 	1,  // 0: ferret.wire.v1.Execution.id:type_name -> ferret.wire.v1.ExecutionId
 	0,  // 1: ferret.wire.v1.Execution.state:type_name -> ferret.wire.v1.ExecutionState
-	13, // 2: ferret.wire.v1.Execution.output:type_name -> ferret.wire.v1.Output
-	14, // 3: ferret.wire.v1.Execution.failure:type_name -> ferret.wire.v1.Failure
-	2,  // 4: ferret.wire.v1.WatchExecutionResponse.execution:type_name -> ferret.wire.v1.Execution
-	15, // 5: ferret.wire.v1.ExecuteRequest.connection_id:type_name -> ferret.wire.v1.ConnectionId
-	16, // 6: ferret.wire.v1.ExecuteRequest.plan_id:type_name -> ferret.wire.v1.PlanId
-	17, // 7: ferret.wire.v1.ExecuteRequest.parameters:type_name -> ferret.wire.v1.Parameters
-	2,  // 8: ferret.wire.v1.ExecuteResponse.execution:type_name -> ferret.wire.v1.Execution
-	15, // 9: ferret.wire.v1.RunSessionRequest.connection_id:type_name -> ferret.wire.v1.ConnectionId
-	18, // 10: ferret.wire.v1.RunSessionRequest.session_id:type_name -> ferret.wire.v1.SessionId
-	2,  // 11: ferret.wire.v1.RunSessionResponse.execution:type_name -> ferret.wire.v1.Execution
-	15, // 12: ferret.wire.v1.CancelExecutionRequest.connection_id:type_name -> ferret.wire.v1.ConnectionId
-	1,  // 13: ferret.wire.v1.CancelExecutionRequest.execution_id:type_name -> ferret.wire.v1.ExecutionId
-	15, // 14: ferret.wire.v1.ReleaseExecutionRequest.connection_id:type_name -> ferret.wire.v1.ConnectionId
-	1,  // 15: ferret.wire.v1.ReleaseExecutionRequest.execution_id:type_name -> ferret.wire.v1.ExecutionId
-	15, // 16: ferret.wire.v1.WatchExecutionRequest.connection_id:type_name -> ferret.wire.v1.ConnectionId
-	1,  // 17: ferret.wire.v1.WatchExecutionRequest.execution_id:type_name -> ferret.wire.v1.ExecutionId
-	4,  // 18: ferret.wire.v1.ExecutionService.Execute:input_type -> ferret.wire.v1.ExecuteRequest
-	6,  // 19: ferret.wire.v1.ExecutionService.RunSession:input_type -> ferret.wire.v1.RunSessionRequest
-	8,  // 20: ferret.wire.v1.ExecutionService.CancelExecution:input_type -> ferret.wire.v1.CancelExecutionRequest
-	10, // 21: ferret.wire.v1.ExecutionService.ReleaseExecution:input_type -> ferret.wire.v1.ReleaseExecutionRequest
-	12, // 22: ferret.wire.v1.ExecutionService.WatchExecution:input_type -> ferret.wire.v1.WatchExecutionRequest
-	5,  // 23: ferret.wire.v1.ExecutionService.Execute:output_type -> ferret.wire.v1.ExecuteResponse
-	7,  // 24: ferret.wire.v1.ExecutionService.RunSession:output_type -> ferret.wire.v1.RunSessionResponse
-	9,  // 25: ferret.wire.v1.ExecutionService.CancelExecution:output_type -> ferret.wire.v1.CancelExecutionResponse
-	11, // 26: ferret.wire.v1.ExecutionService.ReleaseExecution:output_type -> ferret.wire.v1.ReleaseExecutionResponse
-	3,  // 27: ferret.wire.v1.ExecutionService.WatchExecution:output_type -> ferret.wire.v1.WatchExecutionResponse
-	23, // [23:28] is the sub-list for method output_type
-	18, // [18:23] is the sub-list for method input_type
-	18, // [18:18] is the sub-list for extension type_name
-	18, // [18:18] is the sub-list for extension extendee
-	0,  // [0:18] is the sub-list for field type_name
+	15, // 2: ferret.wire.v1.Execution.output:type_name -> ferret.wire.v1.Output
+	16, // 3: ferret.wire.v1.Execution.failure:type_name -> ferret.wire.v1.Failure
+	17, // 4: ferret.wire.v1.Execution.metadata:type_name -> ferret.wire.v1.OutputMetadata
+	2,  // 5: ferret.wire.v1.WatchExecutionResponse.execution:type_name -> ferret.wire.v1.Execution
+	18, // 6: ferret.wire.v1.ExecuteRequest.connection_id:type_name -> ferret.wire.v1.ConnectionId
+	19, // 7: ferret.wire.v1.ExecuteRequest.plan_id:type_name -> ferret.wire.v1.PlanId
+	20, // 8: ferret.wire.v1.ExecuteRequest.parameters:type_name -> ferret.wire.v1.Parameters
+	2,  // 9: ferret.wire.v1.ExecuteResponse.execution:type_name -> ferret.wire.v1.Execution
+	18, // 10: ferret.wire.v1.RunSessionRequest.connection_id:type_name -> ferret.wire.v1.ConnectionId
+	21, // 11: ferret.wire.v1.RunSessionRequest.session_id:type_name -> ferret.wire.v1.SessionId
+	2,  // 12: ferret.wire.v1.RunSessionResponse.execution:type_name -> ferret.wire.v1.Execution
+	18, // 13: ferret.wire.v1.CancelExecutionRequest.connection_id:type_name -> ferret.wire.v1.ConnectionId
+	1,  // 14: ferret.wire.v1.CancelExecutionRequest.execution_id:type_name -> ferret.wire.v1.ExecutionId
+	18, // 15: ferret.wire.v1.ReleaseExecutionRequest.connection_id:type_name -> ferret.wire.v1.ConnectionId
+	1,  // 16: ferret.wire.v1.ReleaseExecutionRequest.execution_id:type_name -> ferret.wire.v1.ExecutionId
+	18, // 17: ferret.wire.v1.WatchExecutionRequest.connection_id:type_name -> ferret.wire.v1.ConnectionId
+	1,  // 18: ferret.wire.v1.WatchExecutionRequest.execution_id:type_name -> ferret.wire.v1.ExecutionId
+	18, // 19: ferret.wire.v1.ReadExecutionOutputRequest.connection_id:type_name -> ferret.wire.v1.ConnectionId
+	1,  // 20: ferret.wire.v1.ReadExecutionOutputRequest.execution_id:type_name -> ferret.wire.v1.ExecutionId
+	22, // 21: ferret.wire.v1.ReadExecutionOutputResponse.frame:type_name -> ferret.wire.v1.OutputFrame
+	13, // 22: ferret.wire.v1.ExecutionService.ReadExecutionOutput:input_type -> ferret.wire.v1.ReadExecutionOutputRequest
+	4,  // 23: ferret.wire.v1.ExecutionService.Execute:input_type -> ferret.wire.v1.ExecuteRequest
+	6,  // 24: ferret.wire.v1.ExecutionService.RunSession:input_type -> ferret.wire.v1.RunSessionRequest
+	8,  // 25: ferret.wire.v1.ExecutionService.CancelExecution:input_type -> ferret.wire.v1.CancelExecutionRequest
+	10, // 26: ferret.wire.v1.ExecutionService.ReleaseExecution:input_type -> ferret.wire.v1.ReleaseExecutionRequest
+	12, // 27: ferret.wire.v1.ExecutionService.WatchExecution:input_type -> ferret.wire.v1.WatchExecutionRequest
+	14, // 28: ferret.wire.v1.ExecutionService.ReadExecutionOutput:output_type -> ferret.wire.v1.ReadExecutionOutputResponse
+	5,  // 29: ferret.wire.v1.ExecutionService.Execute:output_type -> ferret.wire.v1.ExecuteResponse
+	7,  // 30: ferret.wire.v1.ExecutionService.RunSession:output_type -> ferret.wire.v1.RunSessionResponse
+	9,  // 31: ferret.wire.v1.ExecutionService.CancelExecution:output_type -> ferret.wire.v1.CancelExecutionResponse
+	11, // 32: ferret.wire.v1.ExecutionService.ReleaseExecution:output_type -> ferret.wire.v1.ReleaseExecutionResponse
+	3,  // 33: ferret.wire.v1.ExecutionService.WatchExecution:output_type -> ferret.wire.v1.WatchExecutionResponse
+	28, // [28:34] is the sub-list for method output_type
+	22, // [22:28] is the sub-list for method input_type
+	22, // [22:22] is the sub-list for extension type_name
+	22, // [22:22] is the sub-list for extension extendee
+	0,  // [0:22] is the sub-list for field type_name
 }
 
 func init() { file_ferret_wire_v1_execution_proto_init() }
@@ -849,7 +974,7 @@ func file_ferret_wire_v1_execution_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_ferret_wire_v1_execution_proto_rawDesc), len(file_ferret_wire_v1_execution_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   12,
+			NumMessages:   14,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

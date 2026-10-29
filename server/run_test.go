@@ -17,6 +17,7 @@ import (
 	"github.com/MontFerret/api"
 	"github.com/MontFerret/wire/client"
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
+	"github.com/MontFerret/wire/internal/testoutput"
 	"github.com/MontFerret/wire/test/securityfixture"
 )
 
@@ -215,7 +216,7 @@ func TestRunCompetingStartsLeaveAcceptedInvocationOperational(t *testing.T) {
 			releaseOnce.Do(func() { close(release) })
 
 			remote := managedRemote(t, managedAwait(t, bound))
-			if _, err := remote.Run(managedContext(t), api.NewAnonymousSource("RETURN 1")); err != nil {
+			if _, err := testoutput.Collect(remote.Run(managedContext(t), api.NewAnonymousSource("RETURN 1"))); err != nil {
 				t.Fatal(err)
 			}
 
@@ -240,7 +241,7 @@ func TestRunCompetingStartsLeaveAcceptedInvocationOperational(t *testing.T) {
 		t.Fatal("active start accepted")
 	}
 
-	if _, err := remote.Run(managedContext(t), api.NewAnonymousSource("RETURN 1")); err != nil {
+	if _, err := testoutput.Collect(remote.Run(managedContext(t), api.NewAnonymousSource("RETURN 1"))); err != nil {
 		t.Fatal(err)
 	}
 
@@ -362,7 +363,7 @@ func TestRunBudgetBoundsBackgroundShutdownAndRetainsCleanup(t *testing.T) {
 			remote := managedRemote(t, running.listener)
 			conn := managedClient(t, running.listener)
 
-			stream, err := wirev1.NewRuntimeServiceClient(conn).Connect(managedContext(t), &wirev1.ConnectRequest{})
+			stream, err := wirev1.NewRuntimeServiceClient(conn).Connect(managedContext(t), &wirev1.ConnectRequest{OutputFramingVersion: 1})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -411,7 +412,7 @@ func TestRunBudgetBoundsBackgroundShutdownAndRetainsCleanup(t *testing.T) {
 				t.Fatal("cleanup not committed once")
 			}
 
-			if _, err := remote.Run(managedContext(t), api.NewAnonymousSource("RETURN 1")); err == nil {
+			if _, err := testoutput.Collect(remote.Run(managedContext(t), api.NewAnonymousSource("RETURN 1"))); err == nil {
 				t.Fatal("transport remained usable")
 			}
 
@@ -473,7 +474,7 @@ func TestRunExplicitShutdownAndBudgetStartsAtShutdown(t *testing.T) {
 	defer timer.Stop()
 	managedAwait(t, timer.C)
 
-	if _, err := remote.Run(managedContext(t), api.NewAnonymousSource("RETURN 1")); err != nil {
+	if _, err := testoutput.Collect(remote.Run(managedContext(t), api.NewAnonymousSource("RETURN 1"))); err != nil {
 		t.Fatal(err)
 	}
 
@@ -498,7 +499,7 @@ func TestRunRejectedWhileServeRemainsOperational(t *testing.T) {
 		t.Fatal("Run accepted during Serve")
 	}
 
-	if _, err := remote.Run(managedContext(t), api.NewAnonymousSource("RETURN 1")); err != nil {
+	if _, err := testoutput.Collect(remote.Run(managedContext(t), api.NewAnonymousSource("RETURN 1"))); err != nil {
 		t.Fatal(err)
 	}
 
@@ -675,7 +676,7 @@ func TestRunTimeoutPreservesCompletedCleanupFailure(t *testing.T) {
 	running := startManaged(t, s, WithShutdownTimeout(50*time.Millisecond))
 	conn := managedClient(t, running.listener)
 
-	stream, err := wirev1.NewRuntimeServiceClient(conn).Connect(managedContext(t), &wirev1.ConnectRequest{})
+	stream, err := wirev1.NewRuntimeServiceClient(conn).Connect(managedContext(t), &wirev1.ConnectRequest{OutputFramingVersion: 1})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -51,7 +51,7 @@ func TestEventKindValuesPreserveProtocolOrdering(t *testing.T) {
 
 func TestSnapshotUsesCanonicalUnifiedAPITypes(t *testing.T) {
 	location := &source.Range{Location: source.Location{SourceName: "query.fql", Position: source.Position{Line: 1}}}
-	output := &api.Output{ContentType: "text/plain", Content: []byte("1")}
+	output := &api.Content{Metadata: api.Metadata{ContentType: "text/plain"}, Data: []byte("1")}
 	terminalFailure := &failure.Failure{Category: failure.CategoryExecution, Message: "runtime operation failed"}
 	snapshot := wiredebugger.Snapshot{
 		State:            wiredebugger.StateStopped,

@@ -125,6 +125,7 @@ func TestFailureCategoryMapsEverySharedValue(t *testing.T) {
 	assertInternalConversionError(t, err)
 }
 
+//nolint:staticcheck // Assert that deprecated inline payloads remain empty.
 func TestSharedEventsPreserveFieldsAndDetachMutableData(t *testing.T) {
 	location := &source.Range{
 		Location: source.Location{SourceName: "query.fql", Position: source.Position{Line: 2, Column: 1}},
@@ -153,7 +154,7 @@ func TestSharedEventsPreserveFieldsAndDetachMutableData(t *testing.T) {
 			Location:         location,
 			HitBreakpointIDs: hitIDs,
 			Depth:            4,
-			Output:           &api.Output{ContentType: "text/plain", Content: content},
+			Output:           &api.Content{Metadata: api.Metadata{ContentType: "text/plain"}, Data: content},
 			Failure:          terminalFailure,
 		},
 	})
@@ -170,7 +171,7 @@ func TestSharedEventsPreserveFieldsAndDetachMutableData(t *testing.T) {
 		converted.GetSession().GetStopReason() != wirev1.DebugStopReason_DEBUG_STOP_REASON_BREAKPOINT ||
 		converted.GetSession().GetLocation().GetLocation().GetSourceName() != "query.fql" ||
 		converted.GetSession().GetHitBreakpointIds()[0] != 7 || converted.GetSession().GetDepth() != 4 ||
-		string(converted.GetSession().GetOutput().GetContent()) != "partial" ||
+		converted.GetSession().GetOutput().GetMetadata().GetContentType() != "text/plain" || len(converted.GetSession().GetOutput().GetContent()) != 0 ||
 		converted.GetSession().GetFailure().GetDiagnosticSet().GetDiagnostics()[0].GetAnnotations()[0].GetMessage() != "" {
 		t.Fatalf("debug event conversion changed or retained mutable values: %#v", converted)
 	}

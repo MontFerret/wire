@@ -9,6 +9,7 @@ import (
 	"github.com/MontFerret/api"
 	"github.com/MontFerret/api/debugger"
 	"github.com/MontFerret/wire/client"
+	"github.com/MontFerret/wire/internal/testoutput"
 	"github.com/MontFerret/wire/test/integration/harness"
 )
 
@@ -27,17 +28,17 @@ func TestParentClosePreservesChildrenAndActiveWork(t *testing.T) {
 
 					options = append(options, harness.WithBehavior(harness.RuntimeBehavior{Plan: harness.PlanBehavior{
 						Session: func(harness.SessionOptions) harness.SessionBehavior {
-							return harness.SessionBehavior{Run: func(ctx context.Context, invocation int) (*api.Output, error) {
+							return harness.SessionBehavior{Run: func(ctx context.Context, invocation int) (*api.Content, error) {
 								if invocation > 1 {
-									return &api.Output{}, nil
+									return &api.Content{}, nil
 								}
 
-								return &api.Output{}, run.Wait(ctx)
+								return &api.Content{}, run.Wait(ctx)
 							}}
 						},
 						Debugger: harness.DebuggerBehavior{Command: func(ctx context.Context, method string, _ int) (*debugger.Event, error) {
 							if method == "Continue" {
-								return &debugger.Event{Reason: debugger.ReasonCompleted, Output: &api.Output{}}, command.Wait(ctx)
+								return &debugger.Event{Reason: debugger.ReasonCompleted, Output: &api.Content{}}, command.Wait(ctx)
 							}
 
 							return &debugger.Event{Reason: debugger.ReasonEntry}, nil
@@ -71,7 +72,7 @@ func TestParentClosePreservesChildrenAndActiveWork(t *testing.T) {
 					}
 
 					results := make(chan error, 2)
-					go func() { _, err := session.Run(h.Context()); results <- err }()
+					go func() { _, err := testoutput.Collect(session.Run(h.Context())); results <- err }()
 					go func() { _, err := debug.Continue(h.Context()); results <- err }()
 					harness.Await(t, run.Started)
 					harness.Await(t, command.Started)
@@ -98,7 +99,7 @@ func TestParentClosePreservesChildrenAndActiveWork(t *testing.T) {
 							t.Fatal("closed plan accepted a constructor")
 						}
 					} else {
-						if _, err := h.Runtime().Run(h.Context(), api.Source{Content: "RETURN 2"}); err == nil {
+						if _, err := testoutput.Collect(h.Runtime().Run(h.Context(), api.Source{Content: "RETURN 2"})); err == nil {
 							t.Fatal("closed runtime accepted work")
 						}
 
@@ -130,7 +131,7 @@ func TestParentClosePreservesChildrenAndActiveWork(t *testing.T) {
 						}
 					}
 
-					if _, err := session.Run(h.Context()); err != nil {
+					if _, err := testoutput.Collect(session.Run(h.Context())); err != nil {
 						t.Fatalf("surviving session cannot run again: %v", err)
 					}
 
@@ -156,8 +157,8 @@ func TestConcurrentSiblingSessionsRemainIndependent(t *testing.T) {
 	h := harness.New(t, harness.WithBehavior(harness.RuntimeBehavior{Plan: harness.PlanBehavior{Session: func(options harness.SessionOptions) harness.SessionBehavior {
 		index := int(options.Params["index"].(int64))
 
-		return harness.SessionBehavior{Run: func(ctx context.Context, _ int) (*api.Output, error) {
-			return &api.Output{ContentType: "text/plain", Content: []byte(fmt.Sprint(index))}, blocks[index].Wait(ctx)
+		return harness.SessionBehavior{Run: func(ctx context.Context, _ int) (*api.Content, error) {
+			return &api.Content{Metadata: api.Metadata{ContentType: "text/plain"}, Data: []byte(fmt.Sprint(index))}, blocks[index].Wait(ctx)
 		}}
 	}}}))
 
@@ -182,14 +183,14 @@ func TestConcurrentSiblingSessionsRemainIndependent(t *testing.T) {
 	}
 
 	type result struct {
-		output *api.Output
+		output *api.Content
 		err    error
 	}
 	results := []chan result{make(chan result, 1), make(chan result, 1)}
 
 	for index := range 2 {
 		go func() {
-			output, err := sessions[index].Run(h.Context())
+			output, err := testoutput.Collect(sessions[index].Run(h.Context()))
 			results[index] <- result{output, err}
 		}()
 	}
@@ -210,7 +211,7 @@ func TestConcurrentSiblingSessionsRemainIndependent(t *testing.T) {
 	blocks[1].Release()
 
 	second := harness.Await(t, results[1])
-	if second.err != nil || string(second.output.Content) != "1" {
+	if second.err != nil || string(second.output.Data) != "1" {
 		t.Fatalf("unrelated active sibling affected: %+v", second)
 	}
 
@@ -252,7 +253,7 @@ func TestConcurrentPlanSessionCreation(t *testing.T) {
 			h.Own(session)
 
 			if err == nil {
-				_, err = session.Run(h.Context())
+				_, err = testoutput.Collect(session.Run(h.Context()))
 			}
 
 			results <- err
@@ -310,7 +311,7 @@ func TestConcurrentPlansShareRuntime(t *testing.T) {
 			h.Own(session)
 
 			if err == nil {
-				_, err = session.Run(h.Context())
+				_, err = testoutput.Collect(session.Run(h.Context()))
 			}
 
 			results <- err

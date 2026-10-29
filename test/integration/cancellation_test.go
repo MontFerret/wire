@@ -10,6 +10,7 @@ import (
 
 	"github.com/MontFerret/api"
 	"github.com/MontFerret/api/debugger"
+	"github.com/MontFerret/wire/internal/testoutput"
 	"github.com/MontFerret/wire/server"
 	"github.com/MontFerret/wire/test/integration/harness"
 )
@@ -19,16 +20,16 @@ func TestCancellationReachesHostedOperations(t *testing.T) {
 		t.Run(operation, func(t *testing.T) {
 			block := harness.NewBlock(t)
 			behavior := harness.RuntimeBehavior{
-				Run: func(ctx context.Context, src api.Source, _ harness.SessionOptions) (*api.Output, error) {
+				Run: func(ctx context.Context, src api.Source, _ harness.SessionOptions) (*api.Content, error) {
 					if src.Content == "RETURN 2" {
-						return &api.Output{}, nil
+						return &api.Content{}, nil
 					}
 
 					return nil, block.Wait(ctx)
 				},
 				Plan: harness.PlanBehavior{
 					Session: func(harness.SessionOptions) harness.SessionBehavior {
-						return harness.SessionBehavior{Run: func(ctx context.Context, _ int) (*api.Output, error) { return nil, block.Wait(ctx) }}
+						return harness.SessionBehavior{Run: func(ctx context.Context, _ int) (*api.Content, error) { return nil, block.Wait(ctx) }}
 					},
 					Debugger: harness.DebuggerBehavior{
 						Command: func(ctx context.Context, method string, _ int) (*debugger.Event, error) {
@@ -50,7 +51,7 @@ func TestCancellationReachesHostedOperations(t *testing.T) {
 			ctx, cancel := context.WithCancel(h.Context())
 			defer cancel()
 			run := func() error {
-				_, err := h.Runtime().Run(ctx, api.Source{Content: "RETURN 1"})
+				_, err := testoutput.Collect(h.Runtime().Run(ctx, api.Source{Content: "RETURN 1"}))
 
 				return err
 			}
@@ -72,7 +73,7 @@ func TestCancellationReachesHostedOperations(t *testing.T) {
 					h.Own(session)
 
 					run = func() error {
-						_, err := session.Run(ctx)
+						_, err := testoutput.Collect(session.Run(ctx))
 
 						return err
 					}
@@ -138,7 +139,7 @@ func TestCancellationReachesHostedOperations(t *testing.T) {
 					t.Fatal("cancelled execution was not released")
 				}
 
-				if _, err := h.Runtime().Run(h.Context(), api.Source{Content: "RETURN 2"}); err != nil {
+				if _, err := testoutput.Collect(h.Runtime().Run(h.Context(), api.Source{Content: "RETURN 2"})); err != nil {
 					t.Fatalf("cancelled execution retained the only execution slot: %v", err)
 				}
 			}

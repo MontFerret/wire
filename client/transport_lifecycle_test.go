@@ -74,6 +74,7 @@ func (s *constructorStream) RecvMsg(message any) error {
 
 		out.ConnectionId = &wirev1.ConnectionId{Value: "known-connection"}
 		out.Protocol = &wirev1.ProtocolInfo{Name: "ferret.wire", Version: "v1"}
+		out.OutputFramingVersion = 1
 		out.RuntimeVersion = []byte("version")
 
 		return nil
@@ -173,6 +174,7 @@ func TestConstructorRollbackRetainsKnownAllocationErrorsAndMetadata(t *testing.T
 
 						if failure == "cancellation" {
 							out.Protocol = &wirev1.ProtocolInfo{Name: "wire", Version: "v1"}
+							out.OutputFramingVersion = 1
 							out.RuntimeVersion = []byte{}
 							cancel()
 						}
@@ -394,6 +396,7 @@ func TestConstructorPublicationCancellationRace(t *testing.T) {
 					<-allow
 					out.ConnectionId = &wirev1.ConnectionId{Value: "known"}
 					out.Protocol = &wirev1.ProtocolInfo{Name: "wire", Version: "v1"}
+					out.OutputFramingVersion = 1
 					out.RuntimeVersion = []byte{}
 
 					return nil

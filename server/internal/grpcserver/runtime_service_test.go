@@ -68,7 +68,7 @@ func TestConnectProjectsOpaqueRuntimeVersionIndependentlyOfHostIdentity(t *testi
 			}
 
 			stream := &connectStream{ctx: ctx, send: func() error { cancel(); return nil }}
-			if err := service.Connect(&wirev1.ConnectRequest{}, stream); err != nil {
+			if err := service.Connect(&wirev1.ConnectRequest{OutputFramingVersion: 1}, stream); err != nil {
 				t.Fatal(err)
 			}
 
@@ -114,7 +114,7 @@ func TestConnectMetadataFailureReclaimsConnectionCapacity(t *testing.T) {
 				}
 			}}}
 			stream := &connectStream{ctx: ctx, send: func() error { return status.Error(codes.Unavailable, "send failure") }}
-			err := service.Connect(&wirev1.ConnectRequest{}, stream)
+			err := service.Connect(&wirev1.ConnectRequest{OutputFramingVersion: 1}, stream)
 			want := codes.Internal
 			switch mode {
 			case "canceled", "canceled successful retrieval", "canceled private error":
@@ -164,7 +164,7 @@ func TestConnectCancellationReachesHostedVersion(t *testing.T) {
 			}}}
 			stream := &connectStream{ctx: ctx, send: func() error { return nil }}
 			finished := make(chan error, 1)
-			go func() { finished <- service.Connect(&wirev1.ConnectRequest{}, stream) }()
+			go func() { finished <- service.Connect(&wirev1.ConnectRequest{OutputFramingVersion: 1}, stream) }()
 			select {
 			case <-entered:
 			case <-time.After(10 * time.Second):

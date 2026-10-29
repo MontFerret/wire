@@ -107,7 +107,7 @@ message DebugSession {
   DebugStopReason stop_reason = 4;
   // hit_breakpoint_ids is populated only for a breakpoint stop.
   repeated uint64 hit_breakpoint_ids = 6;
-  // output preserves any encoded result returned by the hosted command.
+  // output describes encoded content delivered once after a WatchDebug envelope.
   Output output = 7;
   // failure is present for failed sessions and may accompany a runtime-error stop.
   Failure failure = 8;
@@ -340,6 +340,10 @@ message WatchDebugResponse {
   DebugEventKind kind = 10;
   // session is the latest complete snapshot, including for replayed terminal state.
   DebugSession session = 11;
+  // Mutually exclusive with the semantic envelope. These frames carry its output
+  // once, even when both session.output and command_result.event.output refer to it.
+  // They have no event sequence and never enter the debugger event queue.
+  OutputFrame output_frame = 12;
 }
 
 message WatchDebugRequest {
@@ -390,7 +394,10 @@ message RunCommandRequest {
 }
 
 message RunCommandResponse {
+  // A semantic result is followed by framed content when its event has output.
   DebugCommandResult result = 1;
+  // Mutually exclusive with result; does not create a debugger event.
+  OutputFrame output_frame = 2;
 }
 
 message BreakpointRequest {

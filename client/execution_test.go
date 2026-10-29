@@ -61,7 +61,8 @@ func TestExecutionStateConversionMapsEveryProtocolValue(t *testing.T) {
 	}
 }
 
-func TestExecutionConversionDefensivelyCopiesOutputAndFailure(t *testing.T) {
+//nolint:staticcheck // Legacy snapshot fixtures are translated into framed output by this test server.
+func TestExecutionConversionDetachesMetadataAndFailure(t *testing.T) {
 	protocol := executionSnapshotProto(
 		"execution-1",
 		wirev1.ExecutionState_EXECUTION_STATE_FAILED,
@@ -80,15 +81,17 @@ func TestExecutionConversionDefensivelyCopiesOutputAndFailure(t *testing.T) {
 		},
 	)
 
+	protocol.Metadata = &wirev1.OutputMetadata{ContentType: "text/plain"}
+
 	snapshot, err := convertExecutionSnapshot(protocol)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	protocol.Output.Content[0] = 'X'
+	protocol.Metadata.ContentType = "changed"
 
 	protocol.Failure.DiagnosticSet.Diagnostics[0].Annotations[0].Message = "changed"
-	if string(snapshot.Output.Content) != "partial" || snapshot.Failure == nil ||
+	if snapshot.Metadata == nil || snapshot.Metadata.ContentType != "text/plain" || snapshot.Failure == nil ||
 		snapshot.Failure.Category != failure.CategoryExecution ||
 		snapshot.Failure.Diagnostics[0].Annotations[0].Message != "" {
 		t.Fatalf("execution conversion retained protobuf storage: %#v", snapshot)
@@ -140,7 +143,7 @@ func TestExecutionWaitTerminalStates(t *testing.T) {
 			_, _, execution := openTestExecution(t, server)
 
 			output, err := execution.Wait(testClientContext(t))
-			if test.cancelled && output != nil || !test.cancelled && (output == nil || output.ContentType != test.contentType || string(output.Content) != test.output) {
+			if test.cancelled && output != nil || !test.cancelled && (output == nil || output.Metadata.ContentType != test.contentType || string(output.Data) != test.output) {
 				t.Fatalf("unexpected output: %#v", output)
 			}
 
@@ -151,22 +154,23 @@ func TestExecutionWaitTerminalStates(t *testing.T) {
 					t.Fatalf("unexpected terminal failure: %#v", err)
 				}
 			case test.cancelled:
-				if !errors.Is(err, ErrExecutionCancelled) || errors.Is(err, context.Canceled) {
-					t.Fatalf("remote cancellation was not distinct: %v", err)
+				if !errors.Is(err, ErrExecutionCancelled) || !errors.Is(err, context.Canceled) {
+					t.Fatalf("remote cancellation identities were lost: %v", err)
 				}
 			case err != nil:
 				t.Fatal(err)
 			}
 
 			_, _, releaseExecutionCalls, _ := server.callSnapshot()
-			if releaseExecutionCalls != 0 {
+			if releaseExecutionCalls != 1 {
 				t.Fatalf("Wait released the execution %d times", releaseExecutionCalls)
 			}
 		})
 	}
 }
 
-func TestExecutionWaitUsesFreshWatchWithoutCachingOutput(t *testing.T) {
+//nolint:staticcheck // Legacy snapshot fixtures are translated into framed output by this test server.
+func TestExecutionWaitReleasesHandleAndDetachesOutput(t *testing.T) {
 	completed := executionCompletedEvent("execution-1", "text/plain", []byte("original"))
 	server := &clientTestServer{watchScripts: []executionWatchScript{
 		{events: []*wirev1.WatchExecutionResponse{completed}},
@@ -179,20 +183,19 @@ func TestExecutionWaitUsesFreshWatchWithoutCachingOutput(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	first.Content[0] = 'X'
+	first.Data[0] = 'X'
 
-	second, err := execution.Wait(testClientContext(t))
-	if err != nil {
-		t.Fatal(err)
+	if _, err := execution.Wait(testClientContext(t)); !errors.Is(err, ErrClosed) {
+		t.Fatalf("released output execution was reused: %v", err)
 	}
 
-	if string(second.Content) != "original" {
-		t.Fatalf("Wait reused mutable output: %q", second.Content)
+	if string(completed.GetExecution().GetOutput().GetContent()) != "original" {
+		t.Fatal("collected bytes alias the server")
 	}
 
 	_, watchCalls, releaseExecutionCalls, _ := server.callSnapshot()
-	if watchCalls != 2 || releaseExecutionCalls != 0 {
-		t.Fatalf("Wait calls: watch=%d release=%d", watchCalls, releaseExecutionCalls)
+	if watchCalls != 1 || releaseExecutionCalls != 1 {
+		t.Fatalf("watch=%d release=%d", watchCalls, releaseExecutionCalls)
 	}
 }
 
@@ -220,7 +223,7 @@ func TestExecutionWaitPropagatesContextAndStreamErrors(t *testing.T) {
 		cancel()
 		select {
 		case err := <-result:
-			if err != context.Canceled { //nolint:errorlint // Require the original caller cancellation error, without wrapping.
+			if !errors.Is(err, context.Canceled) {
 				t.Fatalf("Wait did not return the caller context error: %#v", err)
 			}
 		case <-time.After(10 * time.Second):
@@ -256,7 +259,7 @@ func TestExecutionWaitRejectsIncompleteTerminalSnapshots(t *testing.T) {
 				Sequence:  1,
 				Execution: executionSnapshotProto("execution-1", wirev1.ExecutionState_EXECUTION_STATE_COMPLETED, nil, nil),
 			},
-			message: "Wire server returned a completed execution without output",
+			message: "",
 		},
 		{
 			name: "failed without details",
@@ -264,7 +267,7 @@ func TestExecutionWaitRejectsIncompleteTerminalSnapshots(t *testing.T) {
 				Sequence:  1,
 				Execution: executionSnapshotProto("execution-1", wirev1.ExecutionState_EXECUTION_STATE_FAILED, nil, nil),
 			},
-			message: "Wire server returned a failed execution without failure details",
+			message: "missing failure details",
 		},
 	}
 
@@ -274,7 +277,7 @@ func TestExecutionWaitRejectsIncompleteTerminalSnapshots(t *testing.T) {
 			_, _, execution := openTestExecution(t, server)
 
 			_, err := execution.Wait(testClientContext(t))
-			if err == nil || err.Error() != test.message {
+			if (err == nil) != (test.message == "") || err != nil && err.Error() != test.message {
 				t.Fatalf("unexpected incomplete-terminal result: %v", err)
 			}
 		})
@@ -310,6 +313,7 @@ func openTestExecution(t *testing.T, server *clientTestServer) (*connectionHandl
 	return client, plan, execution
 }
 
+//nolint:staticcheck // Legacy snapshot fixtures are translated into framed output by this test server.
 func executionSnapshotProto(id string, state wirev1.ExecutionState, output *wirev1.Output, failure *wirev1.Failure) *wirev1.Execution {
 	return &wirev1.Execution{
 		Id:      &wirev1.ExecutionId{Value: id},
@@ -326,6 +330,7 @@ func executionStartedEvent(id string) *wirev1.WatchExecutionResponse {
 	}
 }
 
+//nolint:staticcheck // Legacy snapshot fixtures are translated into framed output by this test server.
 func executionCompletedEvent(id string, contentType string, content []byte) *wirev1.WatchExecutionResponse {
 	return &wirev1.WatchExecutionResponse{
 		Sequence: 2,
@@ -336,6 +341,7 @@ func executionCompletedEvent(id string, contentType string, content []byte) *wir
 	}
 }
 
+//nolint:staticcheck // Legacy snapshot fixtures are translated into framed output by this test server.
 func executionFailedEvent(id string, content []byte, failure *wirev1.Failure) *wirev1.WatchExecutionResponse {
 	var output *wirev1.Output
 

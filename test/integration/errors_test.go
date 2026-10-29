@@ -17,6 +17,7 @@ import (
 	"github.com/MontFerret/api/diagnostics"
 	"github.com/MontFerret/api/source"
 	"github.com/MontFerret/wire/client"
+	"github.com/MontFerret/wire/internal/testoutput"
 	"github.com/MontFerret/wire/pkg/failure"
 	"github.com/MontFerret/wire/server"
 	"github.com/MontFerret/wire/test/integration/harness"
@@ -37,12 +38,12 @@ func TestDiagnosticsAndFailureClassification(t *testing.T) {
 
 				hostErr := errors.Join(errors.New("private-host-secret"), values.Err())
 				behavior := harness.RuntimeBehavior{
-					Run: func(context.Context, api.Source, harness.SessionOptions) (*api.Output, error) {
+					Run: func(context.Context, api.Source, harness.SessionOptions) (*api.Content, error) {
 						return nil, hostErr
 					},
 					Plan: harness.PlanBehavior{
 						Session: func(harness.SessionOptions) harness.SessionBehavior {
-							return harness.SessionBehavior{Run: func(context.Context, int) (*api.Output, error) { return nil, hostErr }}
+							return harness.SessionBehavior{Run: func(context.Context, int) (*api.Content, error) { return nil, hostErr }}
 						},
 						Debugger: harness.DebuggerBehavior{Command: func(context.Context, string, int) (*debugger.Event, error) {
 							return &debugger.Event{Reason: debugger.ReasonRuntimeError, Error: hostErr}, nil
@@ -64,7 +65,7 @@ func TestDiagnosticsAndFailureClassification(t *testing.T) {
 				case "compile debug":
 					_, err = h.Runtime().CompileDebug(h.Context(), src)
 				case "runtime":
-					_, err = h.Runtime().Run(h.Context(), src)
+					_, err = testoutput.Collect(h.Runtime().Run(h.Context(), src))
 				default:
 					plan, createErr := h.Runtime().CompileDebug(h.Context(), src)
 					if createErr != nil {
@@ -81,7 +82,7 @@ func TestDiagnosticsAndFailureClassification(t *testing.T) {
 
 						h.Own(session)
 
-						_, err = session.Run(h.Context())
+						_, err = testoutput.Collect(session.Run(h.Context()))
 					} else {
 						session, createErr := plan.NewDebugSession(h.Context())
 						if createErr != nil {
@@ -143,7 +144,7 @@ func TestErrorFamilies(t *testing.T) {
 			t.Fatalf("invalid source=%v", err)
 		}
 
-		if _, err := h.Runtime().Run(h.Context(), api.Source{Content: "RETURN 1"}, api.WithParam("bad", make(chan int))); err == nil {
+		if _, err := testoutput.Collect(h.Runtime().Run(h.Context(), api.Source{Content: "RETURN 1"}, api.WithParam("bad", make(chan int)))); err == nil {
 			t.Fatal("unsupported value accepted")
 		}
 
@@ -151,7 +152,7 @@ func TestErrorFamilies(t *testing.T) {
 			t.Fatal("local validation dispatched runtime execution")
 		}
 
-		if _, err := h.Runtime().Run(h.Context(), api.Source{Content: "RETURN 2"}); err != nil {
+		if _, err := testoutput.Collect(h.Runtime().Run(h.Context(), api.Source{Content: "RETURN 2"})); err != nil {
 			t.Fatalf("rejection invalidated Runtime: %v", err)
 		}
 	})
@@ -188,7 +189,7 @@ func TestErrorFamilies(t *testing.T) {
 		ctx, cancel := context.WithDeadline(h.Context(), time.Now().Add(-time.Second))
 		defer cancel()
 
-		if _, err := h.Runtime().Run(ctx, api.Source{Content: "RETURN 1"}); !errors.Is(err, context.DeadlineExceeded) {
+		if _, err := testoutput.Collect(h.Runtime().Run(ctx, api.Source{Content: "RETURN 1"})); !errors.Is(err, context.DeadlineExceeded) {
 			t.Fatalf("caller deadline=%v", err)
 		}
 
@@ -197,11 +198,11 @@ func TestErrorFamilies(t *testing.T) {
 		}
 	})
 	t.Run("remote cancellation differs from caller cancellation", func(t *testing.T) {
-		h := harness.New(t, harness.WithBehavior(harness.RuntimeBehavior{Run: func(context.Context, api.Source, harness.SessionOptions) (*api.Output, error) {
+		h := harness.New(t, harness.WithBehavior(harness.RuntimeBehavior{Run: func(context.Context, api.Source, harness.SessionOptions) (*api.Content, error) {
 			return nil, context.Canceled
 		}}))
 
-		if _, err := h.Runtime().Run(h.Context(), api.Source{Content: "RETURN 1"}); !errors.Is(err, client.ErrExecutionCancelled) || errors.Is(err, context.Canceled) {
+		if _, err := testoutput.Collect(h.Runtime().Run(h.Context(), api.Source{Content: "RETURN 1"})); !errors.Is(err, client.ErrExecutionCancelled) || !errors.Is(err, context.Canceled) {
 			t.Fatalf("remote cancellation=%v", err)
 		}
 	})
@@ -255,7 +256,7 @@ func TestConstructorPanicPreservesParent(t *testing.T) {
 		t.Fatalf("constructor panic invalidated parent: %v", err)
 	}
 
-	if _, err := session.Run(h.Context()); err != nil {
+	if _, err := testoutput.Collect(session.Run(h.Context())); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -267,12 +268,12 @@ func TestPanicContainmentAndResourcePoisoning(t *testing.T) {
 
 			switch mode {
 			case "runtime":
-				behavior.Run = func(context.Context, api.Source, harness.SessionOptions) (*api.Output, error) { panic("panic-secret") }
+				behavior.Run = func(context.Context, api.Source, harness.SessionOptions) (*api.Content, error) { panic("panic-secret") }
 			case "compile":
 				behavior.Compile = func(context.Context, api.Source, bool, harness.CompileOptions) error { panic("panic-secret") }
 			case "session":
 				behavior.Plan.Session = func(harness.SessionOptions) harness.SessionBehavior {
-					return harness.SessionBehavior{Run: func(context.Context, int) (*api.Output, error) { panic("panic-secret") }}
+					return harness.SessionBehavior{Run: func(context.Context, int) (*api.Content, error) { panic("panic-secret") }}
 				}
 			case "debugger":
 				behavior.Plan.Debugger.Inspect = func(string) error { panic("panic-secret") }
@@ -287,7 +288,7 @@ func TestPanicContainmentAndResourcePoisoning(t *testing.T) {
 
 			switch mode {
 			case "runtime":
-				_, err = h.Runtime().Run(h.Context(), api.Source{Content: "RETURN 1"})
+				_, err = testoutput.Collect(h.Runtime().Run(h.Context(), api.Source{Content: "RETURN 1"}))
 			case "compile":
 				_, err = h.Runtime().Compile(h.Context(), api.Source{Content: "RETURN 1"})
 			default:
@@ -338,9 +339,9 @@ func TestPanicContainmentAndResourcePoisoning(t *testing.T) {
 							t.Fatal("cleanup panic was not retained")
 						}
 					} else {
-						_, err = session.Run(h.Context())
+						_, err = testoutput.Collect(session.Run(h.Context()))
 
-						if _, nextErr := session.Run(h.Context()); status.Code(nextErr) != codes.FailedPrecondition {
+						if _, nextErr := testoutput.Collect(session.Run(h.Context())); status.Code(nextErr) != codes.FailedPrecondition {
 							t.Fatalf("poisoned Session reuse=%v", nextErr)
 						}
 					}

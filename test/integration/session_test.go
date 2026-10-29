@@ -12,6 +12,7 @@ import (
 
 	"github.com/MontFerret/api"
 	"github.com/MontFerret/wire/client"
+	"github.com/MontFerret/wire/internal/testoutput"
 	"github.com/MontFerret/wire/pkg/failure"
 	"github.com/MontFerret/wire/server"
 	"github.com/MontFerret/wire/test/integration/harness"
@@ -20,12 +21,12 @@ import (
 func TestSessionRejectsOverlapAndReopensAfterRelease(t *testing.T) {
 	block := harness.NewBlock(t)
 	h := harness.New(t, harness.WithBehavior(harness.RuntimeBehavior{Plan: harness.PlanBehavior{Session: func(harness.SessionOptions) harness.SessionBehavior {
-		return harness.SessionBehavior{Run: func(ctx context.Context, call int) (*api.Output, error) {
+		return harness.SessionBehavior{Run: func(ctx context.Context, call int) (*api.Content, error) {
 			if call == 1 {
-				return &api.Output{}, block.Wait(ctx)
+				return &api.Content{}, block.Wait(ctx)
 			}
 
-			return &api.Output{ContentType: "text/plain", Content: []byte("reused")}, nil
+			return &api.Content{Metadata: api.Metadata{ContentType: "text/plain"}, Data: []byte("reused")}, nil
 		}}
 	}}}))
 
@@ -47,11 +48,11 @@ func TestSessionRejectsOverlapAndReopensAfterRelease(t *testing.T) {
 	defer cancel()
 	result := make(chan error, 1)
 	go func() {
-		_, err := session.Run(ctx)
+		_, err := testoutput.Collect(session.Run(ctx))
 		result <- err
 	}()
 	harness.Await(t, block.Started)
-	_, err = session.Run(h.Context())
+	_, err = testoutput.Collect(session.Run(h.Context()))
 
 	var remote *client.Error
 	if !errors.As(err, &remote) || remote.Category != failure.CategoryInvalidState || status.Code(err) != codes.FailedPrecondition {
@@ -67,8 +68,8 @@ func TestSessionRejectsOverlapAndReopensAfterRelease(t *testing.T) {
 	harness.Await(t, block.Cancelled)
 	harness.Await(t, block.Finished)
 
-	output, err := session.Run(h.Context())
-	if err != nil || string(output.Content) != "reused" {
+	output, err := testoutput.Collect(session.Run(h.Context()))
+	if err != nil || string(output.Data) != "reused" {
 		t.Fatalf("durable session not reusable: %+v %v", output, err)
 	}
 
@@ -87,12 +88,12 @@ func TestSessionCompletionRacesCancellationWithoutDuplicateCleanup(t *testing.T)
 			limits := server.DefaultLimits()
 			limits.MaxExecutionsPerConnection = 1
 			h := harness.New(t, harness.WithServerOptions(server.WithLimits(limits)), harness.WithBehavior(harness.RuntimeBehavior{Plan: harness.PlanBehavior{Session: func(harness.SessionOptions) harness.SessionBehavior {
-				return harness.SessionBehavior{Run: func(ctx context.Context, call int) (*api.Output, error) {
+				return harness.SessionBehavior{Run: func(ctx context.Context, call int) (*api.Content, error) {
 					if call == 1 {
-						return &api.Output{}, block.Wait(ctx)
+						return &api.Content{}, block.Wait(ctx)
 					}
 
-					return &api.Output{}, nil
+					return &api.Content{}, nil
 				}}
 			}}}))
 
@@ -114,7 +115,7 @@ func TestSessionCompletionRacesCancellationWithoutDuplicateCleanup(t *testing.T)
 			defer cancel()
 			result := make(chan error, 1)
 			go func() {
-				_, err := session.Run(ctx)
+				_, err := testoutput.Collect(session.Run(ctx))
 				result <- err
 			}()
 			harness.Await(t, block.Started)
@@ -138,7 +139,7 @@ func TestSessionCompletionRacesCancellationWithoutDuplicateCleanup(t *testing.T)
 				t.Fatal("execution cleanup duplicated")
 			}
 
-			if _, err := session.Run(h.Context()); err != nil {
+			if _, err := testoutput.Collect(session.Run(h.Context())); err != nil {
 				t.Fatalf("execution capacity leaked: %v", err)
 			}
 

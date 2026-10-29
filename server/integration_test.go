@@ -20,6 +20,7 @@ import (
 	"github.com/MontFerret/api/source"
 	"github.com/MontFerret/wire/client"
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
+	"github.com/MontFerret/wire/internal/testoutput"
 	"github.com/MontFerret/wire/pkg/failure"
 	"github.com/MontFerret/wire/server"
 )
@@ -39,8 +40,8 @@ func TestUnifiedRuntimeCompileExecuteAndBorrowedOwnership(t *testing.T) {
 	plan := &apiPlanSpy{
 		params: []string{"input"},
 		newSession: func(context.Context, apiSessionOptions) (api.Session, error) {
-			return &apiSessionSpy{run: func(context.Context) (*api.Output, error) {
-				return &api.Output{ContentType: "application/json", Content: outputBytes}, nil
+			return &apiSessionSpy{run: func(context.Context) (*api.Content, error) {
+				return &api.Content{Metadata: api.Metadata{ContentType: "application/json"}, Data: outputBytes}, nil
 			}}, nil
 		},
 	}
@@ -55,7 +56,7 @@ func TestUnifiedRuntimeCompileExecuteAndBorrowedOwnership(t *testing.T) {
 	defer cancel()
 	rpc := wirev1.NewRuntimeServiceClient(env.conn)
 
-	stream, err := rpc.Connect(streamCtx, &wirev1.ConnectRequest{})
+	stream, err := rpc.Connect(streamCtx, &wirev1.ConnectRequest{OutputFramingVersion: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,12 +109,12 @@ func TestUnifiedRuntimeCompileExecuteAndBorrowedOwnership(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		output, err := session.Run(testContext(t))
+		output, err := testoutput.Collect(session.Run(testContext(t)))
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		if output.ContentType != "application/json" || string(output.Content) != `{"runtime":"unified"}` {
+		if output.Metadata.ContentType != "application/json" || string(output.Data) != `{"runtime":"unified"}` {
 			t.Fatalf("unexpected output: %#v", output)
 		}
 
@@ -170,14 +171,14 @@ func TestUnifiedRuntimeCompileExecuteAndBorrowedOwnership(t *testing.T) {
 		t.Fatalf("Wire closed borrowed API runtime %d times", runtimeCloseCalls)
 	}
 
-	if _, err := runtime.Run(context.Background(), api.NewAnonymousSource("RETURN 1")); err != nil {
+	if _, err := testoutput.Collect(runtime.Run(context.Background(), api.NewAnonymousSource("RETURN 1"))); err != nil {
 		t.Fatalf("borrowed runtime is no longer usable: %v", err)
 	}
 }
 
 func TestServerShutdownClosesOwnedResourcesWithoutClosingRuntime(t *testing.T) {
 	started := make(chan struct{})
-	session := &apiSessionSpy{run: func(ctx context.Context) (*api.Output, error) {
+	session := &apiSessionSpy{run: func(ctx context.Context) (*api.Content, error) {
 		close(started)
 		<-ctx.Done()
 
@@ -204,7 +205,7 @@ func TestServerShutdownClosesOwnedResourcesWithoutClosingRuntime(t *testing.T) {
 	result := make(chan error, 1)
 	runCtx := testContext(t)
 	go func() {
-		_, err := remoteSession.Run(runCtx)
+		_, err := testoutput.Collect(remoteSession.Run(runCtx))
 		result <- err
 	}()
 
@@ -253,7 +254,7 @@ func TestServerShutdownClosesOwnedResourcesWithoutClosingRuntime(t *testing.T) {
 		t.Fatalf("shutdown closed borrowed API runtime %d times", runtimeCloseCalls)
 	}
 
-	if _, err := runtime.Run(context.Background(), api.NewAnonymousSource("RETURN 1")); err != nil {
+	if _, err := testoutput.Collect(runtime.Run(context.Background(), api.NewAnonymousSource("RETURN 1"))); err != nil {
 		t.Fatalf("borrowed runtime is no longer usable: %v", err)
 	}
 }
@@ -314,8 +315,8 @@ func TestPortableDiagnosticsCrossImmediateAndAsynchronousFailures(t *testing.T) 
 
 	t.Run("execution failure", func(t *testing.T) {
 		plan := &apiPlanSpy{newSession: func(context.Context, apiSessionOptions) (api.Session, error) {
-			return &apiSessionSpy{run: func(context.Context) (*api.Output, error) {
-				return &api.Output{ContentType: "text/plain", Content: []byte("partial")},
+			return &apiSessionSpy{run: func(context.Context) (*api.Content, error) {
+				return &api.Content{Metadata: api.Metadata{ContentType: "text/plain"}, Data: []byte("partial")},
 					errors.Join(errors.New("runtime execution secret"), values)
 			}}, nil
 		}}
@@ -334,7 +335,7 @@ func TestPortableDiagnosticsCrossImmediateAndAsynchronousFailures(t *testing.T) 
 			t.Fatal(err)
 		}
 
-		output, err := session.Run(testContext(t))
+		output, err := testoutput.Collect(session.Run(testContext(t)))
 
 		var terminalFailure *failure.Failure
 		if !errors.As(err, &terminalFailure) || terminalFailure.Category != failure.CategoryExecution {
@@ -346,7 +347,7 @@ func TestPortableDiagnosticsCrossImmediateAndAsynchronousFailures(t *testing.T) 
 			t.Fatalf("portable execution diagnostics changed: %#v", terminalFailure)
 		}
 
-		if output.ContentType != "text/plain" || string(output.Content) != "partial" {
+		if output.Metadata.ContentType != "text/plain" || string(output.Data) != "partial" {
 			t.Fatalf("partial encoded output changed: %#v", output)
 		}
 	})
@@ -372,8 +373,8 @@ func testDiagnostics() diagnostics.Diagnostics {
 
 func TestMessageLimitsRemainAtTheGRPCBoundary(t *testing.T) {
 	plan := &apiPlanSpy{newSession: func(context.Context, apiSessionOptions) (api.Session, error) {
-		return &apiSessionSpy{run: func(context.Context) (*api.Output, error) {
-			return &api.Output{ContentType: "application/json", Content: []byte(strings.Repeat("x", 2048))}, nil
+		return &apiSessionSpy{run: func(context.Context) (*api.Content, error) {
+			return &api.Content{Metadata: api.Metadata{ContentType: "application/json"}, Data: []byte(strings.Repeat("x", 2048))}, nil
 		}}, nil
 	}}
 	runtime := &apiRuntimeSpy{compile: func(context.Context, api.Source, bool) (api.Plan, error) {
@@ -386,7 +387,7 @@ func TestMessageLimitsRemainAtTheGRPCBoundary(t *testing.T) {
 	streamCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	stream, err := wirev1.NewRuntimeServiceClient(env.conn).Connect(streamCtx, &wirev1.ConnectRequest{})
+	stream, err := wirev1.NewRuntimeServiceClient(env.conn).Connect(streamCtx, &wirev1.ConnectRequest{OutputFramingVersion: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -414,11 +415,9 @@ func TestMessageLimitsRemainAtTheGRPCBoundary(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := session.Run(testContext(t)); status.Code(err) != codes.ResourceExhausted {
-		var wireErr *client.Error
-		if !errors.As(err, &wireErr) || status.Code(err) != codes.ResourceExhausted {
-			t.Fatalf("unexpected outbound message result: %v", err)
-		}
+	content, err := testoutput.Collect(session.Run(testContext(t)))
+	if err != nil || content == nil || len(content.Data) != 2048 {
+		t.Fatalf("chunked outbound result=%v %v", content, err)
 	}
 }
 
