@@ -288,8 +288,8 @@ func TestProtocolDescriptorsReserveRemovedV1Surface(t *testing.T) {
 	}
 
 	executionMethods := wirev1.File_ferret_wire_v1_execution_proto.Services().ByName("ExecutionService").Methods()
-	if executionMethods.Len() != 5 {
-		t.Error("ExecutionService retained a direct Runtime invocation RPC")
+	if executionMethods.Len() != 6 || executionMethods.ByName("ReadExecutionOutput") == nil || !executionMethods.ByName("ReadExecutionOutput").IsStreamingServer() {
+		t.Error("ExecutionService does not expose the expected execution and output RPCs")
 	}
 
 	for _, required := range []protoreflect.Name{"Execute", "RunSession"} {
@@ -364,7 +364,7 @@ func TestRuntimeVersionSerializationPreservesBytesAndPresence(t *testing.T) {
 		{name: "mixed NUL and invalid bytes", value: []byte("runtime\x00\xff\xc3")},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			message := &wirev1.ConnectResponse{RuntimeVersion: test.value}
+			message := &wirev1.ConnectResponse{OutputFramingVersion: 1, RuntimeVersion: test.value}
 
 			encoded, err := proto.Marshal(message)
 			if err != nil {

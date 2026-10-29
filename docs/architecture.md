@@ -37,7 +37,7 @@ remain host responsibilities.
 
 `client.New(ctx, target, options...)` and `client.From(ctx, conn)` return the canonical `api.Runtime` interface.
 Private adapters implement `api.Plan`, `api.Session`, and `api/debugger.Session`;
-output is `*api.Output`, whose definition belongs to `api/result`. The client
+normal output is the one-shot `api.Output` interface defined by `api/result`; debugger events carry detached `*api.Content`. The client
 does not re-export aliases or expose a second resource or event model.
 Its logical connection, allocation handles, RPC clients, and watches remain
 private within the owning client package.
@@ -67,13 +67,16 @@ embeds its corresponding generated service base and adapts one protocol domain.
 | RuntimeService | Opens/closes logical connections; calls `core.Run` with the borrowed runtime and connection store |
 | PlanService | Calls `core.CompilePlan` with the borrowed runtime and connection store; releases plans through that store |
 | SessionService | Resolves a Plan in the connection store and calls its `NewSession` |
-| ExecutionService | Resolves a Plan or Session for execution creation; resolves Execution for watches, cancellation, and release |
+| ExecutionService | Resolves a Plan or Session for execution creation; resolves Execution for exclusive output delivery, watches, cancellation, and release |
 | DebugService | Resolves a Plan for debugger creation; resolves DebugSession for commands, inspection, watches, and release |
 
 `prepareOperation` resolves the connection and returns its resource store plus
 an ordinary `context.Context`. The context preserves request values and deadlines
 and joins connection cancellation; each handler cancels it to detach the lifetime
 callback. There is no dependency-carrying operation context.
+Normal output delivery resolves the same connection-scoped store directly and
+lets `Execution.ReadOutput` join the request to the execution lifetime, which
+already inherits connection and durable-session cancellation.
 
 Services convert protobuf sources and options to canonical API types before
 calling core. Source/diagnostic, option/value, output, execution, debugger, and
@@ -86,22 +89,73 @@ is shared within server error handling.
 
 ## Execution and host boundaries
 
-Normal results cross Wire through the Unified API encoded output abstraction:
+Normal results cross Wire through `api.Output`: immutable `Metadata`, synchronous
+`Consume`, materializing `Collect`, and idempotent `Close`. An Execution invokes
+hosted Run exactly once, establishes metadata, and owns the returned output until
+consumption or abandonment settles. External Metadata, Consume, and Close calls
+use the existing panic boundary. An output-operation panic poisons a durable
+session; a Wire-owned consumer panic remains a Wire defect. Temporary sessions
+close after their output; caller-owned sessions remain reusable after settlement.
 
-```go
-type Output struct {
-	ContentType string
-	Content     []byte
-}
-```
+The client allocates an execution and opens `ReadExecutionOutput`, awaiting its
+header before returning a handle. Preparation failures return no handle. Later
+execution, encoding, delivery, and cleanup failures are consumed with the output.
+The handle retains the runtime reference. Consumption and invocation contexts
+jointly bound delivery; Close waits for an active callback before finalizing.
+Cleanup errors remain available through repeated Close calls. Invalid/canceled
+admission never claims or disrupts a handle. Metadata is local and immutable.
 
-The contract is exactly content type plus encoded bytes. Wire does not expose,
-reconstruct, or maintain a parallel representation of implementation-specific
-runtime values. It does not add Wire-specific runtime options, private raw-value
-codecs, runtime-value type switches, or locally reconstructed runtime behavior.
-Plan executions use `api.Plan` and `api.Session`; the direct-runtime operation
-calls the borrowed `api.Runtime.Run` exactly once. Debugger values are the
-separate structured boundary defined by `api/debugger`.
+`internal/outputstream` owns output-specific framing, splitting, validation and
+actual-byte accumulation. The transport sends a header, bounded ordered chunks,
+and an explicit terminal with byte accounting and sanitized failure/context flags.
+The size calculation includes each RPC envelope. Framed execution, command, and
+debugger-watch responses use identity compression, selected inside recovery and
+before host middleware can send headers. This makes protobuf size an exact
+transport payload budget even when a request uses gzip. Host middleware must
+preserve that selection. No aggregate cap or allocation from advertised total
+length is used. Normal delivery caches its chunk budget per execution service. Its handler coordinates ReadOutput and terminal framing, with
+one dedicated sender and the existing execution goroutine producing chunks across
+an unbuffered handoff. At most one detached message is being sent and one is held
+by the producer. Success waits for the terminal Send to finish; send failures
+remain transport errors even when they also cancel hosted consumption. Detached
+senders recover host SendMsg panics using the same sanitized transport status as
+the handler interceptor; they do not cross the hosted UAPI panic boundary.
+Wire-generated framing-limit errors retain ResourceExhausted across execution
+callbacks without allowing arbitrary hosted statuses through sanitization.
+
+ReadOutput joins request and execution cancellation once for hosted consumption.
+Cancellation returns the handler independently of a stalled Send or hosted
+cleanup, unblocking transport delivery while the execution owner settles cleanup.
+Callbacks may outlive the canceled handler, so the handoff channel is never closed
+and the handler does not inspect writer state on that path. Release retains quota
+accounting until cleanup settles. Hosted code must still honor cancellation;
+Wire cannot forcibly stop it. On the client, the output's existing lifetime callback
+cancels active consumption; its consumption context preserves caller values and
+the earlier of the invocation and consumption deadlines without duplicate links.
+Cancellation marks active output as stopping before requesting interruption.
+Admission also observes active-context cancellation directly so asynchronous
+cancellation callbacks cannot admit a competing consumer as ordinary active use.
+Execution event history contains metadata and failures, never bulk bytes.
+
+Debugger output remains fully materialized `*api.Content`. After dequeueing each
+semantic event, RunCommand and WatchDebug send the same output frames. Frames have
+no event sequence and never enter event queues. One framed transfer serves both
+snapshot and command-result projections. Each observer delivers independently; a stalled
+observer cannot block commands or other observers. Terminal content stays owned by
+the server for replay until release. A separate delivery lifetime survives normal
+debugger completion and ends on resource release or connection shutdown. Failed
+publication uses full resource release to detach both debugger lifetimes before
+returning its pending reservation. Snapshot and command-result projections retain
+separate detached payload copies, as do independently mutable watcher snapshots. Sharing immutable internal storage
+would require a distinct ownership change; completion does not copy state.output
+again after its initial capture. The client publishes an event only after complete
+reconstruction, joins observed semantic errors with transfer errors, and returns detached content that survives session closure.
+
+Wire preserves content presence separately from size: no chunks means absent;
+an empty chunk means present empty. Fully transferred partial content retains its
+original metadata alongside hosted errors. Known-length mismatch is an error on
+otherwise successful transfer. Chunked RPC delivery does not imply incremental
+query evaluation. Wire never decodes payloads into runtime values.
 
 The host supplies the configured runtime and explicitly selects its endpoint:
 
@@ -165,7 +219,7 @@ timeout matches context.DeadlineExceeded and makes no settlement guarantee.
 Genuine serving errors survive cancellation races, and independent known serving
 and cleanup failures remain joined. Neither path closes the borrowed runtime.
 
-The Connect handshake contains the logical connection ID, Wire protocol identity,
+The Connect handshake requires output framing version 1 and contains the logical connection ID, Wire protocol identity,
 the exact portable runtime version, and optional host-supplied identity. Runtime
 version is independent of `RuntimeIdentity.version`: the latter describes the
 host application or instance. Version retrieval uses the stream context joined
@@ -464,8 +518,9 @@ objects remain behind the sanitization boundary.
 
 `WithTransportCredentials` passes validated non-nil host credentials to gRPC;
 without them, Wire provides no encryption or authentication. Host unary and
-stream middleware applies globally with recovery outermost, then host registration
-order, then Wire handlers. Empty lists are no-ops, nil entries fail construction,
+stream middleware applies globally with recovery outermost, then the framed-output
+compression policy, host registration order, and Wire handlers. Empty lists are
+no-ops, nil entries fail construction,
 and captured lists are copied. Middleware contexts, metadata, and authenticated
 peer information retain gRPC semantics. Message/resource limits cannot be replaced
 through these options.
@@ -486,10 +541,10 @@ architectural reason and an explicit contract.
 
 ## Universal API contract
 
-Wire targets `v1.0.0-alpha.20`; the retained methods and owning tests are listed in
+Wire targets `v1.0.0-alpha.21`; the retained methods and owning tests are listed in
 [Universal API integration coverage](../test/integration/README.md#interface-coverage).
-Output is optional and independent of execution or cleanup failure. `(nil, nil)`
-is an invalid hosted execution result.
+Run must return a non-nil output handle on successful preparation; `(nil, nil)`
+is invalid. Content may be absent, empty, complete, or partial with a terminal error.
 Compile calls `api.Plan.Params(ctx)` with its allocation context and copies the
 fallible parameter metadata before publication; metadata error or panic closes the unpublished plan once and joins cleanup errors.
 Anonymous sources and explicitly empty filesystem roots/content types pass through

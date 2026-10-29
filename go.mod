@@ -3,7 +3,7 @@ module github.com/MontFerret/wire
 go 1.25.0
 
 require (
-	github.com/MontFerret/api v1.0.0-alpha.20
+	github.com/MontFerret/api v1.0.0-alpha.21
 	github.com/google/uuid v1.6.0
 	github.com/ziflex/go-options v1.7.0
 	google.golang.org/grpc v1.84.0

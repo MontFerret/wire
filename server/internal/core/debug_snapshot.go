@@ -19,9 +19,9 @@ func cloneDebugSnapshot(snapshot wiredebugger.Snapshot) wiredebugger.Snapshot {
 	}
 
 	if snapshot.Output != nil {
-		result.Output = &api.Output{
-			ContentType: snapshot.Output.ContentType,
-			Content:     append([]byte(nil), snapshot.Output.Content...),
+		result.Output = &api.Content{
+			Metadata: snapshot.Output.Metadata,
+			Data:     append(snapshot.Output.Data[:0:0], snapshot.Output.Data...),
 		}
 	}
 

@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"sync"
 
 	"github.com/MontFerret/api"
 	"github.com/MontFerret/api/debugger"
@@ -9,10 +10,18 @@ import (
 	wireexecution "github.com/MontFerret/wire/pkg/execution"
 )
 
-type testEnvironment struct {
-	*Connection
-	host *testHost
-}
+type (
+	testEnvironment struct {
+		*Connection
+		host      *testHost
+		collected sync.Map
+	}
+	// collectedExecution keeps payload assertions separate from lifecycle snapshots.
+	collectedExecution struct {
+		done    chan struct{}
+		content *api.Content
+	}
+)
 
 func (e *testEnvironment) operation(ctx context.Context) (context.Context, context.CancelFunc) {
 	return OperationContext(ctx, e.Context())
@@ -53,6 +62,8 @@ func (e *testEnvironment) Execute(ctx context.Context, input executeRequest) (ex
 	if err != nil {
 		return executionResult{}, err
 	}
+
+	e.collectExecution(execution)
 
 	return executionResult{ID: execution.ID(), Snapshot: execution.Snapshot()}, nil
 }
@@ -96,6 +107,8 @@ func (e *testEnvironment) RunSession(ctx context.Context, id SessionID) (executi
 		return executionResult{}, err
 	}
 
+	e.collectExecution(execution)
+
 	return executionResult{ID: execution.ID(), Snapshot: wireexecution.Snapshot{State: wireexecution.StateRunning}}, nil
 }
 
@@ -107,6 +120,8 @@ func (e *testEnvironment) Run(ctx context.Context, input runRequest) (executionR
 	if err != nil {
 		return executionResult{}, err
 	}
+
+	e.collectExecution(execution)
 
 	return executionResult{ID: execution.ID(), Snapshot: wireexecution.Snapshot{State: wireexecution.StateRunning}}, nil
 }
@@ -127,6 +142,8 @@ func (e *testEnvironment) CancelExecution(id ExecutionID) (executionResult, erro
 		return executionResult{}, err
 	}
 
+	e.collectExecution(execution)
+
 	return executionResult{ID: execution.ID(), Snapshot: execution.Cancel()}, nil
 }
 
@@ -146,7 +163,12 @@ func (e *testEnvironment) ReleaseExecution(ctx context.Context, id ExecutionID) 
 	operation, cancel := e.operation(ctx)
 	defer cancel()
 
-	return e.resources.ReleaseExecution(operation, id)
+	err := e.resources.ReleaseExecution(operation, id)
+	if err == nil {
+		e.collected.Delete(id)
+	}
+
+	return err
 }
 
 func (e *testEnvironment) OpenDebugSession(ctx context.Context, input debugRequest) (debugResult, error) {
@@ -326,4 +348,39 @@ func (e *testEnvironment) Close(ctx context.Context) error {
 	}
 
 	return err
+}
+
+func (e *testEnvironment) collectExecution(execution *Execution) {
+	entry := &collectedExecution{done: make(chan struct{})}
+	if _, loaded := e.collected.LoadOrStore(execution.ID(), entry); loaded {
+		return
+	}
+
+	go func() {
+		defer close(entry.done)
+		var metadata api.Metadata
+		_ = execution.ReadOutput(context.Background(), func(value api.Metadata) error { metadata = value; return nil }, func(_ context.Context, data []byte) error {
+			if entry.content == nil {
+				entry.content = &api.Content{Metadata: metadata}
+			}
+
+			entry.content.Data = append(entry.content.Data, data...)
+
+			return nil
+		})
+		// Cancellation can end ReadOutput before the owning execution settles.
+		<-execution.done
+	}()
+}
+
+func (e *testEnvironment) collectedContent(id ExecutionID) *api.Content {
+	value, ok := e.collected.Load(id)
+	if !ok {
+		return nil
+	}
+
+	entry := value.(*collectedExecution)
+	<-entry.done
+
+	return cloneOutput(entry.content)
 }

@@ -5,26 +5,21 @@ import (
 
 	"github.com/MontFerret/api"
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
+	"github.com/MontFerret/wire/internal/outputstream"
 	"github.com/MontFerret/wire/pkg/execution"
 )
 
-func executionOutput(snapshot execution.Snapshot) *api.Output {
-	if snapshot.Output == nil {
-		return nil
-	}
-
-	return &api.Output{
-		ContentType: snapshot.Output.ContentType,
-		Content:     append([]byte(nil), snapshot.Output.Content...),
-	}
-}
-
-func convertOutput(value *wirev1.Output) *api.Output {
+func convertOutput(value *wirev1.Output) (*api.Content, error) {
 	if value == nil {
-		return nil
+		return nil, nil
 	}
 
-	return &api.Output{ContentType: value.GetContentType(), Content: append([]byte(nil), value.GetContent()...)}
+	metadata, err := outputstream.Metadata(value.GetMetadata())
+	if err != nil {
+		return nil, err
+	}
+
+	return &api.Content{Metadata: metadata}, nil
 }
 
 func convertExecutionSnapshot(value *wirev1.Execution) (execution.Snapshot, error) {
@@ -38,10 +33,21 @@ func convertExecutionSnapshot(value *wirev1.Execution) (execution.Snapshot, erro
 		return execution.Snapshot{}, err
 	}
 
+	var metadata *api.Metadata
+
+	if value.GetMetadata() != nil {
+		converted, err := outputstream.Metadata(value.GetMetadata())
+		if err != nil {
+			return execution.Snapshot{}, err
+		}
+
+		metadata = &converted
+	}
+
 	return execution.Snapshot{
-		State:   state,
-		Output:  convertOutput(value.GetOutput()),
-		Failure: terminalFailure,
+		State:    state,
+		Metadata: metadata,
+		Failure:  terminalFailure,
 	}, nil
 }
 

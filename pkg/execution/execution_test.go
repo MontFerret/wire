@@ -28,18 +28,18 @@ func TestStateTerminal(t *testing.T) {
 }
 
 func TestExecutionSemanticTypesUseUnifiedOutputAndSharedFailure(t *testing.T) {
-	output := &api.Output{ContentType: "application/json", Content: []byte("1")}
+	metadata := &api.Metadata{ContentType: "application/json"}
 	terminalFailure := &failure.Failure{Category: failure.CategoryExecution, Message: "runtime operation failed"}
 	event := execution.Event{
 		Sequence: 7,
 		Snapshot: execution.Snapshot{
-			State:   execution.StateFailed,
-			Output:  output,
-			Failure: terminalFailure,
+			State:    execution.StateFailed,
+			Metadata: metadata,
+			Failure:  terminalFailure,
 		},
 	}
 
-	if event.Sequence != 7 || event.Snapshot.Output != output || event.Snapshot.Failure != terminalFailure {
+	if event.Sequence != 7 || event.Snapshot.Metadata != metadata || event.Snapshot.Failure != terminalFailure {
 		t.Fatalf("unexpected execution event: %#v", event)
 	}
 }

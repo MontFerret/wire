@@ -60,7 +60,12 @@ func convertCommandResult(value *wirev1.DebugCommandResult) (*wiredebugger.Comma
 			ids[i] = converted
 		}
 
-		result.Event = &debugger.Event{Reason: reason, Depth: depth, HitBreakpointIDs: ids, Output: convertOutput(event.GetOutput()), Error: eventErr}
+		content, err := convertOutput(event.GetOutput())
+		if err != nil {
+			return nil, err
+		}
+
+		result.Event = &debugger.Event{Reason: reason, Depth: depth, HitBreakpointIDs: ids, Output: content, Error: eventErr}
 
 		if location != nil {
 			result.Event.Location = *location

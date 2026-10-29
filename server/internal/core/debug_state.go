@@ -14,7 +14,7 @@ type debugSessionState struct {
 	location *source.Range
 	hitIDs   []apidebugger.BreakpointID
 	depth    int
-	output   *api.Output
+	output   *api.Content
 	failure  *failure.Failure
 	result   *wiredebugger.CommandResult
 }

@@ -6,6 +6,7 @@ import (
 
 	"github.com/MontFerret/api"
 	"github.com/MontFerret/wire/client"
+	"github.com/MontFerret/wire/internal/testoutput"
 )
 
 func BenchmarkRuntimeAdapterDurableSession(b *testing.B) {
@@ -41,7 +42,7 @@ func BenchmarkRuntimeAdapterDurableSession(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
-		if _, err := session.Run(b.Context()); err != nil {
+		if _, err := testoutput.Collect(session.Run(b.Context())); err != nil {
 			b.Fatal(err)
 		}
 	}

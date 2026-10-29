@@ -10,6 +10,7 @@ import (
 	"github.com/MontFerret/api"
 	"github.com/MontFerret/api/debugger"
 	"github.com/MontFerret/wire/client"
+	"github.com/MontFerret/wire/internal/testoutput"
 	"github.com/MontFerret/wire/pkg/failure"
 	"github.com/MontFerret/wire/test/integration/harness"
 )
@@ -18,27 +19,27 @@ func TestRuntimeAndSessionOutputRoundTrip(t *testing.T) {
 	for _, direct := range []bool{true, false} {
 		for _, test := range []struct {
 			name   string
-			output api.Output
+			output api.Content
 			err    error
 		}{
 			{name: "zero"},
-			{name: "empty", output: api.Output{ContentType: "text/plain", Content: []byte{}}},
-			{name: "text", output: api.Output{ContentType: "text/plain; charset=utf-8", Content: []byte("héllo")}},
-			{name: "binary", output: api.Output{ContentType: "application/octet-stream", Content: []byte{0, 255, 3, 0}}},
-			{name: "partial", output: api.Output{ContentType: "application/json", Content: []byte(`{"partial":true}`)}, err: errors.New("host secret")},
+			{name: "empty", output: api.Content{Metadata: api.Metadata{ContentType: "text/plain"}, Data: []byte{}}},
+			{name: "text", output: api.Content{Metadata: api.Metadata{ContentType: "text/plain; charset=utf-8"}, Data: []byte("héllo")}},
+			{name: "binary", output: api.Content{Metadata: api.Metadata{ContentType: "application/octet-stream"}, Data: []byte{0, 255, 3, 0}}},
+			{name: "partial", output: api.Content{Metadata: api.Metadata{ContentType: "application/json"}, Data: []byte(`{"partial":true}`)}, err: errors.New("host secret")},
 		} {
 			t.Run(map[bool]string{true: "runtime/", false: "session/"}[direct]+test.name, func(t *testing.T) {
-				wantContent := bytes.Clone(test.output.Content)
+				wantContent := bytes.Clone(test.output.Data)
 				h := harness.New(t, harness.WithBehavior(harness.RuntimeBehavior{
-					Run: func(context.Context, api.Source, harness.SessionOptions) (*api.Output, error) {
+					Run: func(context.Context, api.Source, harness.SessionOptions) (*api.Content, error) {
 						return &test.output, test.err
 					},
 					Plan: harness.PlanBehavior{Session: func(harness.SessionOptions) harness.SessionBehavior {
-						return harness.SessionBehavior{Run: func(context.Context, int) (*api.Output, error) { return &test.output, test.err }}
+						return harness.SessionBehavior{Run: func(context.Context, int) (*api.Content, error) { return &test.output, test.err }}
 					}},
 				}))
 				src := api.Source{Name: "results.fql", Content: "RETURN @input"}
-				run := func() (*api.Output, error) { return h.Runtime().Run(h.Context(), src) }
+				run := func() (*api.Content, error) { return testoutput.Collect(h.Runtime().Run(h.Context(), src)) }
 
 				if !direct {
 					plan, err := h.Runtime().Compile(h.Context(), src)
@@ -55,7 +56,7 @@ func TestRuntimeAndSessionOutputRoundTrip(t *testing.T) {
 
 					h.Own(session)
 
-					run = func() (*api.Output, error) { return session.Run(h.Context()) }
+					run = func() (*api.Content, error) { return testoutput.Collect(session.Run(h.Context())) }
 				}
 
 				for range 2 {
@@ -71,15 +72,15 @@ func TestRuntimeAndSessionOutputRoundTrip(t *testing.T) {
 						}
 					}
 
-					if output.ContentType != test.output.ContentType || !bytes.Equal(output.Content, wantContent) {
+					if output.Metadata.ContentType != test.output.Metadata.ContentType || !bytes.Equal(output.Data, wantContent) {
 						t.Fatalf("output = %#v, want %#v", output, test.output)
 					}
 
-					if len(output.Content) > 0 {
-						output.Content[0] ^= 255
+					if len(output.Data) > 0 {
+						output.Data[0] ^= 255
 					}
 
-					if !bytes.Equal(test.output.Content, wantContent) {
+					if !bytes.Equal(test.output.Data, wantContent) {
 						t.Fatal("returned output aliases hosted output bytes")
 					}
 				}
@@ -127,7 +128,7 @@ func TestSessionOptionsRoundTrip(t *testing.T) {
 				method := "Run"
 
 				if mode == "runtime" {
-					if _, err := h.Runtime().Run(h.Context(), api.Source{Name: "options.fql", Content: "RETURN @input"}, options...); err != nil {
+					if _, err := testoutput.Collect(h.Runtime().Run(h.Context(), api.Source{Name: "options.fql", Content: "RETURN @input"}, options...)); err != nil {
 						t.Fatal(err)
 					}
 				} else {
@@ -196,11 +197,11 @@ func TestRuntimeCloseBorrowsTransportAndHostedRuntime(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := h.Runtime().Run(h.Context(), api.Source{Content: "RETURN 1"}); !errors.Is(err, client.ErrClosed) {
+	if _, err := testoutput.Collect(h.Runtime().Run(h.Context(), api.Source{Content: "RETURN 1"})); !errors.Is(err, client.ErrClosed) {
 		t.Fatalf("closed Runtime error=%v", err)
 	}
 
-	if _, err := other.Run(h.Context(), api.Source{Content: "RETURN 2"}); err != nil {
+	if _, err := testoutput.Collect(other.Run(h.Context(), api.Source{Content: "RETURN 2"})); err != nil {
 		t.Fatalf("sibling logical Runtime unusable: %v", err)
 	}
 
@@ -209,7 +210,7 @@ func TestRuntimeCloseBorrowsTransportAndHostedRuntime(t *testing.T) {
 		t.Fatalf("borrowed transport unusable: %v", err)
 	}
 
-	if _, err := fresh.Run(h.Context(), api.Source{Content: "RETURN 3"}); err != nil {
+	if _, err := testoutput.Collect(fresh.Run(h.Context(), api.Source{Content: "RETURN 3"})); err != nil {
 		t.Fatal(err)
 	}
 

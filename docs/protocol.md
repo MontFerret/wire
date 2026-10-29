@@ -81,9 +81,9 @@ running, stopped, or terminal snapshot, then observes ordered changes. Sequence
 numbers are positive and monotonic within one resource history. A debug event
 also carries a kind because start and continue both produce running snapshots.
 
-A completed snapshot has encoded output. A failed snapshot has `Failure` and
-may retain partial encoded output. A cancelled or terminated snapshot has no
-failure. A stopped debug snapshot carries its stop reason, range, depth, and
+Execution snapshots carry metadata and lifecycle failures without payload bytes.
+Debugger terminal snapshots retain content descriptors and replayable materialized
+content. Cancellation can coexist with failure information. A stopped debug snapshot carries its stop reason, range, depth, and
 breakpoint hits when applicable; a runtime-error stop may also carry a failure.
 
 Watches are non-owning. Cancelling or disconnecting one watch releases only
@@ -113,7 +113,7 @@ numbers; although protobuf JSON has spellings for `NaN` and infinities, Wire
 rejects those values on both client encoding and server decoding.
 
 Execution and debugger completion preserve Unified API encoded output exactly:
-`content_type` plus bytes. Wire never interprets the bytes as runtime values.
+metadata plus encoded bytes, delivered in output frames. Wire never interprets the bytes as runtime values.
 
 The handwritten Go adapters use `pkg/execution`, `pkg/debugger`, and
 `pkg/failure` for shared Wire semantics, without protocol resource IDs.
@@ -152,8 +152,8 @@ and field. Rows that list several fields classify each listed field.
 | `ConnectionId` | B | `value=1`, opaque and non-empty. |
 | `ProtocolInfo` | C | `name=1`, `version=2`; identifies Wire, not the runtime. |
 | `RuntimeIdentity` | C | Host-supplied `name=1`, optional `version=2`, optional `instance_id=3`. |
-| `ConnectRequest` | C | Empty request. |
-| `ConnectResponse` | A/B/C | `connection_id=3` (B), `protocol=4` (C), optional `runtime_identity=5` (C), optional opaque bytes `runtime_version=6` (A/C); sent once. Runtime version presence is required by alpha.20 clients. |
+| `ConnectRequest` | C | Required framing version `output_framing_version=2`, currently 1. |
+| `ConnectResponse` | A/B/C | `connection_id=3` (B), `protocol=4` (C), optional `runtime_identity=5` (C), optional opaque bytes `runtime_version=6` (A/C); framing version `output_framing_version=7`; sent once. Runtime version presence and framing version 1 are required. |
 | `CloseConnectionRequest` | B/C | `connection_id=1`. |
 | `CloseConnectionResponse` | C | Empty acknowledgement. |
 | enum `ErrorCategory` | A/B/C | `UNSPECIFIED=0`; compilation `2`, execution `3`; Plan `4`, Execution `5`, DebugSession `6`, Connection `7`, Session `16` not found; invalid state `8`; internal runtime boundary `10`; watcher lag `11`; breakpoint not found `15`. |
@@ -161,7 +161,7 @@ and field. Rows that list several fields classify each listed field.
 | `DiagnosticAnnotation` | A/C | `range=1`, `message=2`, `primary=3`. |
 | `Diagnostic` | A/C | `kind=1`, `message=2`, `hint=3`, `note=4`, `source=7`, ordered `annotations=8`. |
 | `DiagnosticSet` | A/C | Ordered `diagnostics=1`; transport wrapper for `diagnostics.Diagnostics`. |
-| `Output` | A/C | `content_type=1`, encoded `content=2`. |
+| `Output` | A/C | Deprecated inline `content_type=1`, `content=2`; descriptor `metadata=3`. |
 | `Failure` | A/C | `category=1`, sanitized `message=2`, optional `diagnostic_set=4`. |
 
 ### Source model
@@ -215,7 +215,7 @@ and field. Rows that list several fields classify each listed field.
 | RPC `WatchExecution` | B/C | Non-owning ordered snapshot stream. |
 | `ExecutionId` | B | `value=1`, scoped to the owning connection. |
 | enum `ExecutionState` | A/C | `UNSPECIFIED=0`, `RUNNING=1`, `COMPLETED=2`, `FAILED=3`, `CANCELLED=4`. |
-| `Execution` | A/B/C | `id=1`, discriminator `state=3`, optional encoded `output=4`, optional `failure=5`. |
+| `Execution` | A/B/C | `id=1`, discriminator `state=3`, deprecated unused `output=4`, optional `failure=5`, `metadata=6`. |
 | `WatchExecutionResponse` | B/C | Positive monotonic `sequence=2`, complete `execution=8`. |
 | `ExecuteRequest` | A/B/C | `connection_id=1`, `plan_id=2`, optional `parameters=3`, requested `output_content_type=4`, optional `fs_root=5`, `output_content_type_set=6`. |
 | `ExecuteResponse` | B/C | Required running `execution=1`. |
@@ -374,7 +374,7 @@ output, distinct from a present empty Output. Output can accompany failure.
 | `Breakpoints` | Request: connection 1, debugger 2. Response: detached ID-ordered breakpoints 1, including after hosted termination until release. |
 | `Locals` | Request: connection 1, debugger 2. Response: variables 1; directly invokes default-frame operation. |
 | `Evaluate` | Request: connection 1, debugger 2, expression 3. Response: value 1; directly invokes default-frame operation. |
-| `RunCommand` | Server stream. Request: connection 1, debugger 2, command 3. Response: result 1. Commands are Start, Continue, StepIn, StepOver, StepOut; unspecified is invalid. |
+| `RunCommand` | Server stream. Request: connection 1, debugger 2, command 3. Response: result 1, followed by output_frame 2 when content is present. Commands are Start, Continue, StepIn, StepOver, StepOut; unspecified is invalid. |
 | `DebugCommandResult` | Optional canonical event 1, independent sanitized command failure 2, context failure 3. |
 | `DebugResultEvent` | Reason 1, range 2, depth 3, hit IDs 4, optional output 5, event failure 6, context failure 7. |
 | `ContextFailure` | Unspecified, cancelled, or deadline exceeded; preserves context identity independently of generic failures. |
@@ -428,3 +428,51 @@ joins cleanup errors; successful empty metadata is valid. Client `Params(ctx)`
 returns a detached snapshot locally, including after cleanup. Both cached metadata
 methods require non-nil contexts and preserve cancellation/deadline identities.
 No Version or Params RPC, general introspection, or capability negotiation is added.
+
+## Alpha.21 chunked output
+
+Connect requires `output_framing_version=1` in the request and response. Missing or
+incompatible versions fail before work allocation. Existing field numbers and
+reservations remain intact; deprecated inline payload fields are never populated.
+This additive schema intentionally breaks buffered peer behavior.
+
+`ReadExecutionOutput` is the sole new RPC. Its request uses `connection_id=1` and
+`execution_id=2`; responses contain `OutputFrame frame=1`. Allocation, cancellation,
+release and watches remain separate. Exactly one reader may claim an execution,
+including before preparation finishes. Canceling this stream abandons its output;
+canceling WatchExecution remains non-owning.
+
+`OutputMetadata` holds `content_type=1`, `length=2` (int64), and `length_known=3`.
+Each `OutputFrame` is a oneof: `header=1`, `chunk=2`, `terminal=3`. A transfer starts
+with exactly one header, follows with zero or more ordered chunks, and ends with
+exactly one terminal. Terminal fields are actual `transferred_bytes=1`, sanitized
+`failure=2`, `cancelled=3`, and `deadline_exceeded=4`. Context identities remain
+independent of any accompanying failure. EOF before terminal is a transfer error;
+duplicate headers, bad ordering, accounting mismatches, and otherwise successful
+known-length mismatches are rejected. Advertised length never drives preallocation.
+No chunk means absent content; an empty chunk establishes present empty content.
+
+Chunks target 64 KiB and shrink for the configured outbound message limit including
+framing overhead. ReadExecutionOutput, RunCommand, and WatchDebug responses always
+use identity compression, even when requests use gzip. Wire selects it before
+host middleware runs, so early response headers preserve the same budget. Host
+middleware must not override this response-compression policy. Identity avoids
+compressor expansion and extra sizing work at the cost of potentially more
+network bytes. Metadata, semantic envelopes and terminal frames also must fit
+that limit; an envelope or minimum chunk that cannot fit fails with
+ResourceExhausted before Send. A failed Send is never retried. A payload may exceed
+4 MiB or any individual message limit; there is no aggregate cap. This transport protocol does not require incremental query evaluation.
+
+RunCommand emits its semantic result, then `output_frame=2` messages when its event
+has content. WatchDebug emits a semantic envelope, then `output_frame=12` messages.
+Frame-only messages carry no result, session, kind or sequence. Frames never enter
+debugger event queues or consume semantic sequence numbers. Snapshot and command
+result descriptors referring to the same content transfer that payload once per
+envelope. Present content always includes a chunk, even when empty. Terminal replay
+uses the retained content until ReleaseDebugSession. Independent observers receive
+independent framed copies; reconstructed client content survives release.
+
+A debugger event is exposed only after the full transfer is validated. A hosted
+partial result with errors remains valid detached content if its transfer completes.
+Transport failure prevents publication and is joined with errors from the already
+received semantic envelope. Start's retained stream lifetime remains unchanged.

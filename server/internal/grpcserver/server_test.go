@@ -10,7 +10,7 @@ import (
 )
 
 func TestServerRegistersDedicatedProtocolServices(t *testing.T) {
-	server := New(nil, Handshake{}, nil)
+	server := New(nil, Handshake{}, nil, 4<<20)
 	registrar := &registrationRecorder{services: make(map[string]any)}
 	server.Register(registrar)
 

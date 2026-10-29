@@ -2,6 +2,7 @@ package grpcserver
 
 import (
 	"context"
+	"sync"
 
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
 	wireexecution "github.com/MontFerret/wire/pkg/execution"
@@ -12,6 +13,10 @@ import (
 type ExecutionService struct {
 	wirev1.UnimplementedExecutionServiceServer
 	connections *core.ConnectionRegistry
+	maxOutbound int
+	chunkOnce   sync.Once
+	chunkSize   int
+	chunkErr    error
 }
 
 var _ wirev1.ExecutionServiceServer = (*ExecutionService)(nil)

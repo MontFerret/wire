@@ -54,6 +54,11 @@ func convertDebugSessionSnapshot(value *wirev1.DebugSession) (wiredebugger.Snaps
 		return wiredebugger.Snapshot{}, err
 	}
 
+	content, err := convertOutput(value.GetOutput())
+	if err != nil {
+		return wiredebugger.Snapshot{}, err
+	}
+
 	return wiredebugger.Snapshot{
 		CommandResult:    result,
 		State:            state,
@@ -61,7 +66,7 @@ func convertDebugSessionSnapshot(value *wirev1.DebugSession) (wiredebugger.Snaps
 		Location:         location,
 		HitBreakpointIDs: hitIDs,
 		Depth:            depth,
-		Output:           convertOutput(value.GetOutput()),
+		Output:           content,
 		Failure:          failure,
 	}, nil
 }

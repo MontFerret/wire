@@ -8,7 +8,6 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/MontFerret/api"
 	"github.com/MontFerret/api/debugger"
 	"github.com/MontFerret/api/source"
 	wiredebugger "github.com/MontFerret/wire/pkg/debugger"
@@ -39,10 +38,13 @@ type DebugSession struct {
 	poisoned       error
 	commandStreams int
 	done           chan struct{}
+	deliveryCtx    context.Context
+	deliveryCancel context.CancelFunc
 }
 
 func newDebugSession(plan *Plan, hosted debugger.Session) *DebugSession {
 	ctx, cancel := context.WithCancelCause(plan.store.ctx)
+	deliveryCtx, deliveryCancel := context.WithCancel(plan.store.ctx)
 	session := &DebugSession{
 		id:          DebugSessionID(uuid.NewString()),
 		plan:        plan,
@@ -50,6 +52,7 @@ func newDebugSession(plan *Plan, hosted debugger.Session) *DebugSession {
 		ctx:         ctx,
 		cancel:      cancel,
 		done:        make(chan struct{}),
+		deliveryCtx: deliveryCtx, deliveryCancel: deliveryCancel,
 		state:       debugSessionState{status: wiredebugger.StateCreated},
 		breakpoints: newBreakpointSet(plan.store.limits.Breakpoints),
 		events:      newEventStream(plan.store.limits.Watchers, cloneDebugEvent, sequenceDebugEvent),
@@ -67,6 +70,7 @@ func (d *DebugSession) Release(ctx context.Context) error {
 	d.plan.store.mu.Unlock()
 
 	if started {
+		d.deliveryCancel()
 		go d.settleRelease()
 	}
 
@@ -595,13 +599,6 @@ func (d *DebugSession) finishCommand(event *debugger.Event, commandErr error) {
 		case debugger.ReasonCompleted:
 			d.state.status = wiredebugger.StateCompleted
 
-			if event.Output != nil {
-				d.state.output = &api.Output{
-					ContentType: event.Output.ContentType,
-					Content:     append([]byte(nil), event.Output.Content...),
-				}
-			}
-
 			d.publishLocked(wiredebugger.EventCompleted, true)
 			terminal = true
 		case debugger.ReasonTerminated:
@@ -1054,3 +1051,7 @@ func (d *DebugSession) ReserveCommandStream() (func(), error) {
 // BreakpointLimit lets the transport reject oversized batches before allocating
 // their decoded representation. Replacement still validates the resulting set.
 func (d *DebugSession) BreakpointLimit() int { return d.breakpoints.limit }
+
+// DeliveryContext retains replayable content after hosted debugger completion,
+// and ends only when the logical session or its connection is released.
+func (d *DebugSession) DeliveryContext() context.Context { return d.deliveryCtx }

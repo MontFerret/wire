@@ -19,13 +19,13 @@ type Server struct {
 }
 
 // New composes RPC services over the caller's runtime and logical connection registry.
-func New(runtime api.Runtime, info Handshake, connections *core.ConnectionRegistry) *Server {
+func New(runtime api.Runtime, info Handshake, connections *core.ConnectionRegistry, maxOutbound int) *Server {
 	return &Server{
 		runtime:    &RuntimeService{runtime: runtime, info: info, connections: connections},
 		plans:      &PlanService{runtime: runtime, connections: connections},
 		sessions:   &SessionService{connections: connections},
-		executions: &ExecutionService{connections: connections},
-		debug:      &DebugService{connections: connections},
+		executions: &ExecutionService{connections: connections, maxOutbound: maxOutbound},
+		debug:      &DebugService{connections: connections, maxOutbound: maxOutbound},
 	}
 }
 

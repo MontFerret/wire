@@ -13,6 +13,7 @@ import (
 	"github.com/MontFerret/api"
 	"github.com/MontFerret/api/diagnostics"
 	"github.com/MontFerret/wire/client"
+	"github.com/MontFerret/wire/internal/testoutput"
 	"github.com/MontFerret/wire/pkg/failure"
 )
 
@@ -25,12 +26,12 @@ func TestRuntimeRun(t *testing.T) {
 	}
 
 	// This root differs from the engine's default and contains the only copy.
-	output, err := h.runtime.Run(h.ctx,
+	output, err := testoutput.Collect(h.runtime.Run(h.ctx,
 		api.NewSource("direct.fql", `RETURN [@value, TO_STRING(IO::FS::READ("value.txt"))]`),
 		api.WithParam("value", "direct"),
 		api.WithOutputContentType("application/json"),
 		api.WithFSRoot(root),
-	)
+	))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,31 +64,31 @@ func TestReusablePlanAndDurableSessions(t *testing.T) {
 
 	h.own(second)
 
-	firstOutput, err := first.Run(h.ctx)
+	firstOutput, err := testoutput.Collect(first.Run(h.ctx))
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	requireJSONOutput(t, firstOutput, `"first"`)
 
-	secondOutput, err := second.Run(h.ctx)
+	secondOutput, err := testoutput.Collect(second.Run(h.ctx))
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	requireJSONOutput(t, firstOutput, `"first"`)
 	requireJSONOutput(t, secondOutput, `"second"`)
-	firstOutput.Content[1] = 'X'
+	firstOutput.Data[1] = 'X'
 	requireJSONOutput(t, secondOutput, `"second"`)
 
-	repeated, err := first.Run(h.ctx)
+	repeated, err := testoutput.Collect(first.Run(h.ctx))
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	requireJSONOutput(t, repeated, `"first"`)
 	requireJSONOutput(t, firstOutput, `"Xirst"`)
-	repeated.Content[1] = 'Y'
+	repeated.Data[1] = 'Y'
 	requireJSONOutput(t, firstOutput, `"Xirst"`)
 	requireJSONOutput(t, secondOutput, `"second"`)
 }
@@ -155,10 +156,10 @@ func TestCompilerDiagnostics(t *testing.T) {
 	}
 }
 
-func requireJSONOutput(t *testing.T, output *api.Output, want string) {
+func requireJSONOutput(t *testing.T, output *api.Content, want string) {
 	t.Helper()
 
-	if output == nil || output.ContentType != "application/json" || string(output.Content) != want {
+	if output == nil || output.Metadata.ContentType != "application/json" || string(output.Data) != want {
 		t.Fatalf("output = %+v, want application/json %s", output, want)
 	}
 }

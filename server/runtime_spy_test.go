@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/MontFerret/api"
+	"github.com/MontFerret/wire/internal/testoutput"
 )
 
 type apiRuntimeSpy struct {
@@ -19,8 +20,8 @@ func (r *apiRuntimeSpy) Version(ctx context.Context) (api.Version, error) {
 	return api.Version("runtime-test"), ctx.Err()
 }
 
-func (r *apiRuntimeSpy) Run(context.Context, api.Source, ...api.SessionOption) (*api.Output, error) {
-	return &api.Output{ContentType: "application/json", Content: []byte("1")}, nil
+func (r *apiRuntimeSpy) Run(ctx context.Context, _ api.Source, _ ...api.SessionOption) (api.Output, error) {
+	return testoutput.New(ctx, &api.Content{Metadata: api.Metadata{ContentType: "application/json"}, Data: []byte("1")}, nil), nil
 }
 
 func (r *apiRuntimeSpy) Compile(ctx context.Context, src api.Source, _ ...api.PlanOption) (api.Plan, error) {

@@ -12,6 +12,7 @@ import (
 	"github.com/MontFerret/api"
 	"github.com/MontFerret/api/debugger"
 	"github.com/MontFerret/wire/client"
+	"github.com/MontFerret/wire/internal/testoutput"
 	"github.com/MontFerret/wire/pkg/failure"
 	"github.com/MontFerret/wire/test/integration/harness"
 )
@@ -36,18 +37,18 @@ func TestConnectionLossReclaimsResources(t *testing.T) {
 			t.Run(mode+map[bool]string{false: "/transport", true: "/server"}[shutdown], func(t *testing.T) {
 				block := harness.NewBlock(t)
 				h := harness.New(t, harness.WithBehavior(harness.RuntimeBehavior{
-					Run: func(ctx context.Context, _ api.Source, _ harness.SessionOptions) (*api.Output, error) {
+					Run: func(ctx context.Context, _ api.Source, _ harness.SessionOptions) (*api.Content, error) {
 						return nil, block.Wait(ctx)
 					},
 					Plan: harness.PlanBehavior{
 						Session: func(harness.SessionOptions) harness.SessionBehavior {
-							return harness.SessionBehavior{Run: func(ctx context.Context, _ int) (*api.Output, error) { return nil, block.Wait(ctx) }}
+							return harness.SessionBehavior{Run: func(ctx context.Context, _ int) (*api.Content, error) { return nil, block.Wait(ctx) }}
 						},
 						Debugger: harness.DebuggerBehavior{Command: func(ctx context.Context, _ string, _ int) (*debugger.Event, error) { return nil, block.Wait(ctx) }},
 					},
 				}))
 				run := func() error {
-					_, err := h.Runtime().Run(h.Context(), api.Source{Content: "RETURN 1"})
+					_, err := testoutput.Collect(h.Runtime().Run(h.Context(), api.Source{Content: "RETURN 1"}))
 
 					return err
 				}
@@ -70,7 +71,7 @@ func TestConnectionLossReclaimsResources(t *testing.T) {
 						h.Own(session)
 
 						run = func() error {
-							_, err := session.Run(h.Context())
+							_, err := testoutput.Collect(session.Run(h.Context()))
 
 							return err
 						}
@@ -168,14 +169,14 @@ func TestWatchTerminationReturnsError(t *testing.T) {
 			t.Run(map[bool]string{false: "execution/", true: "debugger/"}[debug]+watchErr.Error(), func(t *testing.T) {
 				block := harness.NewBlock(t)
 				h := harness.New(t, harness.WithBehavior(harness.RuntimeBehavior{
-					Run: func(ctx context.Context, _ api.Source, _ harness.SessionOptions) (*api.Output, error) {
+					Run: func(ctx context.Context, _ api.Source, _ harness.SessionOptions) (*api.Content, error) {
 						return nil, block.Wait(ctx)
 					},
 					Plan: harness.PlanBehavior{Debugger: harness.DebuggerBehavior{Command: func(ctx context.Context, _ string, _ int) (*debugger.Event, error) { return nil, block.Wait(ctx) }}},
 				}))
-				operation := harness.WatchExecution
+				operation := harness.ReadExecutionOutput
 				run := func() error {
-					_, err := h.Runtime().Run(h.Context(), api.Source{Content: "RETURN 1"})
+					_, err := testoutput.Collect(h.Runtime().Run(h.Context(), api.Source{Content: "RETURN 1"}))
 
 					return err
 				}

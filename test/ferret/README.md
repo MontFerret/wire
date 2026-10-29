@@ -7,8 +7,8 @@ native engine.New → ferret/uapi.Wrap(native, version) → api.Runtime → wire
 → protobuf and real gRPC over bufconn → wire/client.From → api.Runtime consumer
 ```
 
-The nested module pins Ferret `v2.0.0-alpha.57` and Universal API
-`v1.0.0-alpha.20`, matching Wire's UAPI dependency. It replaces only Wire with
+The nested module pins Ferret `v2.0.0-alpha.58` and Universal API
+`v1.0.0-alpha.21`, matching Wire's UAPI dependency. It replaces only Wire with
 the local checkout. Native Ferret is not a root-module dependency and is never
 imported by Wire production packages. No workspace file or local Ferret checkout
 is required.
@@ -34,6 +34,7 @@ a Ferret release string or deriving a version from Wire/build metadata.
 | `TestRuntimeCloseDefersConnectionRelease` | Closed root rejects work; descendants still create/execute; the last child releases the logical connection slot |
 | `TestWireShutdownBorrowsNativeRuntime` | Direct hosted execution still works after Wire and transport shutdown |
 | `TestCompilerDiagnostics` | Invalid-token and EOF compiler diagnostics preserve their compilation classification, source, annotations, and ranges through Wire |
+| `TestLargeNativeNormalAndDebuggerOutput` | Multi-megabyte JSON through 1 KiB outbound messages, output consumption, debugger content surviving session closure |
 | `TestDebuggerRoundTrip` | Explicit unoptimized compilation, breakpoint replacement/binding/enumeration, entry and breakpoint stops, three-frame locals/evaluation, completion and output |
 
 ## Ownership and determinism

@@ -11,14 +11,15 @@ import (
 
 	"github.com/MontFerret/api"
 	"github.com/MontFerret/wire/client"
+	"github.com/MontFerret/wire/internal/testoutput"
 	"github.com/MontFerret/wire/server"
 	"github.com/MontFerret/wire/test/integration/harness"
 )
 
 func TestOwnedTargetsAndStartupContext(t *testing.T) {
 	h := harness.New(t, harness.WithOwnedTransport(client.WithInsecure()), harness.WithBehavior(harness.RuntimeBehavior{
-		Run: func(context.Context, api.Source, harness.SessionOptions) (*api.Output, error) {
-			return &api.Output{ContentType: "application/json", Content: []byte("[42]")}, nil
+		Run: func(context.Context, api.Source, harness.SessionOptions) (*api.Content, error) {
+			return &api.Content{Metadata: api.Metadata{ContentType: "application/json"}, Data: []byte("[42]")}, nil
 		},
 	}))
 	for _, prefix := range []string{"", "passthrough:///", "dns:///"} {
@@ -32,8 +33,8 @@ func TestOwnedTargetsAndStartupContext(t *testing.T) {
 
 		h.Own(remote)
 
-		output, err := remote.Run(h.Context(), api.NewSource("query.fql", "RETURN 42"))
-		if err != nil || output == nil || output.ContentType != "application/json" || string(output.Content) != "[42]" {
+		output, err := testoutput.Collect(remote.Run(h.Context(), api.NewSource("query.fql", "RETURN 42")))
+		if err != nil || output == nil || output.Metadata.ContentType != "application/json" || string(output.Data) != "[42]" {
 			t.Fatalf("startup cancellation or target changed runtime behavior: %v, %v", output, err)
 		}
 
@@ -63,8 +64,8 @@ func TestOwnedAdmittedRootCallsSurviveClose(t *testing.T) {
 			behavior := harness.RuntimeBehavior{}
 
 			if operation == "run" {
-				behavior.Run = func(ctx context.Context, _ api.Source, _ harness.SessionOptions) (*api.Output, error) {
-					return &api.Output{Content: []byte("retained")}, block.Wait(ctx)
+				behavior.Run = func(ctx context.Context, _ api.Source, _ harness.SessionOptions) (*api.Content, error) {
+					return &api.Content{Data: []byte("retained")}, block.Wait(ctx)
 				}
 			} else {
 				behavior.Compile = func(ctx context.Context, _ api.Source, _ bool, _ harness.CompileOptions) error {
@@ -75,7 +76,7 @@ func TestOwnedAdmittedRootCallsSurviveClose(t *testing.T) {
 			h := harness.New(t, harness.WithOwnedTransport(client.WithInsecure()), harness.WithBehavior(behavior))
 			type result struct {
 				plan   api.Plan
-				output *api.Output
+				output *api.Content
 				err    error
 			}
 			done := make(chan result, 1)
@@ -83,7 +84,7 @@ func TestOwnedAdmittedRootCallsSurviveClose(t *testing.T) {
 				var value result
 
 				if operation == "run" {
-					value.output, value.err = h.Runtime().Run(h.Context(), api.NewAnonymousSource("RETURN 1"))
+					value.output, value.err = testoutput.Collect(h.Runtime().Run(h.Context(), api.NewAnonymousSource("RETURN 1")))
 				} else {
 					value.plan, value.err = h.Runtime().Compile(h.Context(), api.NewAnonymousSource("RETURN 1"))
 				}
@@ -109,7 +110,7 @@ func TestOwnedAdmittedRootCallsSurviveClose(t *testing.T) {
 			}
 
 			if operation == "run" {
-				if value.output == nil || string(value.output.Content) != "retained" {
+				if value.output == nil || string(value.output.Data) != "retained" {
 					t.Fatal("admitted run lost its output")
 				}
 			} else {
@@ -129,7 +130,7 @@ func TestOwnedAdmittedRootCallsSurviveClose(t *testing.T) {
 
 				assertOwnedChannelRetained(t, h)
 
-				if _, err := session.Run(h.Context()); err != nil {
+				if _, err := testoutput.Collect(session.Run(h.Context())); err != nil {
 					t.Fatalf("session lost transport after plan Close: %v", err)
 				}
 
@@ -200,7 +201,7 @@ func TestOwnedKnownCleanupFailurePreservesRuntime(t *testing.T) {
 	}
 	h := harness.New(t, harness.WithOwnedTransport(client.WithInsecure()), harness.WithServerOptions(server.WithUnaryInterceptors(rejectRelease)))
 	for range 2 {
-		output, err := h.Runtime().Run(h.Context(), api.NewAnonymousSource("RETURN 1"))
+		output, err := testoutput.Collect(h.Runtime().Run(h.Context(), api.NewAnonymousSource("RETURN 1")))
 		if output == nil || !errors.Is(err, releaseErr) {
 			t.Fatalf("known cleanup failure changed output or error: %v, %v", output, err)
 		}

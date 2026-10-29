@@ -12,7 +12,7 @@ type remoteSession struct {
 
 var _ api.Session = (*remoteSession)(nil)
 
-func (s *remoteSession) Run(ctx context.Context) (*api.Output, error) {
+func (s *remoteSession) Run(ctx context.Context) (api.Output, error) {
 	if s == nil || s.session == nil {
 		return nil, ErrClosed
 	}
@@ -33,7 +33,12 @@ func (s *remoteSession) Run(ctx context.Context) (*api.Output, error) {
 		return nil, s.session.client.reclaimAllocation(ctx, err, s.session.Close, s.session.plan.Close)
 	}
 
-	return execution.waitAndRelease(ctx)
+	output, err := execution.openOutput(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return output, nil
 }
 
 func (s *remoteSession) Close() error {

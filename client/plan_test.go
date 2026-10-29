@@ -9,6 +9,7 @@ import (
 
 	"github.com/MontFerret/api"
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
+	"github.com/MontFerret/wire/internal/testoutput"
 	"github.com/MontFerret/wire/pkg/failure"
 )
 
@@ -40,10 +41,7 @@ func TestCompileMapsCanonicalSource(t *testing.T) {
 
 func TestSessionRunPreservesCallerOwnedPlan(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
-		server := &clientTestServer{watchScripts: []executionWatchScript{{events: []*wirev1.WatchExecutionResponse{
-			executionStartedEvent("execution-1"),
-			executionCompletedEvent("execution-1", "text/plain", []byte("done")),
-		}}}}
+		server := &clientTestServer{outputScripts: []executionOutputScript{{frames: completedOutputFrames("text/plain", []byte("done"))}}}
 		client := openTestRuntime(t, startClientTestServer(t, server))
 
 		plan, err := client.Compile(testClientContext(t), api.Source{Content: "RETURN 1"})
@@ -56,8 +54,8 @@ func TestSessionRunPreservesCallerOwnedPlan(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		output, err := session.Run(testClientContext(t))
-		if err != nil || string(output.Content) != "done" {
+		output, err := testoutput.Collect(session.Run(testClientContext(t)))
+		if err != nil || string(output.Data) != "done" {
 			t.Fatalf("unexpected Session.Run result: %#v, %v", output, err)
 		}
 
@@ -89,12 +87,10 @@ func TestSessionRunPreservesCallerOwnedPlan(t *testing.T) {
 
 	t.Run("terminal and cleanup failures", func(t *testing.T) {
 		server := &clientTestServer{
-			watchScripts: []executionWatchScript{{events: []*wirev1.WatchExecutionResponse{
-				executionFailedEvent("execution-1", []byte("partial"), &wirev1.Failure{
-					Category: wirev1.ErrorCategory_ERROR_CATEGORY_EXECUTION_FAILURE,
-					Message:  "execution failed",
-				}),
-			}}},
+			outputScripts: []executionOutputScript{{frames: failedOutputFrames([]byte("partial"), &wirev1.Failure{
+				Category: wirev1.ErrorCategory_ERROR_CATEGORY_EXECUTION_FAILURE,
+				Message:  "execution failed",
+			})}},
 			releaseExecutionErr: status.Error(codes.Internal, "execution cleanup failed"),
 		}
 		client := openTestRuntime(t, startClientTestServer(t, server))
@@ -109,11 +105,11 @@ func TestSessionRunPreservesCallerOwnedPlan(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		output, err := session.Run(testClientContext(t))
+		output, err := testoutput.Collect(session.Run(testClientContext(t)))
 		var terminalFailure *failure.Failure
 
 		var wireErr *Error
-		if string(output.Content) != "partial" || !errors.As(err, &terminalFailure) || !errors.As(err, &wireErr) ||
+		if string(output.Data) != "partial" || !errors.As(err, &terminalFailure) || !errors.As(err, &wireErr) ||
 			terminalFailure.Message != "execution failed" || wireErr.Message != "execution cleanup failed" {
 			t.Fatalf("Session.Run did not preserve joined errors: %#v, %v", output, err)
 		}

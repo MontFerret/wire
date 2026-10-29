@@ -5,27 +5,32 @@ import (
 	"sync"
 
 	"github.com/MontFerret/api"
+	"github.com/MontFerret/wire/internal/testoutput"
 )
 
 type spySession struct {
 	mu         sync.Mutex
-	run        func(context.Context) (*api.Output, error)
+	run        func(context.Context) (*api.Content, error)
 	close      func() error
 	runCalls   int
 	closeCalls int
 }
 
-func (s *spySession) Run(ctx context.Context) (*api.Output, error) {
-	s.mu.Lock()
-	s.runCalls++
-	run := s.run
-	s.mu.Unlock()
+func (s *spySession) Run(ctx context.Context) (api.Output, error) {
+	content, terminalErr := func() (*api.Content, error) {
+		s.mu.Lock()
+		s.runCalls++
+		run := s.run
+		s.mu.Unlock()
 
-	if run == nil {
-		return &api.Output{}, nil
-	}
+		if run == nil {
+			return &api.Content{}, nil
+		}
 
-	return run(ctx)
+		return run(ctx)
+	}()
+
+	return testoutput.New(ctx, content, terminalErr), nil
 }
 
 func (s *spySession) Close() error {

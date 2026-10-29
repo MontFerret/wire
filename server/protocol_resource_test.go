@@ -43,7 +43,7 @@ func TestProtocolResourceOperationsRemainAvailable(t *testing.T) {
 			}
 
 			return &apiSessionSpy{
-				run: func(ctx context.Context) (*api.Output, error) {
+				run: func(ctx context.Context) (*api.Content, error) {
 					close(started)
 					<-ctx.Done()
 					close(cancellationObserved)
@@ -70,7 +70,7 @@ func TestProtocolResourceOperationsRemainAvailable(t *testing.T) {
 	defer cancel()
 	runtimeRPC := wirev1.NewRuntimeServiceClient(env.conn)
 
-	stream, err := runtimeRPC.Connect(connectCtx, &wirev1.ConnectRequest{})
+	stream, err := runtimeRPC.Connect(connectCtx, &wirev1.ConnectRequest{OutputFramingVersion: 1})
 	if err != nil {
 		t.Fatal(err)
 	}

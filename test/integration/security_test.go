@@ -10,6 +10,7 @@ import (
 
 	"github.com/MontFerret/api"
 	"github.com/MontFerret/wire/client"
+	"github.com/MontFerret/wire/internal/testoutput"
 	"github.com/MontFerret/wire/server"
 	"github.com/MontFerret/wire/test/integration/harness"
 	"github.com/MontFerret/wire/test/securityfixture"
@@ -18,8 +19,8 @@ import (
 func TestPublicTLSAuthenticatedRuntimeRoundTrip(t *testing.T) {
 	certs := securityfixture.NewCertificates(t)
 	hosted := harness.NewRuntimeSpy(harness.RuntimeBehavior{Plan: harness.PlanBehavior{Params: []string{"input"}, Session: func(harness.SessionOptions) harness.SessionBehavior {
-		return harness.SessionBehavior{Run: func(context.Context, int) (*api.Output, error) {
-			return &api.Output{ContentType: "application/json", Content: []byte("[42]")}, nil
+		return harness.SessionBehavior{Run: func(context.Context, int) (*api.Content, error) {
+			return &api.Content{Metadata: api.Metadata{ContentType: "application/json"}, Data: []byte("[42]")}, nil
 		}}
 	}}})
 
@@ -72,12 +73,12 @@ func TestPublicTLSAuthenticatedRuntimeRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	output, err := session.Run(harness.Context(t))
+	output, err := testoutput.Collect(session.Run(harness.Context(t)))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if output.ContentType != "application/json" || string(output.Content) != "[42]" {
+	if output.Metadata.ContentType != "application/json" || string(output.Data) != "[42]" {
 		t.Fatalf("encoded output changed: %+v", output)
 	}
 

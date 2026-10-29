@@ -30,7 +30,7 @@ func (events *debugEvents) Recv() (debugger.Event, error) {
 		return debugger.Event{}, decodeError(err)
 	}
 
-	if value.GetSession() == nil || value.GetKind() == wirev1.DebugEventKind_DEBUG_EVENT_KIND_UNSPECIFIED {
+	if value.GetOutputFrame() != nil || value.GetSession() == nil || value.GetKind() == wirev1.DebugEventKind_DEBUG_EVENT_KIND_UNSPECIFIED {
 		events.cancel()
 
 		return debugger.Event{}, fmt.Errorf("Wire server returned an empty debug event")
@@ -38,6 +38,23 @@ func (events *debugEvents) Recv() (debugger.Event, error) {
 
 	event, err := convertDebugEvent(value)
 	if err != nil {
+		events.cancel()
+
+		return debugger.Event{}, err
+	}
+
+	if err := receiveDebugEventContent(&event, func() (*wirev1.OutputFrame, error) {
+		frame, err := events.stream.Recv()
+		if err != nil {
+			return nil, err
+		}
+
+		if frame.GetOutputFrame() == nil || frame.GetSession() != nil || frame.GetSequence() != 0 || frame.GetKind() != wirev1.DebugEventKind_DEBUG_EVENT_KIND_UNSPECIFIED {
+			return nil, invalidDebuggerResponse("expected debugger output frame")
+		}
+
+		return frame.GetOutputFrame(), nil
+	}); err != nil {
 		events.cancel()
 
 		return debugger.Event{}, err

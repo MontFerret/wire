@@ -2,6 +2,9 @@ package grpcserver
 
 import (
 	"context"
+	"errors"
+
+	"google.golang.org/protobuf/proto"
 
 	"github.com/MontFerret/api/debugger"
 	"github.com/MontFerret/api/source"
@@ -39,34 +42,50 @@ func (s *DebugService) RunCommand(request *wirev1.RunCommandRequest, stream wire
 		return rpcError(&core.DomainError{Kind: core.ErrorKindInvalidRequest, Message: "invalid debug command or position"})
 	}
 
-	command, err := session.Command(name)
-	if err != nil {
-		return rpcError(err)
-	}
+	return deliverStream(operation, session.DeliveryContext(), s.maxOutbound, stream.Send,
+		func(operation context.Context, send func(*wirev1.RunCommandResponse) error) error {
+			command, err := session.Command(name)
+			if err != nil {
+				return rpcError(err)
+			}
 
-	result, err := session.RunCommand(operation, name == "start", command)
-	if err != nil {
-		return rpcError(err)
-	}
+			result, err := session.RunCommand(operation, name == "start", command)
+			if err != nil {
+				return rpcError(err)
+			}
 
-	converted, err := commandResult(result)
-	if err != nil {
-		return rpcError(err)
-	}
+			converted, err := commandResult(result)
+			if err != nil {
+				return rpcError(err)
+			}
 
-	if err := stream.Send(&wirev1.RunCommandResponse{Result: converted}); err != nil {
-		return err
-	}
+			if err := send(&wirev1.RunCommandResponse{Result: converted}); err != nil {
+				return err
+			}
 
-	if name == "start" && result.Event != nil && result.Event.Reason != debugger.ReasonCompleted && result.Event.Reason != debugger.ReasonTerminated {
-		select {
-		case <-operation.Done():
-			return rpcError(operation.Err())
-		case <-session.Done():
-		}
-	}
+			if result.Event != nil && result.Event.Output != nil {
+				writer, err := newOutputWriter(s.maxOutbound,
+					func(frame *wirev1.OutputFrame) proto.Message { return &wirev1.RunCommandResponse{OutputFrame: frame} },
+					func(frame *wirev1.OutputFrame) error { return send(&wirev1.RunCommandResponse{OutputFrame: frame}) })
+				if err != nil {
+					return deliveryRPCError(err)
+				}
 
-	return nil
+				if err := writer.content(operation, result.Event.Output, errors.Join(result.Error, result.Event.Error)); err != nil {
+					return err
+				}
+			}
+
+			if name == "start" && result.Event != nil && result.Event.Reason != debugger.ReasonCompleted && result.Event.Reason != debugger.ReasonTerminated {
+				select {
+				case <-operation.Done():
+					return rpcError(operation.Err())
+				case <-session.Done():
+				}
+			}
+
+			return nil
+		})
 }
 
 // ReplaceBreakpoints projects one source-wide atomic publication.

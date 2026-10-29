@@ -23,8 +23,8 @@ func TestCompileExecuteRetainsReusableAPIPlanAndSessionOptions(t *testing.T) {
 	plan := &spyPlan{
 		params: []string{"input"},
 		newSession: func(context.Context, sessionOptions) (api.Session, error) {
-			session := &spySession{run: func(context.Context) (*api.Output, error) {
-				return &api.Output{ContentType: "application/json", Content: outputBytes}, nil
+			session := &spySession{run: func(context.Context) (*api.Content, error) {
+				return &api.Content{Metadata: api.Metadata{ContentType: "application/json"}, Data: outputBytes}, nil
 			}}
 			sessionsMu.Lock()
 			sessions = append(sessions, session)
@@ -85,7 +85,7 @@ func TestCompileExecuteRetainsReusableAPIPlanAndSessionOptions(t *testing.T) {
 		}
 
 		finished := waitExecution(t, connection, execution.ID)
-		if finished.State != wireexecution.StateCompleted || finished.Output == nil || finished.Output.ContentType != "application/json" {
+		if finished.State != wireexecution.StateCompleted || finished.Output == nil || finished.Output.Metadata.ContentType != "application/json" {
 			t.Fatalf("unexpected execution result: %#v", finished)
 		}
 	}
@@ -98,7 +98,7 @@ func TestCompileExecuteRetainsReusableAPIPlanAndSessionOptions(t *testing.T) {
 			continue
 		}
 
-		if got := execution.Snapshot().Output.Content[0]; got != '{' {
+		if got := connection.collectedContent(execution.ID()).Data[0]; got != '{' {
 			t.Fatalf("execution retained runtime output storage: %q", got)
 		}
 	}
@@ -642,12 +642,12 @@ func TestExecutionUsesPortableFailureFallbacks(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			session := &spySession{
-				run: func(context.Context) (*api.Output, error) {
+				run: func(context.Context) (*api.Content, error) {
 					if test.panicRun {
 						panic("run secret must not escape")
 					}
 
-					return &api.Output{ContentType: "application/json", Content: []byte("1")}, test.runErr
+					return &api.Content{Metadata: api.Metadata{ContentType: "application/json"}, Data: []byte("1")}, test.runErr
 				},
 				close: func() error { return test.closeErr },
 			}
@@ -735,7 +735,7 @@ func waitExecution(t *testing.T, connection *testEnvironment, id ExecutionID) ex
 		t.Fatal("execution did not finish")
 	}
 
-	return executionResult{ID: execution.ID(), Snapshot: execution.Snapshot()}
+	return executionResult{ID: execution.ID(), Snapshot: execution.Snapshot(), Output: connection.collectedContent(id)}
 }
 
 func testContext(t *testing.T) context.Context {
@@ -766,7 +766,7 @@ func hasCategory(err error, category ErrorKind) bool {
 
 func TestWireOwnedExecutionOperationPanicPropagates(t *testing.T) {
 	sentinel := errors.New("Wire defect")
-	execution := &Execution{operation: func(context.Context) (*api.Output, error) {
+	execution := &Execution{operation: func(context.Context) (api.Output, error) {
 		panic(sentinel)
 	}}
 

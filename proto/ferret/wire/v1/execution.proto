@@ -11,6 +11,9 @@ option go_package = "github.com/MontFerret/wire/gen/ferret/wire/v1;wirev1";
 
 // ExecutionService owns asynchronous runtime and session invocations.
 service ExecutionService {
+  // ReadExecutionOutput exclusively consumes output; disconnect abandons consumption.
+  // The header is sent only after hosted Run has returned a usable output.
+  rpc ReadExecutionOutput(ReadExecutionOutputRequest) returns (stream ReadExecutionOutputResponse);
   // Execute publishes an asynchronous execution of an existing reusable plan.
   rpc Execute(ExecuteRequest) returns (ExecuteResponse);
   // RunSession publishes one execution of an existing reusable Session.
@@ -44,10 +47,12 @@ message Execution {
   ExecutionId id = 1;
   // state is the only execution lifecycle discriminator.
   ExecutionState state = 3;
-  // output is required on completion and may contain partial output on other terminal states.
-  Output output = 4;
-  // failure is present only for failed executions.
+  // Bulk output is delivered only through ReadExecutionOutput.
+  Output output = 4 [deprecated = true];
+  // failure preserves terminal errors, including errors accompanying cancellation.
   Failure failure = 5;
+  // metadata is available once hosted output preparation succeeds.
+  OutputMetadata metadata = 6;
 }
 
 message WatchExecutionResponse {
@@ -107,4 +112,13 @@ message ReleaseExecutionResponse {}
 message WatchExecutionRequest {
   ConnectionId connection_id = 1;
   ExecutionId execution_id = 2;
+}
+
+message ReadExecutionOutputRequest {
+  ConnectionId connection_id = 1;
+  ExecutionId execution_id = 2;
+}
+
+message ReadExecutionOutputResponse {
+  OutputFrame frame = 1;
 }

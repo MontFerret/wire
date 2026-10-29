@@ -5,11 +5,12 @@ import (
 	"sync"
 
 	"github.com/MontFerret/api"
+	"github.com/MontFerret/wire/internal/testoutput"
 )
 
 type contractRuntime struct {
 	mu             sync.Mutex
-	run            func(context.Context, api.Source, apiSessionOptions) (*api.Output, error)
+	run            func(context.Context, api.Source, apiSessionOptions) (*api.Content, error)
 	compile        func(context.Context, api.Source, bool, contractPlanOptions) (api.Plan, error)
 	runSources     []api.Source
 	runOptions     []apiSessionOptions
@@ -23,23 +24,27 @@ func (r *contractRuntime) Version(ctx context.Context) (api.Version, error) {
 	return api.Version("runtime-test"), ctx.Err()
 }
 
-func (r *contractRuntime) Run(ctx context.Context, src api.Source, options ...api.SessionOption) (*api.Output, error) {
-	configured, err := applyAPIOptions(options)
-	if err != nil {
-		return nil, err
-	}
+func (r *contractRuntime) Run(ctx context.Context, src api.Source, options ...api.SessionOption) (api.Output, error) {
+	content, terminalErr := func() (*api.Content, error) {
+		configured, err := applyAPIOptions(options)
+		if err != nil {
+			return nil, err
+		}
 
-	r.mu.Lock()
-	r.runSources = append(r.runSources, src)
-	r.runOptions = append(r.runOptions, configured.clone())
-	run := r.run
-	r.mu.Unlock()
+		r.mu.Lock()
+		r.runSources = append(r.runSources, src)
+		r.runOptions = append(r.runOptions, configured.clone())
+		run := r.run
+		r.mu.Unlock()
 
-	if run == nil {
-		return nil, nil
-	}
+		if run == nil {
+			return nil, nil
+		}
 
-	return run(ctx, src, configured)
+		return run(ctx, src, configured)
+	}()
+
+	return testoutput.New(ctx, content, terminalErr), nil
 }
 
 func (r *contractRuntime) Compile(ctx context.Context, src api.Source, options ...api.PlanOption) (api.Plan, error) {

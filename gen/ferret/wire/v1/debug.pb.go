@@ -420,7 +420,7 @@ type DebugSession struct {
 	StopReason DebugStopReason `protobuf:"varint,4,opt,name=stop_reason,json=stopReason,proto3,enum=ferret.wire.v1.DebugStopReason" json:"stop_reason,omitempty"`
 	// hit_breakpoint_ids is populated only for a breakpoint stop.
 	HitBreakpointIds []uint64 `protobuf:"varint,6,rep,packed,name=hit_breakpoint_ids,json=hitBreakpointIds,proto3" json:"hit_breakpoint_ids,omitempty"`
-	// output preserves any encoded result returned by the hosted command.
+	// output describes encoded content delivered once after a WatchDebug envelope.
 	Output *Output `protobuf:"bytes,7,opt,name=output,proto3" json:"output,omitempty"`
 	// failure is present for failed sessions and may accompany a runtime-error stop.
 	Failure *Failure `protobuf:"bytes,8,opt,name=failure,proto3" json:"failure,omitempty"`
@@ -2340,7 +2340,11 @@ type WatchDebugResponse struct {
 	// kind distinguishes CREATED and the two transitions that produce RUNNING snapshots.
 	Kind DebugEventKind `protobuf:"varint,10,opt,name=kind,proto3,enum=ferret.wire.v1.DebugEventKind" json:"kind,omitempty"`
 	// session is the latest complete snapshot, including for replayed terminal state.
-	Session       *DebugSession `protobuf:"bytes,11,opt,name=session,proto3" json:"session,omitempty"`
+	Session *DebugSession `protobuf:"bytes,11,opt,name=session,proto3" json:"session,omitempty"`
+	// Mutually exclusive with the semantic envelope. These frames carry its output
+	// once, even when both session.output and command_result.event.output refer to it.
+	// They have no event sequence and never enter the debugger event queue.
+	OutputFrame   *OutputFrame `protobuf:"bytes,12,opt,name=output_frame,json=outputFrame,proto3" json:"output_frame,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2392,6 +2396,13 @@ func (x *WatchDebugResponse) GetKind() DebugEventKind {
 func (x *WatchDebugResponse) GetSession() *DebugSession {
 	if x != nil {
 		return x.Session
+	}
+	return nil
+}
+
+func (x *WatchDebugResponse) GetOutputFrame() *OutputFrame {
+	if x != nil {
+		return x.OutputFrame
 	}
 	return nil
 }
@@ -2664,8 +2675,11 @@ func (x *RunCommandRequest) GetCommand() DebugCommand {
 }
 
 type RunCommandResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Result        *DebugCommandResult    `protobuf:"bytes,1,opt,name=result,proto3" json:"result,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// A semantic result is followed by framed content when its event has output.
+	Result *DebugCommandResult `protobuf:"bytes,1,opt,name=result,proto3" json:"result,omitempty"`
+	// Mutually exclusive with result; does not create a debugger event.
+	OutputFrame   *OutputFrame `protobuf:"bytes,2,opt,name=output_frame,json=outputFrame,proto3" json:"output_frame,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2703,6 +2717,13 @@ func (*RunCommandResponse) Descriptor() ([]byte, []int) {
 func (x *RunCommandResponse) GetResult() *DebugCommandResult {
 	if x != nil {
 		return x.Result
+	}
+	return nil
+}
+
+func (x *RunCommandResponse) GetOutputFrame() *OutputFrame {
+	if x != nil {
+		return x.OutputFrame
 	}
 	return nil
 }
@@ -3305,12 +3326,13 @@ const file_ferret_wire_v1_debug_proto_rawDesc = "" +
 	"\x1aReleaseDebugSessionRequest\x12A\n" +
 	"\rconnection_id\x18\x01 \x01(\v2\x1c.ferret.wire.v1.ConnectionIdR\fconnectionId\x12H\n" +
 	"\x10debug_session_id\x18\x02 \x01(\v2\x1e.ferret.wire.v1.DebugSessionIdR\x0edebugSessionId\"\x1d\n" +
-	"\x1bReleaseDebugSessionResponse\"\xa2\x02\n" +
+	"\x1bReleaseDebugSessionResponse\"\xe2\x02\n" +
 	"\x12WatchDebugResponse\x12\x1a\n" +
 	"\bsequence\x18\x02 \x01(\x04R\bsequence\x122\n" +
 	"\x04kind\x18\n" +
 	" \x01(\x0e2\x1e.ferret.wire.v1.DebugEventKindR\x04kind\x126\n" +
-	"\asession\x18\v \x01(\v2\x1c.ferret.wire.v1.DebugSessionR\asessionJ\x04\b\x01\x10\x02J\x04\b\x03\x10\x04J\x04\b\x04\x10\x05J\x04\b\x05\x10\x06J\x04\b\x06\x10\aJ\x04\b\a\x10\bJ\x04\b\b\x10\tJ\x04\b\t\x10\n" +
+	"\asession\x18\v \x01(\v2\x1c.ferret.wire.v1.DebugSessionR\asession\x12>\n" +
+	"\foutput_frame\x18\f \x01(\v2\x1b.ferret.wire.v1.OutputFrameR\voutputFrameJ\x04\b\x01\x10\x02J\x04\b\x03\x10\x04J\x04\b\x04\x10\x05J\x04\b\x05\x10\x06J\x04\b\x06\x10\aJ\x04\b\a\x10\bJ\x04\b\b\x10\tJ\x04\b\t\x10\n" +
 	"R\x10debug_session_idR\x06outputR\astartedR\tcontinuedR\astoppedR\tcompletedR\x06failedR\n" +
 	"terminated\"\xa0\x01\n" +
 	"\x11WatchDebugRequest\x12A\n" +
@@ -3331,9 +3353,10 @@ const file_ferret_wire_v1_debug_proto_rawDesc = "" +
 	"\x11RunCommandRequest\x12A\n" +
 	"\rconnection_id\x18\x01 \x01(\v2\x1c.ferret.wire.v1.ConnectionIdR\fconnectionId\x12H\n" +
 	"\x10debug_session_id\x18\x02 \x01(\v2\x1e.ferret.wire.v1.DebugSessionIdR\x0edebugSessionId\x126\n" +
-	"\acommand\x18\x03 \x01(\x0e2\x1c.ferret.wire.v1.DebugCommandR\acommand\"P\n" +
+	"\acommand\x18\x03 \x01(\x0e2\x1c.ferret.wire.v1.DebugCommandR\acommand\"\x90\x01\n" +
 	"\x12RunCommandResponse\x12:\n" +
-	"\x06result\x18\x01 \x01(\v2\".ferret.wire.v1.DebugCommandResultR\x06result\"\x86\x01\n" +
+	"\x06result\x18\x01 \x01(\v2\".ferret.wire.v1.DebugCommandResultR\x06result\x12>\n" +
+	"\foutput_frame\x18\x02 \x01(\v2\x1b.ferret.wire.v1.OutputFrameR\voutputFrame\"\x86\x01\n" +
 	"\x11BreakpointRequest\x124\n" +
 	"\bposition\x18\x01 \x01(\v2\x18.ferret.wire.v1.PositionR\bposition\x12;\n" +
 	"\aoptions\x18\x02 \x01(\v2!.ferret.wire.v1.BreakpointOptionsR\aoptions\"\x88\x02\n" +
@@ -3509,7 +3532,8 @@ var file_ferret_wire_v1_debug_proto_goTypes = []any{
 	(*ConnectionId)(nil),                // 62: ferret.wire.v1.ConnectionId
 	(*PlanId)(nil),                      // 63: ferret.wire.v1.PlanId
 	(*Parameters)(nil),                  // 64: ferret.wire.v1.Parameters
-	(*Position)(nil),                    // 65: ferret.wire.v1.Position
+	(*OutputFrame)(nil),                 // 65: ferret.wire.v1.OutputFrame
+	(*Position)(nil),                    // 66: ferret.wire.v1.Position
 }
 var file_ferret_wire_v1_debug_proto_depIdxs = []int32{
 	6,   // 0: ferret.wire.v1.DebugSession.id:type_name -> ferret.wire.v1.DebugSessionId
@@ -3566,81 +3590,83 @@ var file_ferret_wire_v1_debug_proto_depIdxs = []int32{
 	6,   // 51: ferret.wire.v1.ReleaseDebugSessionRequest.debug_session_id:type_name -> ferret.wire.v1.DebugSessionId
 	2,   // 52: ferret.wire.v1.WatchDebugResponse.kind:type_name -> ferret.wire.v1.DebugEventKind
 	7,   // 53: ferret.wire.v1.WatchDebugResponse.session:type_name -> ferret.wire.v1.DebugSession
-	62,  // 54: ferret.wire.v1.WatchDebugRequest.connection_id:type_name -> ferret.wire.v1.ConnectionId
-	6,   // 55: ferret.wire.v1.WatchDebugRequest.debug_session_id:type_name -> ferret.wire.v1.DebugSessionId
-	60,  // 56: ferret.wire.v1.DebugResultEvent.location:type_name -> ferret.wire.v1.Range
-	58,  // 57: ferret.wire.v1.DebugResultEvent.output:type_name -> ferret.wire.v1.Output
-	59,  // 58: ferret.wire.v1.DebugResultEvent.error:type_name -> ferret.wire.v1.Failure
-	5,   // 59: ferret.wire.v1.DebugResultEvent.context_failure:type_name -> ferret.wire.v1.ContextFailure
-	45,  // 60: ferret.wire.v1.DebugCommandResult.event:type_name -> ferret.wire.v1.DebugResultEvent
-	59,  // 61: ferret.wire.v1.DebugCommandResult.error:type_name -> ferret.wire.v1.Failure
-	5,   // 62: ferret.wire.v1.DebugCommandResult.context_failure:type_name -> ferret.wire.v1.ContextFailure
-	62,  // 63: ferret.wire.v1.RunCommandRequest.connection_id:type_name -> ferret.wire.v1.ConnectionId
-	6,   // 64: ferret.wire.v1.RunCommandRequest.debug_session_id:type_name -> ferret.wire.v1.DebugSessionId
-	4,   // 65: ferret.wire.v1.RunCommandRequest.command:type_name -> ferret.wire.v1.DebugCommand
-	46,  // 66: ferret.wire.v1.RunCommandResponse.result:type_name -> ferret.wire.v1.DebugCommandResult
-	65,  // 67: ferret.wire.v1.BreakpointRequest.position:type_name -> ferret.wire.v1.Position
-	28,  // 68: ferret.wire.v1.BreakpointRequest.options:type_name -> ferret.wire.v1.BreakpointOptions
-	62,  // 69: ferret.wire.v1.ReplaceBreakpointsRequest.connection_id:type_name -> ferret.wire.v1.ConnectionId
-	6,   // 70: ferret.wire.v1.ReplaceBreakpointsRequest.debug_session_id:type_name -> ferret.wire.v1.DebugSessionId
-	49,  // 71: ferret.wire.v1.ReplaceBreakpointsRequest.requests:type_name -> ferret.wire.v1.BreakpointRequest
-	8,   // 72: ferret.wire.v1.ReplaceBreakpointsResponse.breakpoints:type_name -> ferret.wire.v1.Breakpoint
-	62,  // 73: ferret.wire.v1.BreakpointsRequest.connection_id:type_name -> ferret.wire.v1.ConnectionId
-	6,   // 74: ferret.wire.v1.BreakpointsRequest.debug_session_id:type_name -> ferret.wire.v1.DebugSessionId
-	8,   // 75: ferret.wire.v1.BreakpointsResponse.breakpoints:type_name -> ferret.wire.v1.Breakpoint
-	62,  // 76: ferret.wire.v1.LocalsRequest.connection_id:type_name -> ferret.wire.v1.ConnectionId
-	6,   // 77: ferret.wire.v1.LocalsRequest.debug_session_id:type_name -> ferret.wire.v1.DebugSessionId
-	10,  // 78: ferret.wire.v1.LocalsResponse.variables:type_name -> ferret.wire.v1.Variable
-	62,  // 79: ferret.wire.v1.EvaluateRequest.connection_id:type_name -> ferret.wire.v1.ConnectionId
-	6,   // 80: ferret.wire.v1.EvaluateRequest.debug_session_id:type_name -> ferret.wire.v1.DebugSessionId
-	9,   // 81: ferret.wire.v1.EvaluateResponse.value:type_name -> ferret.wire.v1.DebugValue
-	47,  // 82: ferret.wire.v1.DebugService.RunCommand:input_type -> ferret.wire.v1.RunCommandRequest
-	50,  // 83: ferret.wire.v1.DebugService.ReplaceBreakpoints:input_type -> ferret.wire.v1.ReplaceBreakpointsRequest
-	52,  // 84: ferret.wire.v1.DebugService.Breakpoints:input_type -> ferret.wire.v1.BreakpointsRequest
-	54,  // 85: ferret.wire.v1.DebugService.Locals:input_type -> ferret.wire.v1.LocalsRequest
-	56,  // 86: ferret.wire.v1.DebugService.Evaluate:input_type -> ferret.wire.v1.EvaluateRequest
-	12,  // 87: ferret.wire.v1.DebugService.CreateDebugSession:input_type -> ferret.wire.v1.CreateDebugSessionRequest
-	14,  // 88: ferret.wire.v1.DebugService.Start:input_type -> ferret.wire.v1.StartRequest
-	29,  // 89: ferret.wire.v1.DebugService.SetBreakpoint:input_type -> ferret.wire.v1.SetBreakpointRequest
-	31,  // 90: ferret.wire.v1.DebugService.DeleteBreakpoint:input_type -> ferret.wire.v1.DeleteBreakpointRequest
-	16,  // 91: ferret.wire.v1.DebugService.Continue:input_type -> ferret.wire.v1.ContinueRequest
-	18,  // 92: ferret.wire.v1.DebugService.Pause:input_type -> ferret.wire.v1.PauseRequest
-	20,  // 93: ferret.wire.v1.DebugService.StepOver:input_type -> ferret.wire.v1.StepOverRequest
-	22,  // 94: ferret.wire.v1.DebugService.StepIn:input_type -> ferret.wire.v1.StepInRequest
-	24,  // 95: ferret.wire.v1.DebugService.StepOut:input_type -> ferret.wire.v1.StepOutRequest
-	33,  // 96: ferret.wire.v1.DebugService.Frames:input_type -> ferret.wire.v1.FramesRequest
-	35,  // 97: ferret.wire.v1.DebugService.FrameLocals:input_type -> ferret.wire.v1.FrameLocalsRequest
-	37,  // 98: ferret.wire.v1.DebugService.Variables:input_type -> ferret.wire.v1.VariablesRequest
-	39,  // 99: ferret.wire.v1.DebugService.EvaluateFrame:input_type -> ferret.wire.v1.EvaluateFrameRequest
-	26,  // 100: ferret.wire.v1.DebugService.Terminate:input_type -> ferret.wire.v1.TerminateRequest
-	41,  // 101: ferret.wire.v1.DebugService.ReleaseDebugSession:input_type -> ferret.wire.v1.ReleaseDebugSessionRequest
-	44,  // 102: ferret.wire.v1.DebugService.WatchDebug:input_type -> ferret.wire.v1.WatchDebugRequest
-	48,  // 103: ferret.wire.v1.DebugService.RunCommand:output_type -> ferret.wire.v1.RunCommandResponse
-	51,  // 104: ferret.wire.v1.DebugService.ReplaceBreakpoints:output_type -> ferret.wire.v1.ReplaceBreakpointsResponse
-	53,  // 105: ferret.wire.v1.DebugService.Breakpoints:output_type -> ferret.wire.v1.BreakpointsResponse
-	55,  // 106: ferret.wire.v1.DebugService.Locals:output_type -> ferret.wire.v1.LocalsResponse
-	57,  // 107: ferret.wire.v1.DebugService.Evaluate:output_type -> ferret.wire.v1.EvaluateResponse
-	13,  // 108: ferret.wire.v1.DebugService.CreateDebugSession:output_type -> ferret.wire.v1.CreateDebugSessionResponse
-	15,  // 109: ferret.wire.v1.DebugService.Start:output_type -> ferret.wire.v1.StartResponse
-	30,  // 110: ferret.wire.v1.DebugService.SetBreakpoint:output_type -> ferret.wire.v1.SetBreakpointResponse
-	32,  // 111: ferret.wire.v1.DebugService.DeleteBreakpoint:output_type -> ferret.wire.v1.DeleteBreakpointResponse
-	17,  // 112: ferret.wire.v1.DebugService.Continue:output_type -> ferret.wire.v1.ContinueResponse
-	19,  // 113: ferret.wire.v1.DebugService.Pause:output_type -> ferret.wire.v1.PauseResponse
-	21,  // 114: ferret.wire.v1.DebugService.StepOver:output_type -> ferret.wire.v1.StepOverResponse
-	23,  // 115: ferret.wire.v1.DebugService.StepIn:output_type -> ferret.wire.v1.StepInResponse
-	25,  // 116: ferret.wire.v1.DebugService.StepOut:output_type -> ferret.wire.v1.StepOutResponse
-	34,  // 117: ferret.wire.v1.DebugService.Frames:output_type -> ferret.wire.v1.FramesResponse
-	36,  // 118: ferret.wire.v1.DebugService.FrameLocals:output_type -> ferret.wire.v1.FrameLocalsResponse
-	38,  // 119: ferret.wire.v1.DebugService.Variables:output_type -> ferret.wire.v1.VariablesResponse
-	40,  // 120: ferret.wire.v1.DebugService.EvaluateFrame:output_type -> ferret.wire.v1.EvaluateFrameResponse
-	27,  // 121: ferret.wire.v1.DebugService.Terminate:output_type -> ferret.wire.v1.TerminateResponse
-	42,  // 122: ferret.wire.v1.DebugService.ReleaseDebugSession:output_type -> ferret.wire.v1.ReleaseDebugSessionResponse
-	43,  // 123: ferret.wire.v1.DebugService.WatchDebug:output_type -> ferret.wire.v1.WatchDebugResponse
-	103, // [103:124] is the sub-list for method output_type
-	82,  // [82:103] is the sub-list for method input_type
-	82,  // [82:82] is the sub-list for extension type_name
-	82,  // [82:82] is the sub-list for extension extendee
-	0,   // [0:82] is the sub-list for field type_name
+	65,  // 54: ferret.wire.v1.WatchDebugResponse.output_frame:type_name -> ferret.wire.v1.OutputFrame
+	62,  // 55: ferret.wire.v1.WatchDebugRequest.connection_id:type_name -> ferret.wire.v1.ConnectionId
+	6,   // 56: ferret.wire.v1.WatchDebugRequest.debug_session_id:type_name -> ferret.wire.v1.DebugSessionId
+	60,  // 57: ferret.wire.v1.DebugResultEvent.location:type_name -> ferret.wire.v1.Range
+	58,  // 58: ferret.wire.v1.DebugResultEvent.output:type_name -> ferret.wire.v1.Output
+	59,  // 59: ferret.wire.v1.DebugResultEvent.error:type_name -> ferret.wire.v1.Failure
+	5,   // 60: ferret.wire.v1.DebugResultEvent.context_failure:type_name -> ferret.wire.v1.ContextFailure
+	45,  // 61: ferret.wire.v1.DebugCommandResult.event:type_name -> ferret.wire.v1.DebugResultEvent
+	59,  // 62: ferret.wire.v1.DebugCommandResult.error:type_name -> ferret.wire.v1.Failure
+	5,   // 63: ferret.wire.v1.DebugCommandResult.context_failure:type_name -> ferret.wire.v1.ContextFailure
+	62,  // 64: ferret.wire.v1.RunCommandRequest.connection_id:type_name -> ferret.wire.v1.ConnectionId
+	6,   // 65: ferret.wire.v1.RunCommandRequest.debug_session_id:type_name -> ferret.wire.v1.DebugSessionId
+	4,   // 66: ferret.wire.v1.RunCommandRequest.command:type_name -> ferret.wire.v1.DebugCommand
+	46,  // 67: ferret.wire.v1.RunCommandResponse.result:type_name -> ferret.wire.v1.DebugCommandResult
+	65,  // 68: ferret.wire.v1.RunCommandResponse.output_frame:type_name -> ferret.wire.v1.OutputFrame
+	66,  // 69: ferret.wire.v1.BreakpointRequest.position:type_name -> ferret.wire.v1.Position
+	28,  // 70: ferret.wire.v1.BreakpointRequest.options:type_name -> ferret.wire.v1.BreakpointOptions
+	62,  // 71: ferret.wire.v1.ReplaceBreakpointsRequest.connection_id:type_name -> ferret.wire.v1.ConnectionId
+	6,   // 72: ferret.wire.v1.ReplaceBreakpointsRequest.debug_session_id:type_name -> ferret.wire.v1.DebugSessionId
+	49,  // 73: ferret.wire.v1.ReplaceBreakpointsRequest.requests:type_name -> ferret.wire.v1.BreakpointRequest
+	8,   // 74: ferret.wire.v1.ReplaceBreakpointsResponse.breakpoints:type_name -> ferret.wire.v1.Breakpoint
+	62,  // 75: ferret.wire.v1.BreakpointsRequest.connection_id:type_name -> ferret.wire.v1.ConnectionId
+	6,   // 76: ferret.wire.v1.BreakpointsRequest.debug_session_id:type_name -> ferret.wire.v1.DebugSessionId
+	8,   // 77: ferret.wire.v1.BreakpointsResponse.breakpoints:type_name -> ferret.wire.v1.Breakpoint
+	62,  // 78: ferret.wire.v1.LocalsRequest.connection_id:type_name -> ferret.wire.v1.ConnectionId
+	6,   // 79: ferret.wire.v1.LocalsRequest.debug_session_id:type_name -> ferret.wire.v1.DebugSessionId
+	10,  // 80: ferret.wire.v1.LocalsResponse.variables:type_name -> ferret.wire.v1.Variable
+	62,  // 81: ferret.wire.v1.EvaluateRequest.connection_id:type_name -> ferret.wire.v1.ConnectionId
+	6,   // 82: ferret.wire.v1.EvaluateRequest.debug_session_id:type_name -> ferret.wire.v1.DebugSessionId
+	9,   // 83: ferret.wire.v1.EvaluateResponse.value:type_name -> ferret.wire.v1.DebugValue
+	47,  // 84: ferret.wire.v1.DebugService.RunCommand:input_type -> ferret.wire.v1.RunCommandRequest
+	50,  // 85: ferret.wire.v1.DebugService.ReplaceBreakpoints:input_type -> ferret.wire.v1.ReplaceBreakpointsRequest
+	52,  // 86: ferret.wire.v1.DebugService.Breakpoints:input_type -> ferret.wire.v1.BreakpointsRequest
+	54,  // 87: ferret.wire.v1.DebugService.Locals:input_type -> ferret.wire.v1.LocalsRequest
+	56,  // 88: ferret.wire.v1.DebugService.Evaluate:input_type -> ferret.wire.v1.EvaluateRequest
+	12,  // 89: ferret.wire.v1.DebugService.CreateDebugSession:input_type -> ferret.wire.v1.CreateDebugSessionRequest
+	14,  // 90: ferret.wire.v1.DebugService.Start:input_type -> ferret.wire.v1.StartRequest
+	29,  // 91: ferret.wire.v1.DebugService.SetBreakpoint:input_type -> ferret.wire.v1.SetBreakpointRequest
+	31,  // 92: ferret.wire.v1.DebugService.DeleteBreakpoint:input_type -> ferret.wire.v1.DeleteBreakpointRequest
+	16,  // 93: ferret.wire.v1.DebugService.Continue:input_type -> ferret.wire.v1.ContinueRequest
+	18,  // 94: ferret.wire.v1.DebugService.Pause:input_type -> ferret.wire.v1.PauseRequest
+	20,  // 95: ferret.wire.v1.DebugService.StepOver:input_type -> ferret.wire.v1.StepOverRequest
+	22,  // 96: ferret.wire.v1.DebugService.StepIn:input_type -> ferret.wire.v1.StepInRequest
+	24,  // 97: ferret.wire.v1.DebugService.StepOut:input_type -> ferret.wire.v1.StepOutRequest
+	33,  // 98: ferret.wire.v1.DebugService.Frames:input_type -> ferret.wire.v1.FramesRequest
+	35,  // 99: ferret.wire.v1.DebugService.FrameLocals:input_type -> ferret.wire.v1.FrameLocalsRequest
+	37,  // 100: ferret.wire.v1.DebugService.Variables:input_type -> ferret.wire.v1.VariablesRequest
+	39,  // 101: ferret.wire.v1.DebugService.EvaluateFrame:input_type -> ferret.wire.v1.EvaluateFrameRequest
+	26,  // 102: ferret.wire.v1.DebugService.Terminate:input_type -> ferret.wire.v1.TerminateRequest
+	41,  // 103: ferret.wire.v1.DebugService.ReleaseDebugSession:input_type -> ferret.wire.v1.ReleaseDebugSessionRequest
+	44,  // 104: ferret.wire.v1.DebugService.WatchDebug:input_type -> ferret.wire.v1.WatchDebugRequest
+	48,  // 105: ferret.wire.v1.DebugService.RunCommand:output_type -> ferret.wire.v1.RunCommandResponse
+	51,  // 106: ferret.wire.v1.DebugService.ReplaceBreakpoints:output_type -> ferret.wire.v1.ReplaceBreakpointsResponse
+	53,  // 107: ferret.wire.v1.DebugService.Breakpoints:output_type -> ferret.wire.v1.BreakpointsResponse
+	55,  // 108: ferret.wire.v1.DebugService.Locals:output_type -> ferret.wire.v1.LocalsResponse
+	57,  // 109: ferret.wire.v1.DebugService.Evaluate:output_type -> ferret.wire.v1.EvaluateResponse
+	13,  // 110: ferret.wire.v1.DebugService.CreateDebugSession:output_type -> ferret.wire.v1.CreateDebugSessionResponse
+	15,  // 111: ferret.wire.v1.DebugService.Start:output_type -> ferret.wire.v1.StartResponse
+	30,  // 112: ferret.wire.v1.DebugService.SetBreakpoint:output_type -> ferret.wire.v1.SetBreakpointResponse
+	32,  // 113: ferret.wire.v1.DebugService.DeleteBreakpoint:output_type -> ferret.wire.v1.DeleteBreakpointResponse
+	17,  // 114: ferret.wire.v1.DebugService.Continue:output_type -> ferret.wire.v1.ContinueResponse
+	19,  // 115: ferret.wire.v1.DebugService.Pause:output_type -> ferret.wire.v1.PauseResponse
+	21,  // 116: ferret.wire.v1.DebugService.StepOver:output_type -> ferret.wire.v1.StepOverResponse
+	23,  // 117: ferret.wire.v1.DebugService.StepIn:output_type -> ferret.wire.v1.StepInResponse
+	25,  // 118: ferret.wire.v1.DebugService.StepOut:output_type -> ferret.wire.v1.StepOutResponse
+	34,  // 119: ferret.wire.v1.DebugService.Frames:output_type -> ferret.wire.v1.FramesResponse
+	36,  // 120: ferret.wire.v1.DebugService.FrameLocals:output_type -> ferret.wire.v1.FrameLocalsResponse
+	38,  // 121: ferret.wire.v1.DebugService.Variables:output_type -> ferret.wire.v1.VariablesResponse
+	40,  // 122: ferret.wire.v1.DebugService.EvaluateFrame:output_type -> ferret.wire.v1.EvaluateFrameResponse
+	27,  // 123: ferret.wire.v1.DebugService.Terminate:output_type -> ferret.wire.v1.TerminateResponse
+	42,  // 124: ferret.wire.v1.DebugService.ReleaseDebugSession:output_type -> ferret.wire.v1.ReleaseDebugSessionResponse
+	43,  // 125: ferret.wire.v1.DebugService.WatchDebug:output_type -> ferret.wire.v1.WatchDebugResponse
+	105, // [105:126] is the sub-list for method output_type
+	84,  // [84:105] is the sub-list for method input_type
+	84,  // [84:84] is the sub-list for extension type_name
+	84,  // [84:84] is the sub-list for extension extendee
+	0,   // [0:84] is the sub-list for field type_name
 }
 
 func init() { file_ferret_wire_v1_debug_proto_init() }

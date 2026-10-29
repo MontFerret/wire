@@ -38,7 +38,7 @@ func serveTLS(ctx context.Context, hostRuntime api.Runtime, serverCertificate tl
 The matching client verifies both the root and certificate identity:
 
 ```go
-func runTLS(ctx context.Context, serverRoots *x509.CertPool) (out *api.Output, err error) {
+func runTLS(ctx context.Context, serverRoots *x509.CertPool) (out *api.Content, err error) {
     remote, err := client.New(ctx,
         "127.0.0.1:50051",
         client.WithTransportCredentials(credentials.NewTLS(&tls.Config{
@@ -51,7 +51,12 @@ func runTLS(ctx context.Context, serverRoots *x509.CertPool) (out *api.Output, e
         return nil, err
     }
     defer func() { err = errors.Join(err, remote.Close()) }()
-    return remote.Run(ctx, api.NewAnonymousSource("RETURN 1"))
+    output, err := remote.Run(ctx, api.NewAnonymousSource("RETURN 1"))
+    if err != nil {
+        return nil, err
+    }
+    defer func() { err = errors.Join(err, output.Close()) }()
+    return output.Collect(ctx)
 }
 ```
 
@@ -78,13 +83,18 @@ func serveInventory(ctx context.Context, hostRuntime api.Runtime, certificate tl
     return srv.Run(ctx, "inventory.example.com:50051")
 }
 
-func runInventory(ctx context.Context) (out *api.Output, err error) {
+func runInventory(ctx context.Context) (out *api.Content, err error) {
     remote, err := client.New(ctx, "inventory.example.com:50051")
     if err != nil {
         return nil, err
     }
     defer func() { err = errors.Join(err, remote.Close()) }()
-    return remote.Run(ctx, api.NewAnonymousSource("RETURN 1"))
+    output, err := remote.Run(ctx, api.NewAnonymousSource("RETURN 1"))
+    if err != nil {
+        return nil, err
+    }
+    defer func() { err = errors.Join(err, output.Close()) }()
+    return output.Collect(ctx)
 }
 ```
 
@@ -118,7 +128,7 @@ return srv.Run(ctx, "127.0.0.1:50051")
 The matching client configuration is:
 
 ```go
-func runMTLS(ctx context.Context, serverRoots *x509.CertPool, certificate tls.Certificate) (out *api.Output, err error) {
+func runMTLS(ctx context.Context, serverRoots *x509.CertPool, certificate tls.Certificate) (out *api.Content, err error) {
     clientTLS := &tls.Config{
         MinVersion:   tls.VersionTLS12,
         RootCAs:      serverRoots,
@@ -132,7 +142,12 @@ func runMTLS(ctx context.Context, serverRoots *x509.CertPool, certificate tls.Ce
         return nil, err
     }
     defer func() { err = errors.Join(err, remote.Close()) }()
-    return remote.Run(ctx, api.NewAnonymousSource("RETURN 1"))
+    output, err := remote.Run(ctx, api.NewAnonymousSource("RETURN 1"))
+    if err != nil {
+        return nil, err
+    }
+    defer func() { err = errors.Join(err, output.Close()) }()
+    return output.Collect(ctx)
 }
 ```
 
@@ -208,7 +223,7 @@ func (token bearerToken) GetRequestMetadata(context.Context, ...string) (map[str
 }
 func (bearerToken) RequireTransportSecurity() bool { return true }
 
-func runAuthenticated(ctx context.Context, serverRoots *x509.CertPool, hostIssuedToken string) (out *api.Output, err error) {
+func runAuthenticated(ctx context.Context, serverRoots *x509.CertPool, hostIssuedToken string) (out *api.Content, err error) {
     clientTLS := &tls.Config{
         MinVersion: tls.VersionTLS12,
         RootCAs:    serverRoots,
@@ -223,7 +238,12 @@ func runAuthenticated(ctx context.Context, serverRoots *x509.CertPool, hostIssue
         return nil, err
     }
     defer func() { err = errors.Join(err, remote.Close()) }()
-    return remote.Run(ctx, api.NewAnonymousSource("RETURN 1"))
+    output, err := remote.Run(ctx, api.NewAnonymousSource("RETURN 1"))
+    if err != nil {
+        return nil, err
+    }
+    defer func() { err = errors.Join(err, output.Close()) }()
+    return output.Collect(ctx)
 }
 ```
 
@@ -239,7 +259,7 @@ example uses the same `127.0.0.1:50051` TLS host and `wire.test` identity. The c
 owns the channel on construction failure and after all logical runtimes close:
 
 ```go
-func runBorrowed(ctx context.Context, serverRoots *x509.CertPool) (out *api.Output, err error) {
+func runBorrowed(ctx context.Context, serverRoots *x509.CertPool) (out *api.Content, err error) {
     conn, err := grpc.NewClient("127.0.0.1:50051",
         grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{
             RootCAs: serverRoots, ServerName: "wire.test",
@@ -255,7 +275,12 @@ func runBorrowed(ctx context.Context, serverRoots *x509.CertPool) (out *api.Outp
         return nil, err
     }
     defer func() { err = errors.Join(err, remote.Close()) }()
-    return remote.Run(ctx, api.NewAnonymousSource("RETURN 1"))
+    output, err := remote.Run(ctx, api.NewAnonymousSource("RETURN 1"))
+    if err != nil {
+        return nil, err
+    }
+    defer func() { err = errors.Join(err, output.Close()) }()
+    return output.Collect(ctx)
 }
 ```
 
@@ -315,11 +340,12 @@ Wire adds no token cache or lifecycle. See [client options](client.md#transport-
 ## Middleware and trust boundaries
 
 Repeated interceptor options append in registration order. Wire recovery is the
-outermost wrapper, followed by host middleware, then the handler. Host middleware
-can reject requests before handler resource allocation or runtime work. Ordinary
+outermost wrapper, followed by Wire's framed-response compression policy, host
+middleware, then the handler. Host middleware can reject requests before handler resource allocation or runtime work. Ordinary
 host authentication/authorization statuses pass through unchanged; invocation
-panics receive Wire's existing sanitized internal status. Captured interceptor
-lists are copied, but middleware closures must be safe for concurrent RPCs.
+panics receive Wire's existing sanitized internal status, including panics from
+wrapped SendMsg calls in detached output senders. Captured interceptor lists are
+copied, but middleware closures must be safe for concurrent RPCs.
 Unary replacement contexts and wrapped stream contexts reach the next handler;
 incoming metadata and peer authentication information remain available.
 
@@ -342,3 +368,29 @@ cleanup may remain pending under its original owner; subsequent `Shutdown` calls
 observe its retained settlement result. Successful return means managed cleanup
 settled. Wire never closes the borrowed host runtime. See the
 [serving lifecycle](architecture.md#public-serving-lifecycle).
+
+## Encoded output limits
+
+Framing version 1 is mandatory during Connect; incompatible peers cannot allocate
+work. Each output message, including its envelope, respects the outbound gRPC limit.
+ReadExecutionOutput, RunCommand, and WatchDebug responses use identity compression
+so incompressible data cannot expand past their protobuf-based budget. Requests
+may still use gzip. The policy is selected before host middleware, including early
+headers; middleware must preserve it. This trades compression savings for exact
+message bounds without speculative compression or retries. Oversized metadata,
+semantic envelopes, terminal frames, and impossible minimum chunk budgets return
+ResourceExhausted. Wire retains those trusted delivery errors while sanitizing
+arbitrary hosted statuses.
+Normal execution streams borrowed bytes with bounded backpressure and does not
+retain payloads for lifecycle watches. Unread output must be closed or canceled.
+Cancellation, disconnect and shutdown can settle producers without waiting for a
+stalled network Send. Hosted implementations must honor cancellation themselves.
+
+There is deliberately no aggregate result-size cap. Collect materializes received
+bytes; debugger results remain materialized on both sides and retained server-side
+for replay until release. Hosts and consumers must budget for those allocations.
+Untrusted advertised lengths never trigger preallocation. Framing validates order,
+actual byte accounting and successful known lengths. Failures are sanitized using
+the existing runtime boundary policy; context-error identity is conveyed separately.
+Output-operation panics poison durable sessions. Metadata and terminal envelopes
+must themselves fit the message limit, even though payloads can span many messages.

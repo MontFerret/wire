@@ -2,7 +2,7 @@
 
 Ferret Wire is a versioned gRPC boundary for hosting an implementation of the [Unified Ferret API](https://github.com/MontFerret/api) in another process. It lets a host expose compilation, execution, and source-level debugging while the host retains runtime construction, configuration, and security policy.
 
-This module targets Go 1.25 and Unified API `v1.0.0-alpha.20`. The v1 protobuf package is `ferret.wire.v1`; its sources live in `proto/ferret/wire/v1`, and the checked-in Go bindings live in `gen/ferret/wire/v1`.
+This module targets Go 1.25 and Unified API `v1.0.0-alpha.21`. The v1 protobuf package is `ferret.wire.v1`; its sources live in `proto/ferret/wire/v1`, and the checked-in Go bindings live in `gen/ferret/wire/v1`.
 
 ## Ownership and architecture
 
@@ -35,7 +35,7 @@ Unary execution and debug resume calls publish work before returning. Once publi
 - `CreateSession` constructs one durable hosted `api.Session`. `RunSession` reuses it for sequential runs and represents every run as a distinct asynchronous Execution; overlap is rejected until the prior Execution is released.
 - `RuntimeService.Run` invokes the hosted `api.Runtime.Run` directly and represents that one-shot operation as a connection-owned asynchronous Execution. It does not compile a temporary Plan.
 - Parameter values use an explicit protobuf oneof for null, boolean, exact signed 64-bit integer, finite double, string, bytes, array, or string-keyed object. Missing variants, NaN, infinities, custom values, and nesting beyond 64 levels are rejected. In protobuf JSON, int64 values are decimal strings while finite doubles remain JSON numbers.
-- Execution and debug completion carry one shared Unified API output contract unchanged: `content_type` plus encoded `content` bytes. Wire never decodes or reinterprets them.
+- Normal execution returns a one-shot `api.Output`; debugger events carry detached `*api.Content`. Both preserve encoded bytes and metadata without interpreting them, using chunked delivery that can exceed individual RPC message limits.
 - Execution and debug watches carry ordered snapshots. State is the execution lifecycle discriminator; debug events also carry a kind because start and continue both publish a running state. A new debug session immediately publishes a created snapshot. Created, running, stopped, and terminal snapshots are replayable; watcher cancellation is independent of resource cancellation, and slow watchers are detached without blocking runtime work.
 - Debug transport uses the canonical `StepOver`, `StepIn`, and `StepOut` commands and preserves semantic source names, ranges and spans, event depth, requested and resolved breakpoints, binding mode, point and function IDs, frame function IDs, variables, value references, stop reason, and hit breakpoint IDs. Positive value references are scoped to the current stopped state. Frame order is the zero-based index accepted by `FrameLocals` and `EvaluateFrame`.
 - Invalid requests, cancellation, and resource exhaustion use normal gRPC status codes. `ErrorDetail` carries meaningful Wire lifecycle/runtime categories. Typed Unified API diagnostics are preserved separately from sanitized summaries on immediate errors and asynchronous failures; Wire never parses arbitrary runtime error strings.
@@ -49,7 +49,7 @@ is the exact opaque value from the hosted `api.Runtime.Version(ctx)`; and option
 through `WithRuntimeIdentity`. `runtime_version` and `runtime_identity.version`
 have different owners and semantics, even when their strings happen to match.
 Runtime version bytes are preserved exactly, including invalid UTF-8. An empty
-runtime version is valid when present; alpha.20 clients reject handshakes
+runtime version is valid when present; clients reject handshakes
 without the field. Wire exposes no capability negotiation, Ferret-specific build
 metadata, Git metadata, or module inventories.
 
@@ -76,14 +76,19 @@ This example uses **unencrypted, unauthenticated transport**, even on loopback.
 The matching client explicitly selects plaintext and owns its channel:
 
 ```go
-func runLoopback(ctx context.Context) (out *api.Output, err error) {
+func runLoopback(ctx context.Context) (out *api.Content, err error) {
     remote, err := client.New(ctx, "127.0.0.1:50051", client.WithInsecure())
     if err != nil {
         return nil, err
     }
     defer func() { err = errors.Join(err, remote.Close()) }()
 
-    return remote.Run(ctx, api.NewAnonymousSource("RETURN 1"))
+    output, err := remote.Run(ctx, api.NewAnonymousSource("RETURN 1"))
+    if err != nil {
+        return nil, err
+    }
+    defer func() { err = errors.Join(err, output.Close()) }()
+    return output.Collect(ctx)
 }
 ```
 
@@ -178,7 +183,7 @@ transport setup. `client.From` borrows the supplied connection and returns
 `api.Runtime`; subsequent operations use the same interfaces as a local runtime:
 
 ```go
-func runRemote(ctx context.Context, conn grpc.ClientConnInterface) (out *api.Output, err error) {
+func runRemote(ctx context.Context, conn grpc.ClientConnInterface) (out *api.Content, err error) {
     remote, err := client.From(ctx, conn)
     if err != nil {
         return nil, err
@@ -205,14 +210,22 @@ func runRemote(ctx context.Context, conn grpc.ClientConnInterface) (out *api.Out
     }
     defer func() { err = errors.Join(err, session.Close()) }()
 
-    return session.Run(ctx)
+    output, err := session.Run(ctx)
+    if err != nil {
+        return nil, err
+    }
+    defer func() { err = errors.Join(err, output.Close()) }()
+    return output.Collect(ctx)
 }
 ```
 
 For a one-shot invocation, `remote.Run(ctx, source, options...)` calls the hosted
 `api.Runtime.Run` directly. Plans and durable sessions may be reused; normal
-session runs are sequential. Output is `*api.Output`: content type and
-encoded bytes.
+session runs are sequential. `Run` returns a one-shot `api.Output` after hosted
+preparation and metadata retrieval. Call `Consume` for synchronous borrowed chunks
+or `Collect` for detached `*api.Content`, then check the terminal error. `Close`
+abandons unread output; it does not certify successful execution. Metadata remains
+readable after closure, and collected content survives parent cleanup.
 
 For debugging, use `remote.CompileDebug`, `plan.NewDebugSession`, and the
 canonical `api/debugger.Session` commands and events. Connection IDs, execution
@@ -241,7 +254,7 @@ Debugger methods take caller contexts. `RunCommand` streams preserve Start's
 execution lifetime and each resume's request context; cancellation does not
 release the debugger. Atomic breakpoint replacement works while running, and
 breakpoint enumeration remains available after explicit Close. See the
-[alpha.20 interface coverage](test/integration/README.md#interface-coverage).
+[alpha.21 interface coverage](test/integration/README.md#interface-coverage).
 
 The public client exports `New`, `From`, `Option`, the three transport option
 factories, `Error`, `ErrClosed`, and `ErrExecutionCancelled`. This is an intentional
@@ -370,3 +383,21 @@ runs Go lint, the race detector, Buf lint, checked generation, and pull-request
 breaking checks against the fetched base branch. Both integration layers run on
 the OS matrix and under the Linux race detector. CI explicitly invokes the
 nested-module targets and caches dependencies using both modules' checksum files.
+
+### Alpha.21 output migration
+
+This is an intentional behavior break: both peers must exchange output framing
+version 1 during Connect. Older peers fail before executing work; there is no
+buffered-output fallback. Execution watches now retain metadata and lifecycle
+failures only. `ReadExecutionOutput` provides exclusive output consumption.
+
+Chunks target 64 KiB and shrink to fit the host's outbound message limit, including
+protobuf overhead. There is no aggregate output-size cap. `Consume` applies
+backpressure; `Collect` and debugger content materialize all delivered bytes.
+Chunked transport does not imply incremental query evaluation or native encoding.
+The invocation context must remain alive until consumption completes. Each output
+owns its execution and runtime reference; session output leaves its caller-owned
+session open. Close every output that you do not consume.
+
+See [output performance measurements](docs/output-performance.md) for the benchmark
+comparison and separate bounded-buffering checks.
