@@ -1,5 +1,13 @@
 # Alpha.21 output measurements
 
+For the current reproducible delivery and CLI-writer baseline, see
+[Streaming allocation baseline](output-streaming-baseline.md). The historical
+results below retain their original methodology. The later audit found that
+`BenchmarkExecutionOutput` used a recorder that retained every hosted call and
+scanned its growing history, plus an RPC wrapper that retained unary call order.
+The new benchmark uses a different fixture and transport and is not directly
+comparable with those historical execution-output timings or allocations.
+
 Measured on 2026-10-28 on an Apple M2 Max, darwin/arm64, Go 1.27.3, with
 GOMAXPROCS fixed at 12. These are in-process gRPC benchmarks, not network
 service-level guarantees. All comparisons report median ns/op, B/op, and

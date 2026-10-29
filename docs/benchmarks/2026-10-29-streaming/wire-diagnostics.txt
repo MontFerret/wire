@@ -1,0 +1,42 @@
+=== RUN   TestOutputDeliveryFrames
+=== RUN   TestOutputDeliveryFrames/64B/whole
+    output_delivery_test.go:55: payload=64 callback=64 data_frames=1 headers=1 terminals=1
+=== RUN   TestOutputDeliveryFrames/1MiB/whole
+    output_delivery_test.go:55: payload=1048576 callback=1048576 data_frames=16 headers=1 terminals=1
+=== RUN   TestOutputDeliveryFrames/8MiB/whole
+    output_delivery_test.go:55: payload=8388608 callback=8388608 data_frames=128 headers=1 terminals=1
+=== RUN   TestOutputDeliveryFrames/1MiB/64KiB
+    output_delivery_test.go:55: payload=1048576 callback=65536 data_frames=16 headers=1 terminals=1
+=== RUN   TestOutputDeliveryFrames/1MiB/4KiB
+    output_delivery_test.go:55: payload=1048576 callback=4096 data_frames=256 headers=1 terminals=1
+=== RUN   TestOutputDeliveryFrames/1MiB/256B
+    output_delivery_test.go:55: payload=1048576 callback=256 data_frames=4096 headers=1 terminals=1
+=== RUN   TestOutputDeliveryFrames/uneven
+    output_delivery_test.go:55: payload=65549 callback=1009 data_frames=65 headers=1 terminals=1
+--- PASS: TestOutputDeliveryFrames (0.03s)
+    --- PASS: TestOutputDeliveryFrames/64B/whole (0.00s)
+    --- PASS: TestOutputDeliveryFrames/1MiB/whole (0.00s)
+    --- PASS: TestOutputDeliveryFrames/8MiB/whole (0.01s)
+    --- PASS: TestOutputDeliveryFrames/1MiB/64KiB (0.00s)
+    --- PASS: TestOutputDeliveryFrames/1MiB/4KiB (0.00s)
+    --- PASS: TestOutputDeliveryFrames/1MiB/256B (0.01s)
+    --- PASS: TestOutputDeliveryFrames/uneven (0.00s)
+=== RUN   TestOutputDeliveryFailures
+=== RUN   TestOutputDeliveryFailures/terminal
+=== RUN   TestOutputDeliveryFailures/cleanup
+--- PASS: TestOutputDeliveryFailures (0.00s)
+    --- PASS: TestOutputDeliveryFailures/terminal (0.00s)
+    --- PASS: TestOutputDeliveryFailures/cleanup (0.00s)
+=== RUN   TestOutputDeliverySlowConsumer
+=== RUN   TestOutputDeliverySlowConsumer/resume
+    output_delivery_test.go:152: first_payload=468.333µs callback_bytes=65536
+    output_delivery_test.go:153: stall_entry producer_entered=6 producer_returned=5 send_entered=5 send_returned=4
+    output_delivery_test.go:162: stall_100ms producer_entered=8 producer_returned=7 send_entered=7 send_returned=6
+=== RUN   TestOutputDeliverySlowConsumer/cancel
+    output_delivery_test.go:152: first_payload=424.584µs callback_bytes=65536
+    output_delivery_test.go:153: stall_entry producer_entered=6 producer_returned=5 send_entered=5 send_returned=4
+    output_delivery_test.go:162: stall_100ms producer_entered=8 producer_returned=7 send_entered=7 send_returned=6
+--- PASS: TestOutputDeliverySlowConsumer (0.22s)
+    --- PASS: TestOutputDeliverySlowConsumer/resume (0.11s)
+    --- PASS: TestOutputDeliverySlowConsumer/cancel (0.11s)
+PASS

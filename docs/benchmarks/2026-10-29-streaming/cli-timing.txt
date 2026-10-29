@@ -1,0 +1,45 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/MontFerret/cli/v2/internal/output
+cpu: Apple M2 Max
+BenchmarkWireOutputDelivery/64B/whole-12         	    5204	    230051 ns/op	   0.28 MB/s	   44913 B/op	     655 allocs/op
+BenchmarkWireOutputDelivery/64B/whole-12         	    5193	    229019 ns/op	   0.28 MB/s	   45885 B/op	     655 allocs/op
+BenchmarkWireOutputDelivery/64B/whole-12         	    5389	    227426 ns/op	   0.28 MB/s	   46008 B/op	     655 allocs/op
+BenchmarkWireOutputDelivery/64B/whole-12         	    5146	    233427 ns/op	   0.27 MB/s	   46298 B/op	     655 allocs/op
+BenchmarkWireOutputDelivery/64B/whole-12         	    5162	    232635 ns/op	   0.28 MB/s	   46273 B/op	     655 allocs/op
+BenchmarkWireOutputDelivery/64B/whole-12         	    5239	    230631 ns/op	   0.28 MB/s	   46333 B/op	     655 allocs/op
+BenchmarkWireOutputDelivery/64B/whole-12         	    5233	    231810 ns/op	   0.28 MB/s	   45872 B/op	     655 allocs/op
+BenchmarkWireOutputDelivery/64B/whole-12         	    4978	    231677 ns/op	   0.28 MB/s	   46535 B/op	     655 allocs/op
+BenchmarkWireOutputDelivery/64B/whole-12         	    5395	    232302 ns/op	   0.28 MB/s	   46098 B/op	     655 allocs/op
+BenchmarkWireOutputDelivery/64B/whole-12         	    5240	    230848 ns/op	   0.28 MB/s	   46084 B/op	     655 allocs/op
+BenchmarkWireOutputDelivery/1MiB/whole-12        	    1509	    778146 ns/op	1347.53 MB/s	 3170210 B/op	    1013 allocs/op
+BenchmarkWireOutputDelivery/1MiB/whole-12        	    1596	    746824 ns/op	1404.05 MB/s	 3038317 B/op	     989 allocs/op
+BenchmarkWireOutputDelivery/1MiB/whole-12        	    1629	    747060 ns/op	1403.60 MB/s	 2995238 B/op	     998 allocs/op
+BenchmarkWireOutputDelivery/1MiB/whole-12        	    1557	    750619 ns/op	1396.95 MB/s	 3011913 B/op	     994 allocs/op
+BenchmarkWireOutputDelivery/1MiB/whole-12        	    1609	    744127 ns/op	1409.13 MB/s	 2994494 B/op	     986 allocs/op
+BenchmarkWireOutputDelivery/1MiB/whole-12        	    1573	    745823 ns/op	1405.93 MB/s	 3022365 B/op	     992 allocs/op
+BenchmarkWireOutputDelivery/1MiB/whole-12        	    1614	    747423 ns/op	1402.92 MB/s	 2991756 B/op	     988 allocs/op
+BenchmarkWireOutputDelivery/1MiB/whole-12        	    1606	    746917 ns/op	1403.87 MB/s	 3023749 B/op	     994 allocs/op
+BenchmarkWireOutputDelivery/1MiB/whole-12        	    1585	    744585 ns/op	1408.27 MB/s	 2997623 B/op	     987 allocs/op
+BenchmarkWireOutputDelivery/1MiB/whole-12        	    1587	    742065 ns/op	1413.05 MB/s	 2968286 B/op	     985 allocs/op
+BenchmarkWireOutputDelivery/8MiB/whole-12        	     328	   3626947 ns/op	2312.86 MB/s	20229879 B/op	    3287 allocs/op
+BenchmarkWireOutputDelivery/8MiB/whole-12        	     272	   3832535 ns/op	2188.79 MB/s	19205787 B/op	    3276 allocs/op
+BenchmarkWireOutputDelivery/8MiB/whole-12        	     338	   3528985 ns/op	2377.06 MB/s	19003494 B/op	    3378 allocs/op
+BenchmarkWireOutputDelivery/8MiB/whole-12        	     334	   3571543 ns/op	2348.74 MB/s	19235716 B/op	    3359 allocs/op
+BenchmarkWireOutputDelivery/8MiB/whole-12        	     333	   3552285 ns/op	2361.47 MB/s	18927353 B/op	    3289 allocs/op
+BenchmarkWireOutputDelivery/8MiB/whole-12        	     338	   3511569 ns/op	2388.85 MB/s	19124242 B/op	    3282 allocs/op
+BenchmarkWireOutputDelivery/8MiB/whole-12        	     332	   3605441 ns/op	2326.65 MB/s	19179140 B/op	    3325 allocs/op
+BenchmarkWireOutputDelivery/8MiB/whole-12        	     334	   3576989 ns/op	2345.16 MB/s	19144372 B/op	    3371 allocs/op
+BenchmarkWireOutputDelivery/8MiB/whole-12        	     337	   3518493 ns/op	2384.15 MB/s	19103488 B/op	    3301 allocs/op
+BenchmarkWireOutputDelivery/8MiB/whole-12        	     324	   3997069 ns/op	2098.69 MB/s	19043902 B/op	    3177 allocs/op
+BenchmarkWireOutputDelivery/1MiB/256B-12         	     140	   8517842 ns/op	 123.10 MB/s	 7238180 B/op	   80043 allocs/op
+BenchmarkWireOutputDelivery/1MiB/256B-12         	     150	   8230379 ns/op	 127.40 MB/s	 7065496 B/op	   79806 allocs/op
+BenchmarkWireOutputDelivery/1MiB/256B-12         	     147	   8032332 ns/op	 130.54 MB/s	 7084613 B/op	   79917 allocs/op
+BenchmarkWireOutputDelivery/1MiB/256B-12         	     147	   8089267 ns/op	 129.63 MB/s	 7073693 B/op	   79930 allocs/op
+BenchmarkWireOutputDelivery/1MiB/256B-12         	     148	   8033282 ns/op	 130.53 MB/s	 7072796 B/op	   79896 allocs/op
+BenchmarkWireOutputDelivery/1MiB/256B-12         	     147	   8532396 ns/op	 122.89 MB/s	 7092471 B/op	   79928 allocs/op
+BenchmarkWireOutputDelivery/1MiB/256B-12         	     146	   8122910 ns/op	 129.09 MB/s	 7066805 B/op	   79845 allocs/op
+BenchmarkWireOutputDelivery/1MiB/256B-12         	     147	   8090633 ns/op	 129.60 MB/s	 7071858 B/op	   79926 allocs/op
+BenchmarkWireOutputDelivery/1MiB/256B-12         	     148	   8044612 ns/op	 130.35 MB/s	 7070924 B/op	   79929 allocs/op
+BenchmarkWireOutputDelivery/1MiB/256B-12         	     148	   8061817 ns/op	 130.07 MB/s	 7066835 B/op	   79963 allocs/op
+PASS
