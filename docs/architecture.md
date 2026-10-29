@@ -550,3 +550,9 @@ fallible parameter metadata before publication; metadata error or panic closes t
 Anonymous sources and explicitly empty filesystem roots/content types pass through
 unchanged. Wire owns structural protocol checks; hosted implementations own source
 validity, filesystem interpretation, and codec validation.
+
+Preparation failures before an output metadata header use an RPC status. Canonical
+query diagnostics retain the execution-failure category and diagnostic status
+detail, matching terminal output failures. Existing domain classifications and
+Wire delivery-limit provenance take precedence; arbitrary host errors remain
+sanitized internal failures.
