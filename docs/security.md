@@ -340,11 +340,12 @@ Wire adds no token cache or lifecycle. See [client options](client.md#transport-
 ## Middleware and trust boundaries
 
 Repeated interceptor options append in registration order. Wire recovery is the
-outermost wrapper, followed by host middleware, then the handler. Host middleware
-can reject requests before handler resource allocation or runtime work. Ordinary
+outermost wrapper, followed by Wire's framed-response compression policy, host
+middleware, then the handler. Host middleware can reject requests before handler resource allocation or runtime work. Ordinary
 host authentication/authorization statuses pass through unchanged; invocation
-panics receive Wire's existing sanitized internal status. Captured interceptor
-lists are copied, but middleware closures must be safe for concurrent RPCs.
+panics receive Wire's existing sanitized internal status, including panics from
+wrapped SendMsg calls in detached output senders. Captured interceptor lists are
+copied, but middleware closures must be safe for concurrent RPCs.
 Unary replacement contexts and wrapped stream contexts reach the next handler;
 incoming metadata and peer authentication information remain available.
 
@@ -372,6 +373,14 @@ settled. Wire never closes the borrowed host runtime. See the
 
 Framing version 1 is mandatory during Connect; incompatible peers cannot allocate
 work. Each output message, including its envelope, respects the outbound gRPC limit.
+ReadExecutionOutput, RunCommand, and WatchDebug responses use identity compression
+so incompressible data cannot expand past their protobuf-based budget. Requests
+may still use gzip. The policy is selected before host middleware, including early
+headers; middleware must preserve it. This trades compression savings for exact
+message bounds without speculative compression or retries. Oversized metadata,
+semantic envelopes, terminal frames, and impossible minimum chunk budgets return
+ResourceExhausted. Wire retains those trusted delivery errors while sanitizing
+arbitrary hosted statuses.
 Normal execution streams borrowed bytes with bounded backpressure and does not
 retain payloads for lifecycle watches. Unread output must be closed or canceled.
 Cancellation, disconnect and shutdown can settle producers without waiting for a

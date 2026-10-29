@@ -11,6 +11,7 @@ import (
 
 	"github.com/MontFerret/api"
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
+	"github.com/MontFerret/wire/internal/outputstream"
 	wireexecution "github.com/MontFerret/wire/pkg/execution"
 	"github.com/MontFerret/wire/pkg/failure"
 )
@@ -61,25 +62,19 @@ func TestExecutionStateConversionMapsEveryProtocolValue(t *testing.T) {
 	}
 }
 
-//nolint:staticcheck // Legacy snapshot fixtures are translated into framed output by this test server.
 func TestExecutionConversionDetachesMetadataAndFailure(t *testing.T) {
-	protocol := executionSnapshotProto(
-		"execution-1",
-		wirev1.ExecutionState_EXECUTION_STATE_FAILED,
-		&wirev1.Output{ContentType: "text/plain", Content: []byte("partial")},
-		&wirev1.Failure{
-			Category: wirev1.ErrorCategory_ERROR_CATEGORY_EXECUTION_FAILURE,
-			Message:  "runtime operation failed",
-			DiagnosticSet: &wirev1.DiagnosticSet{Diagnostics: []*wirev1.Diagnostic{{
-				Kind:   "TypeError",
-				Source: &wirev1.Source{Name: "query.fql", Content: "RETURN 1"},
-				Annotations: []*wirev1.DiagnosticAnnotation{{
-					Range: debugTestRange("query.fql", 1, 0, 0, 1),
-				}},
+	protocol := &wirev1.Execution{Id: &wirev1.ExecutionId{Value: "execution-1"}, State: wirev1.ExecutionState_EXECUTION_STATE_FAILED, Failure: &wirev1.Failure{
+		Category: wirev1.ErrorCategory_ERROR_CATEGORY_EXECUTION_FAILURE,
+		Message:  "runtime operation failed",
+		DiagnosticSet: &wirev1.DiagnosticSet{Diagnostics: []*wirev1.Diagnostic{{
+			Kind:   "TypeError",
+			Source: &wirev1.Source{Name: "query.fql", Content: "RETURN 1"},
+			Annotations: []*wirev1.DiagnosticAnnotation{{
+				Range: debugTestRange("query.fql", 1, 0, 0, 1),
 			}},
-			},
+		}},
 		},
-	)
+	}}
 
 	protocol.Metadata = &wirev1.OutputMetadata{ContentType: "text/plain"}
 
@@ -98,51 +93,44 @@ func TestExecutionConversionDetachesMetadataAndFailure(t *testing.T) {
 	}
 }
 
-func TestExecutionWaitTerminalStates(t *testing.T) {
+func TestExecutionOutputTerminalStates(t *testing.T) {
 	tests := []struct {
 		name        string
-		events      []*wirev1.WatchExecutionResponse
+		frames      []*wirev1.OutputFrame
 		contentType string
 		output      string
 		failure     bool
 		cancelled   bool
 	}{
 		{
-			name: "completed after intermediate event",
-			events: []*wirev1.WatchExecutionResponse{
-				executionStartedEvent("execution-1"),
-				executionCompletedEvent("execution-1", "application/json", []byte(`{"ok":true}`)),
-			},
+			name:        "completed",
+			frames:      completedOutputFrames("application/json", []byte(`{"ok":true}`)),
 			contentType: "application/json",
 			output:      `{"ok":true}`,
 		},
 		{
 			name: "failed immediately",
-			events: []*wirev1.WatchExecutionResponse{
-				executionFailedEvent("execution-1", []byte("partial"), &wirev1.Failure{
-					Category: wirev1.ErrorCategory_ERROR_CATEGORY_EXECUTION_FAILURE,
-					Message:  "remote execution failed",
-				}),
-			},
+			frames: failedOutputFrames([]byte("partial"), &wirev1.Failure{
+				Category: wirev1.ErrorCategory_ERROR_CATEGORY_EXECUTION_FAILURE,
+				Message:  "remote execution failed",
+			}),
 			contentType: "text/plain",
 			output:      "partial",
 			failure:     true,
 		},
 		{
-			name: "cancelled immediately",
-			events: []*wirev1.WatchExecutionResponse{
-				executionCancelledEvent("execution-1"),
-			},
+			name:      "cancelled immediately",
+			frames:    []*wirev1.OutputFrame{outputstream.Header(api.Metadata{}), outputstream.End(&wirev1.OutputTerminal{Cancelled: true})},
 			cancelled: true,
 		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			server := &clientTestServer{watchScripts: []executionWatchScript{{events: test.events}}}
+			server := &clientTestServer{outputScripts: []executionOutputScript{{frames: test.frames}}}
 			_, _, execution := openTestExecution(t, server)
 
-			output, err := execution.Wait(testClientContext(t))
+			output, err := collectTestExecution(testClientContext(t), execution)
 			if test.cancelled && output != nil || !test.cancelled && (output == nil || output.Metadata.ContentType != test.contentType || string(output.Data) != test.output) {
 				t.Fatalf("unexpected output: %#v", output)
 			}
@@ -163,47 +151,45 @@ func TestExecutionWaitTerminalStates(t *testing.T) {
 
 			_, _, releaseExecutionCalls, _ := server.callSnapshot()
 			if releaseExecutionCalls != 1 {
-				t.Fatalf("Wait released the execution %d times", releaseExecutionCalls)
+				t.Fatalf("Output consumption released the execution %d times", releaseExecutionCalls)
 			}
 		})
 	}
 }
 
-//nolint:staticcheck // Legacy snapshot fixtures are translated into framed output by this test server.
-func TestExecutionWaitReleasesHandleAndDetachesOutput(t *testing.T) {
-	completed := executionCompletedEvent("execution-1", "text/plain", []byte("original"))
-	server := &clientTestServer{watchScripts: []executionWatchScript{
-		{events: []*wirev1.WatchExecutionResponse{completed}},
-		{events: []*wirev1.WatchExecutionResponse{completed}},
+func TestExecutionOutputReleasesHandleAndDetachesOutput(t *testing.T) {
+	completed := completedOutputFrames("text/plain", []byte("original"))
+	server := &clientTestServer{outputScripts: []executionOutputScript{
+		{frames: completed},
 	}}
 	_, _, execution := openTestExecution(t, server)
 
-	first, err := execution.Wait(testClientContext(t))
+	first, err := collectTestExecution(testClientContext(t), execution)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	first.Data[0] = 'X'
 
-	if _, err := execution.Wait(testClientContext(t)); !errors.Is(err, ErrClosed) {
+	if _, err := collectTestExecution(testClientContext(t), execution); !errors.Is(err, ErrClosed) {
 		t.Fatalf("released output execution was reused: %v", err)
 	}
 
-	if string(completed.GetExecution().GetOutput().GetContent()) != "original" {
+	if string(completed[1].GetChunk()) != "original" {
 		t.Fatal("collected bytes alias the server")
 	}
 
-	_, watchCalls, releaseExecutionCalls, _ := server.callSnapshot()
-	if watchCalls != 1 || releaseExecutionCalls != 1 {
-		t.Fatalf("watch=%d release=%d", watchCalls, releaseExecutionCalls)
+	_, outputCalls, releaseExecutionCalls, _ := server.callSnapshot()
+	if outputCalls != 1 || releaseExecutionCalls != 1 {
+		t.Fatalf("output reads=%d release=%d", outputCalls, releaseExecutionCalls)
 	}
 }
 
-func TestExecutionWaitPropagatesContextAndStreamErrors(t *testing.T) {
+func TestExecutionOutputPropagatesContextAndStreamErrors(t *testing.T) {
 	t.Run("caller cancellation", func(t *testing.T) {
 		entered := make(chan struct{})
-		server := &clientTestServer{watchScripts: []executionWatchScript{{
-			events:  []*wirev1.WatchExecutionResponse{executionStartedEvent("execution-1")},
+		server := &clientTestServer{outputScripts: []executionOutputScript{{
+			frames:  []*wirev1.OutputFrame{outputstream.Header(api.Metadata{})},
 			block:   true,
 			entered: entered,
 		}}}
@@ -211,77 +197,61 @@ func TestExecutionWaitPropagatesContextAndStreamErrors(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		result := make(chan error, 1)
 		go func() {
-			_, err := execution.Wait(ctx)
+			_, err := collectTestExecution(ctx, execution)
 			result <- err
 		}()
 		select {
 		case <-entered:
 		case <-time.After(10 * time.Second):
-			t.Fatal("Wait did not attach its watcher")
+			t.Fatal("Consumption did not attach output delivery")
 		}
 
 		cancel()
 		select {
 		case err := <-result:
 			if !errors.Is(err, context.Canceled) {
-				t.Fatalf("Wait did not return the caller context error: %#v", err)
+				t.Fatalf("Consumption did not return the caller context error: %#v", err)
 			}
 		case <-time.After(10 * time.Second):
-			t.Fatal("Wait did not observe caller cancellation")
+			t.Fatal("Consumption did not observe caller cancellation")
 		}
 	})
 
 	t.Run("stream failure", func(t *testing.T) {
-		server := &clientTestServer{watchScripts: []executionWatchScript{{
-			events: []*wirev1.WatchExecutionResponse{executionStartedEvent("execution-1")},
-			err:    status.Error(codes.Unavailable, "watch transport failed"),
+		server := &clientTestServer{outputScripts: []executionOutputScript{{
+			frames: []*wirev1.OutputFrame{outputstream.Header(api.Metadata{})},
+			err:    status.Error(codes.Unavailable, "output transport failed"),
 		}}}
 		_, _, execution := openTestExecution(t, server)
 
-		_, err := execution.Wait(testClientContext(t))
+		_, err := collectTestExecution(testClientContext(t), execution)
 
 		var wireErr *Error
-		if !errors.As(err, &wireErr) || status.Code(err) != codes.Unavailable || wireErr.Message != "watch transport failed" {
+		if !errors.As(err, &wireErr) || status.Code(err) != codes.Unavailable || wireErr.Message != "output transport failed" {
 			t.Fatalf("unexpected stream failure: %#v", err)
 		}
 	})
 }
 
-func TestExecutionWaitRejectsIncompleteTerminalSnapshots(t *testing.T) {
-	tests := []struct {
-		name    string
-		event   *wirev1.WatchExecutionResponse
-		message string
-	}{
-		{
-			name: "completed without output",
-			event: &wirev1.WatchExecutionResponse{
-				Sequence:  1,
-				Execution: executionSnapshotProto("execution-1", wirev1.ExecutionState_EXECUTION_STATE_COMPLETED, nil, nil),
-			},
-			message: "",
-		},
-		{
-			name: "failed without details",
-			event: &wirev1.WatchExecutionResponse{
-				Sequence:  1,
-				Execution: executionSnapshotProto("execution-1", wirev1.ExecutionState_EXECUTION_STATE_FAILED, nil, nil),
-			},
-			message: "missing failure details",
-		},
+func TestExecutionOutputAbsentContent(t *testing.T) {
+	server := &clientTestServer{outputScripts: []executionOutputScript{{frames: []*wirev1.OutputFrame{
+		outputstream.Header(api.Metadata{}), outputstream.End(&wirev1.OutputTerminal{}),
+	}}}}
+	_, _, execution := openTestExecution(t, server)
+
+	content, err := collectTestExecution(testClientContext(t), execution)
+	if err != nil || content != nil {
+		t.Fatalf("absent content=%v error=%v", content, err)
+	}
+}
+
+func collectTestExecution(ctx context.Context, execution *executionHandle) (*api.Content, error) {
+	output, err := execution.openOutput(ctx, nil)
+	if err != nil {
+		return nil, err
 	}
 
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			server := &clientTestServer{watchScripts: []executionWatchScript{{events: []*wirev1.WatchExecutionResponse{test.event}}}}
-			_, _, execution := openTestExecution(t, server)
-
-			_, err := execution.Wait(testClientContext(t))
-			if (err == nil) != (test.message == "") || err != nil && err.Error() != test.message {
-				t.Fatalf("unexpected incomplete-terminal result: %v", err)
-			}
-		})
-	}
+	return output.Collect(ctx)
 }
 
 func openTestExecution(t *testing.T, server *clientTestServer) (*connectionHandle, *planHandle, *executionHandle) {
@@ -311,53 +281,4 @@ func openTestExecution(t *testing.T, server *clientTestServer) (*connectionHandl
 	})
 
 	return client, plan, execution
-}
-
-//nolint:staticcheck // Legacy snapshot fixtures are translated into framed output by this test server.
-func executionSnapshotProto(id string, state wirev1.ExecutionState, output *wirev1.Output, failure *wirev1.Failure) *wirev1.Execution {
-	return &wirev1.Execution{
-		Id:      &wirev1.ExecutionId{Value: id},
-		State:   state,
-		Output:  output,
-		Failure: failure,
-	}
-}
-
-func executionStartedEvent(id string) *wirev1.WatchExecutionResponse {
-	return &wirev1.WatchExecutionResponse{
-		Sequence:  1,
-		Execution: executionSnapshotProto(id, wirev1.ExecutionState_EXECUTION_STATE_RUNNING, nil, nil),
-	}
-}
-
-//nolint:staticcheck // Legacy snapshot fixtures are translated into framed output by this test server.
-func executionCompletedEvent(id string, contentType string, content []byte) *wirev1.WatchExecutionResponse {
-	return &wirev1.WatchExecutionResponse{
-		Sequence: 2,
-		Execution: executionSnapshotProto(id, wirev1.ExecutionState_EXECUTION_STATE_COMPLETED, &wirev1.Output{
-			ContentType: contentType,
-			Content:     append([]byte(nil), content...),
-		}, nil),
-	}
-}
-
-//nolint:staticcheck // Legacy snapshot fixtures are translated into framed output by this test server.
-func executionFailedEvent(id string, content []byte, failure *wirev1.Failure) *wirev1.WatchExecutionResponse {
-	var output *wirev1.Output
-
-	if content != nil {
-		output = &wirev1.Output{ContentType: "text/plain", Content: append([]byte(nil), content...)}
-	}
-
-	return &wirev1.WatchExecutionResponse{
-		Sequence:  2,
-		Execution: executionSnapshotProto(id, wirev1.ExecutionState_EXECUTION_STATE_FAILED, output, failure),
-	}
-}
-
-func executionCancelledEvent(id string) *wirev1.WatchExecutionResponse {
-	return &wirev1.WatchExecutionResponse{
-		Sequence:  2,
-		Execution: executionSnapshotProto(id, wirev1.ExecutionState_EXECUTION_STATE_CANCELLED, nil, nil),
-	}
 }

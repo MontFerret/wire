@@ -96,15 +96,11 @@ type Decoder struct {
 	metadata api.Metadata
 	header   bool
 	ended    bool
-	present  bool
 	bytes    uint64
 }
 
 // Metadata returns the immutable descriptor received in the header.
 func (d *Decoder) Metadata() api.Metadata { return d.metadata }
-
-// Present reports whether at least one chunk, including an empty one, arrived.
-func (d *Decoder) Present() bool { return d.present }
 
 // Accept returns either a chunk or the terminal result. A header returns neither.
 func (d *Decoder) Accept(frame *wirev1.OutputFrame) ([]byte, bool, *wirev1.OutputTerminal, error) {
@@ -132,7 +128,6 @@ func (d *Decoder) Accept(frame *wirev1.OutputFrame) ([]byte, bool, *wirev1.Outpu
 		}
 
 		d.bytes += uint64(len(value.Chunk))
-		d.present = true
 
 		return value.Chunk, true, nil, nil
 	case *wirev1.OutputFrame_Terminal:

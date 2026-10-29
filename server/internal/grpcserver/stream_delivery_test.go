@@ -3,6 +3,7 @@ package grpcserver
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -81,5 +82,20 @@ func TestConnectRejectsUnsupportedOutputFramingBeforeHosting(t *testing.T) {
 		if stream.response != nil {
 			t.Fatal("incompatible peer allocated a connection")
 		}
+	}
+}
+
+func TestDebuggerDeliveryRejectsOversizedSemanticEnvelope(t *testing.T) {
+	var sent atomic.Int32
+
+	err := deliverStream(t.Context(), t.Context(), 1024, func(*wirev1.RunCommandResponse) error {
+		sent.Add(1)
+
+		return nil
+	}, func(_ context.Context, send func(*wirev1.RunCommandResponse) error) error {
+		return send(&wirev1.RunCommandResponse{Result: &wirev1.DebugCommandResult{Error: &wirev1.Failure{Message: strings.Repeat("x", 2048)}}})
+	})
+	if status.Code(err) != codes.ResourceExhausted || sent.Load() != 0 {
+		t.Fatalf("sent=%d error=%v", sent.Load(), err)
 	}
 }

@@ -48,22 +48,26 @@ func TestChunkBudgetIncludesEachEnvelope(t *testing.T) {
 func TestDecoderPresenceAndTerminalAccounting(t *testing.T) {
 	for _, present := range []bool{false, true} {
 		var decoder Decoder
+		var content Accumulator
+
 		if _, _, _, err := decoder.Accept(Header(api.Metadata{LengthKnown: true})); err != nil {
 			t.Fatal(err)
 		}
 
 		if present {
-			_, chunk, _, err := decoder.Accept(&wirev1.OutputFrame{Frame: &wirev1.OutputFrame_Chunk{}})
+			data, chunk, _, err := decoder.Accept(&wirev1.OutputFrame{Frame: &wirev1.OutputFrame_Chunk{}})
 			if err != nil || !chunk {
 				t.Fatalf("empty chunk: %v", err)
 			}
+
+			content.Add(data)
 		}
 
 		if _, _, _, err := decoder.Accept(End(&wirev1.OutputTerminal{})); err != nil {
 			t.Fatal(err)
 		}
 
-		if decoder.Present() != present {
+		if (content.Content() != nil) != present {
 			t.Fatal("zero length confused content presence")
 		}
 

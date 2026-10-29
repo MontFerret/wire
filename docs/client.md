@@ -81,8 +81,10 @@ session. Metadata remains immutable and locally readable after closure.
 
 Admission checks context presence, consumer presence, consumption cancellation,
 then invocation cancellation before claiming the handle. Competing consumers match
-`api.ErrOutputInUse`; stopping/closed handles match `api.ErrOutputClosed`. Both
-contexts and their earliest deadline bound callbacks. Callback errors and panics
+`api.ErrOutputInUse`; stopping/closed handles match `api.ErrOutputClosed`. Active
+cancellation is stopping even while a callback unwinds or its asynchronous
+cancellation notification remains pending. Both contexts and their earliest
+deadline bound callbacks. Callback errors and panics
 finalize resources; panics propagate unchanged. Explicit Close before outcome
 commitment adds ErrOutputClosed while preserving other observed failures. Callbacks
 must not call Close synchronously on their own output because Close waits for them.

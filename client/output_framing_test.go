@@ -28,7 +28,7 @@ func TestOutputMalformedFramesFinalizeAndKeepPrefix(t *testing.T) {
 				frames = append(frames, test.end)
 			}
 
-			server := &clientTestServer{outputFrames: frames}
+			server := &clientTestServer{outputScripts: []executionOutputScript{{frames: frames}}}
 			remote := openTestRuntime(t, startClientTestServer(t, server))
 
 			output, err := remote.Run(testClientContext(t), api.Source{})
@@ -109,5 +109,29 @@ func TestDebuggerContentRejectsInterruptedReconstruction(t *testing.T) {
 	})
 	if !errors.Is(err, io.ErrUnexpectedEOF) || !errors.Is(err, semantic) || len(event.Snapshot.Output.Data) != 0 {
 		t.Fatalf("incomplete reconstruction=%v error=%v", event, err)
+	}
+}
+
+func TestOutputMalformedTerminalFailureReachesClient(t *testing.T) {
+	frames := completedOutputFrames("text/plain", []byte("prefix"))
+	frames[2].GetTerminal().Failure = &wirev1.Failure{Category: wirev1.ErrorCategory(999), Message: "invalid failure category"}
+	server := &clientTestServer{outputScripts: []executionOutputScript{{frames: frames}}}
+	remote := openTestRuntime(t, startClientTestServer(t, server))
+
+	output, err := remote.Run(testClientContext(t), api.Source{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	content, err := output.Collect(testClientContext(t))
+
+	var rpc *Error
+	if err == nil || errors.As(err, &rpc) || content == nil || string(content.Data) != "prefix" {
+		t.Fatalf("client validation content=%v error=%v", content, err)
+	}
+
+	_, _, releases, _ := server.callSnapshot()
+	if releases != 1 {
+		t.Fatalf("releases=%d", releases)
 	}
 }

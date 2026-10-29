@@ -41,10 +41,7 @@ func TestCompileMapsCanonicalSource(t *testing.T) {
 
 func TestSessionRunPreservesCallerOwnedPlan(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
-		server := &clientTestServer{watchScripts: []executionWatchScript{{events: []*wirev1.WatchExecutionResponse{
-			executionStartedEvent("execution-1"),
-			executionCompletedEvent("execution-1", "text/plain", []byte("done")),
-		}}}}
+		server := &clientTestServer{outputScripts: []executionOutputScript{{frames: completedOutputFrames("text/plain", []byte("done"))}}}
 		client := openTestRuntime(t, startClientTestServer(t, server))
 
 		plan, err := client.Compile(testClientContext(t), api.Source{Content: "RETURN 1"})
@@ -90,12 +87,10 @@ func TestSessionRunPreservesCallerOwnedPlan(t *testing.T) {
 
 	t.Run("terminal and cleanup failures", func(t *testing.T) {
 		server := &clientTestServer{
-			watchScripts: []executionWatchScript{{events: []*wirev1.WatchExecutionResponse{
-				executionFailedEvent("execution-1", []byte("partial"), &wirev1.Failure{
-					Category: wirev1.ErrorCategory_ERROR_CATEGORY_EXECUTION_FAILURE,
-					Message:  "execution failed",
-				}),
-			}}},
+			outputScripts: []executionOutputScript{{frames: failedOutputFrames([]byte("partial"), &wirev1.Failure{
+				Category: wirev1.ErrorCategory_ERROR_CATEGORY_EXECUTION_FAILURE,
+				Message:  "execution failed",
+			})}},
 			releaseExecutionErr: status.Error(codes.Internal, "execution cleanup failed"),
 		}
 		client := openTestRuntime(t, startClientTestServer(t, server))

@@ -453,9 +453,15 @@ known-length mismatches are rejected. Advertised length never drives preallocati
 No chunk means absent content; an empty chunk establishes present empty content.
 
 Chunks target 64 KiB and shrink for the configured outbound message limit including
-framing overhead. Metadata, semantic envelopes and terminal frames also must fit
-that limit. A payload may exceed 4 MiB or any individual message limit; there is no
-aggregate cap. This transport protocol does not require incremental query evaluation.
+framing overhead. ReadExecutionOutput, RunCommand, and WatchDebug responses always
+use identity compression, even when requests use gzip. Wire selects it before
+host middleware runs, so early response headers preserve the same budget. Host
+middleware must not override this response-compression policy. Identity avoids
+compressor expansion and extra sizing work at the cost of potentially more
+network bytes. Metadata, semantic envelopes and terminal frames also must fit
+that limit; an envelope or minimum chunk that cannot fit fails with
+ResourceExhausted before Send. A failed Send is never retried. A payload may exceed
+4 MiB or any individual message limit; there is no aggregate cap. This transport protocol does not require incremental query evaluation.
 
 RunCommand emits its semantic result, then `output_frame=2` messages when its event
 has content. WatchDebug emits a semantic envelope, then `output_frame=12` messages.

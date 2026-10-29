@@ -17,6 +17,8 @@ import (
 type remoteOutput struct {
 	mu           sync.Mutex
 	invocation   context.Context
+	lifetime     context.Context
+	consumption  context.Context
 	stream       wirev1.ExecutionService_ReadExecutionOutputClient
 	streamCancel context.CancelFunc
 	stopLifetime func() bool
@@ -69,7 +71,7 @@ func (e *executionHandle) openOutput(ctx context.Context, drop func() error) (*r
 		return nil, errors.Join(ctx.Err(), decodeError(err), boundedCleanup(ctx, convenienceCleanupTimeout, e.Close))
 	}
 
-	output := &remoteOutput{invocation: ctx, stream: stream, streamCancel: cancel, execution: e, drop: drop,
+	output := &remoteOutput{invocation: ctx, lifetime: streamCtx, stream: stream, streamCancel: cancel, execution: e, drop: drop,
 		decoder: decoder, metadata: decoder.Metadata(), done: make(chan struct{})}
 	// Install under the lock: an already canceled lifetime may schedule its
 	// callback immediately, before AfterFunc returns the stop function.
@@ -90,6 +92,7 @@ func (o *remoteOutput) lifetimeEnded() {
 		return
 	}
 
+	o.stopping = true
 	if o.active {
 		cancel := o.cancel
 		o.mu.Unlock()
@@ -99,7 +102,6 @@ func (o *remoteOutput) lifetimeEnded() {
 		return
 	}
 
-	o.stopping = true
 	o.mu.Unlock()
 	o.settle()
 }
@@ -152,7 +154,9 @@ func (o *remoteOutput) Consume(ctx context.Context, consumer api.Consumer) (resu
 	}
 
 	o.mu.Lock()
-	if o.stopping {
+	// AfterFunc callbacks are asynchronous. Observe cancellation directly so
+	// admission cannot mistake a canceled active delivery for ordinary use.
+	if o.stopping || o.lifetime.Err() != nil || o.active && o.consumption.Err() != nil {
 		o.mu.Unlock()
 
 		return api.ErrOutputClosed
@@ -165,10 +169,11 @@ func (o *remoteOutput) Consume(ctx context.Context, consumer api.Consumer) (resu
 	}
 
 	operation, cancel := outputContext(ctx, o.invocation)
+	o.consumption = operation
 	o.cancel = cancel
 	o.active = true
 	o.mu.Unlock()
-	stop := context.AfterFunc(operation, o.streamCancel)
+	stop := context.AfterFunc(operation, o.lifetimeEnded)
 	defer func() {
 		// This runs during callback panic unwinding too, without recovering it.
 		resultErr = errors.Join(resultErr, operation.Err(), ctx.Err(), o.invocation.Err())
@@ -178,6 +183,7 @@ func (o *remoteOutput) Consume(ctx context.Context, consumer api.Consumer) (resu
 		}
 
 		o.committed, o.stopping, o.active = true, true, false
+		o.consumption = nil
 		o.mu.Unlock()
 		stop()
 		cancel()

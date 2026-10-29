@@ -93,6 +93,7 @@ func New(runtime api.Runtime, options ...Option) (*Server, error) {
 		grpc.MaxSendMsgSize(configured.limits.MaxOutboundMessageBytes),
 		grpc.UnaryInterceptor(grpcserver.UnaryRecoveryInterceptor),
 		grpc.StreamInterceptor(grpcserver.StreamRecoveryInterceptor),
+		grpc.ChainStreamInterceptor(grpcserver.OutputCompressionInterceptor),
 		grpc.ChainUnaryInterceptor(configured.unary...),
 		grpc.ChainStreamInterceptor(configured.stream...),
 	}

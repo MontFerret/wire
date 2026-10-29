@@ -36,7 +36,7 @@ func deliverStream[T proto.Message](ctx, lifetime context.Context, limit int, se
 
 		result = produce(operation, func(message T) error {
 			if proto.Size(message) > limit {
-				return status.Error(codes.ResourceExhausted, "outbound message limit exceeded")
+				return outboundLimitError("outbound message limit exceeded")
 			}
 
 			select {
@@ -52,7 +52,7 @@ func deliverStream[T proto.Message](ctx, lifetime context.Context, limit int, se
 		for {
 			select {
 			case <-operation.Done():
-				sent <- operation.Err()
+				sent <- rpcError(errors.Join(operation.Err(), context.Cause(operation)))
 
 				return
 			case message, ok := <-messages:
@@ -62,7 +62,7 @@ func deliverStream[T proto.Message](ctx, lifetime context.Context, limit int, se
 					return
 				}
 
-				if err := send(message); err != nil {
+				if err := protectedSend(send, message); err != nil {
 					sent <- err
 
 					return
@@ -73,8 +73,19 @@ func deliverStream[T proto.Message](ctx, lifetime context.Context, limit int, se
 
 	select {
 	case err := <-sent:
+		var delivery *deliveryError
+		if errors.As(err, &delivery) {
+			return delivery.error
+		}
+
 		return err
 	case <-operation.Done():
+		select {
+		case err := <-sent:
+			return err
+		default:
+		}
+
 		return rpcError(errors.Join(operation.Err(), context.Cause(operation)))
 	}
 }

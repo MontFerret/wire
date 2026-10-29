@@ -19,13 +19,14 @@ import (
 
 	"github.com/MontFerret/api"
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
+	"github.com/MontFerret/wire/internal/outputstream"
 	"github.com/MontFerret/wire/internal/testoutput"
 	"github.com/MontFerret/wire/pkg/failure"
 )
 
 type (
-	executionWatchScript struct {
-		events  []*wirev1.WatchExecutionResponse
+	executionOutputScript struct {
+		frames  []*wirev1.OutputFrame
 		err     error
 		block   bool
 		entered chan struct{}
@@ -40,7 +41,6 @@ type (
 		mu                    sync.Mutex
 		handshake             *wirev1.ConnectResponse
 		connectErr            error
-		outputFrames          []*wirev1.OutputFrame
 		connectDone           chan struct{}
 		plans                 int
 		sessions              int
@@ -50,8 +50,8 @@ type (
 		executeErr            error
 		releaseExecutionErr   error
 		releasePlanErr        error
-		watchScripts          []executionWatchScript
-		watchCalls            int
+		outputScripts         []executionOutputScript
+		outputCalls           int
 		lastCompileDebuggable bool
 		lastCompileSourceName string
 		lastCompileContent    string
@@ -176,7 +176,7 @@ func (s *clientTestServer) startExecution(operation, connectionID, parentID, con
 
 	s.executions++
 
-	return executionSnapshotProto(fmt.Sprintf("execution-%d", s.executions), wirev1.ExecutionState_EXECUTION_STATE_RUNNING, nil, nil), nil
+	return &wirev1.Execution{Id: &wirev1.ExecutionId{Value: fmt.Sprintf("execution-%d", s.executions)}, State: wirev1.ExecutionState_EXECUTION_STATE_RUNNING}, nil
 }
 
 func (s *clientTestServer) CreateSession(_ context.Context, request *wirev1.CreateSessionRequest) (*wirev1.CreateSessionResponse, error) {
@@ -211,38 +211,6 @@ func (s *clientTestServer) ReleaseExecution(ctx context.Context, request *wirev1
 	return &wirev1.ReleaseExecutionResponse{}, nil
 }
 
-func (s *clientTestServer) WatchExecution(request *wirev1.WatchExecutionRequest, stream wirev1.ExecutionService_WatchExecutionServer) error {
-	s.mu.Lock()
-	s.calls = append(s.calls, call("watch", request.GetConnectionId().GetValue(), request.GetExecutionId().GetValue()))
-	index := s.watchCalls
-	s.watchCalls++
-	var script executionWatchScript
-
-	if index < len(s.watchScripts) {
-		script = s.watchScripts[index]
-	}
-
-	s.mu.Unlock()
-
-	for _, event := range script.events {
-		if err := stream.Send(event); err != nil {
-			return err
-		}
-	}
-
-	if script.entered != nil {
-		close(script.entered)
-	}
-
-	if script.block {
-		<-stream.Context().Done()
-
-		return stream.Context().Err()
-	}
-
-	return script.err
-}
-
 func (s *clientTestServer) record(name string, connectionID string, resourceID string) {
 	s.mu.Lock()
 	s.calls = append(s.calls, call(name, connectionID, resourceID))
@@ -253,7 +221,7 @@ func (s *clientTestServer) callSnapshot() ([]string, int, int, int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	return append([]string(nil), s.calls...), s.watchCalls, s.releaseExecutionCalls, s.releasePlanCalls
+	return append([]string(nil), s.calls...), s.outputCalls, s.releaseExecutionCalls, s.releasePlanCalls
 }
 
 func (s *clientTestServer) releaseDeadlineSnapshot() (time.Time, time.Time) {
@@ -278,9 +246,7 @@ func assertCleanupDeadline(t *testing.T, kind string, deadline time.Time) {
 
 func TestRuntimeRunOwnsItsExecution(t *testing.T) {
 	t.Run("success and options", func(t *testing.T) {
-		server := &clientTestServer{watchScripts: []executionWatchScript{{events: []*wirev1.WatchExecutionResponse{
-			executionCompletedEvent("execution-1", "application/json", []byte(`{"value":1}`)),
-		}}}}
+		server := &clientTestServer{outputScripts: []executionOutputScript{{frames: completedOutputFrames("application/json", []byte(`{"value":1}`))}}}
 		client := openTestRuntime(t, startClientTestServer(t, server))
 
 		output, err := testoutput.Collect(client.Run(testClientContext(t), api.Source{Content: "RETURN 1"}, api.WithOutputContentType("application/json")))
@@ -291,7 +257,7 @@ func TestRuntimeRunOwnsItsExecution(t *testing.T) {
 		calls, _, releaseExecutionCalls, releasePlanCalls := server.callSnapshot()
 		want := []string{
 			call("run", "connection", ""),
-			call("watch", "connection", "execution-1"),
+			call("read-output", "connection", "execution-1"),
 			call("release-execution", "connection", "execution-1"),
 		}
 		server.mu.Lock()
@@ -315,8 +281,8 @@ func TestRuntimeRunOwnsItsExecution(t *testing.T) {
 			t.Fatalf("unexpected compile failure: %v", err)
 		}
 
-		calls, watchCalls, releaseExecutionCalls, releasePlanCalls := server.callSnapshot()
-		if !slices.Equal(calls, []string{call("compile", "connection", "")}) || watchCalls != 0 || releaseExecutionCalls != 0 || releasePlanCalls != 0 {
+		calls, outputCalls, releaseExecutionCalls, releasePlanCalls := server.callSnapshot()
+		if !slices.Equal(calls, []string{call("compile", "connection", "")}) || outputCalls != 0 || releaseExecutionCalls != 0 || releasePlanCalls != 0 {
 			t.Fatalf("compile failure leaked cleanup calls: %v", calls)
 		}
 	})
@@ -332,20 +298,20 @@ func TestRuntimeRunOwnsItsExecution(t *testing.T) {
 			t.Fatalf("unexpected execute failure: %v", err)
 		}
 
-		calls, watchCalls, releaseExecutionCalls, releasePlanCalls := server.callSnapshot()
+		calls, outputCalls, releaseExecutionCalls, releasePlanCalls := server.callSnapshot()
 
 		want := []string{
 			call("run", "connection", ""),
 		}
-		if !slices.Equal(calls, want) || watchCalls != 0 || releaseExecutionCalls != 0 || releasePlanCalls != 0 {
+		if !slices.Equal(calls, want) || outputCalls != 0 || releaseExecutionCalls != 0 || releasePlanCalls != 0 {
 			t.Fatalf("execute failure cleanup: %v", calls)
 		}
 	})
 
 	t.Run("caller cancellation still cleans up", func(t *testing.T) {
 		entered := make(chan struct{})
-		server := &clientTestServer{watchScripts: []executionWatchScript{{
-			events:  []*wirev1.WatchExecutionResponse{executionStartedEvent("execution-1")},
+		server := &clientTestServer{outputScripts: []executionOutputScript{{
+			frames:  []*wirev1.OutputFrame{outputstream.Header(api.Metadata{})},
 			block:   true,
 			entered: entered,
 		}}}
@@ -386,16 +352,16 @@ func TestRuntimeRunOwnsItsExecution(t *testing.T) {
 	})
 
 	t.Run("stream failure still cleans up", func(t *testing.T) {
-		server := &clientTestServer{watchScripts: []executionWatchScript{{
-			events: []*wirev1.WatchExecutionResponse{executionStartedEvent("execution-1")},
-			err:    status.Error(codes.Unavailable, "watch transport failed"),
+		server := &clientTestServer{outputScripts: []executionOutputScript{{
+			frames: []*wirev1.OutputFrame{outputstream.Header(api.Metadata{})},
+			err:    status.Error(codes.Unavailable, "output transport failed"),
 		}}}
 		client := openTestRuntime(t, startClientTestServer(t, server))
 
 		_, err := testoutput.Collect(client.Run(testClientContext(t), api.Source{Content: "RETURN 1"}))
 
 		var wireErr *Error
-		if !errors.As(err, &wireErr) || status.Code(err) != codes.Unavailable || wireErr.Message != "watch transport failed" {
+		if !errors.As(err, &wireErr) || status.Code(err) != codes.Unavailable || wireErr.Message != "output transport failed" {
 			t.Fatalf("Runtime.Run lost the stream failure: %v", err)
 		}
 
@@ -407,12 +373,10 @@ func TestRuntimeRunOwnsItsExecution(t *testing.T) {
 
 	t.Run("execution and cleanup failures are joined", func(t *testing.T) {
 		server := &clientTestServer{
-			watchScripts: []executionWatchScript{{events: []*wirev1.WatchExecutionResponse{
-				executionFailedEvent("execution-1", []byte("partial"), &wirev1.Failure{
-					Category: wirev1.ErrorCategory_ERROR_CATEGORY_EXECUTION_FAILURE,
-					Message:  "execution failed",
-				}),
-			}}},
+			outputScripts: []executionOutputScript{{frames: failedOutputFrames([]byte("partial"), &wirev1.Failure{
+				Category: wirev1.ErrorCategory_ERROR_CATEGORY_EXECUTION_FAILURE,
+				Message:  "execution failed",
+			})}},
 			releaseExecutionErr: status.Error(codes.Internal, "execution cleanup failed"),
 		}
 		client := openTestRuntime(t, startClientTestServer(t, server))
@@ -516,68 +480,21 @@ func (s *clientTestServer) ClosePlan(context.Context, *wirev1.ClosePlanRequest) 
 	return &wirev1.ClosePlanResponse{}, nil
 }
 
-//nolint:staticcheck // Legacy snapshot fixtures are translated into framed output by this test server.
 func (s *clientTestServer) ReadExecutionOutput(request *wirev1.ReadExecutionOutputRequest, stream wirev1.ExecutionService_ReadExecutionOutputServer) error {
-	if s.outputFrames != nil {
-		for _, frame := range s.outputFrames {
-			if err := stream.Send(&wirev1.ReadExecutionOutputResponse{Frame: frame}); err != nil {
-				return err
-			}
-		}
-
-		return nil
-	}
-
 	s.mu.Lock()
-	s.calls = append(s.calls, call("watch", request.GetConnectionId().GetValue(), request.GetExecutionId().GetValue()))
-	index := s.watchCalls
-	s.watchCalls++
-	var script executionWatchScript
+	s.calls = append(s.calls, call("read-output", request.GetConnectionId().GetValue(), request.GetExecutionId().GetValue()))
+	index := s.outputCalls
+	s.outputCalls++
+	script := executionOutputScript{frames: []*wirev1.OutputFrame{outputstream.Header(api.Metadata{}), outputstream.End(&wirev1.OutputTerminal{})}}
 
-	if index < len(s.watchScripts) {
-		script = s.watchScripts[index]
+	if index < len(s.outputScripts) {
+		script = s.outputScripts[index]
 	}
 
 	s.mu.Unlock()
-	var terminal *wirev1.Execution
-	for _, event := range script.events {
-		if event.GetExecution().GetState() != wirev1.ExecutionState_EXECUTION_STATE_RUNNING {
-			terminal = event.GetExecution()
 
-			break
-		}
-	}
-
-	metadata := &wirev1.OutputMetadata{}
-
-	if terminal.GetOutput() != nil {
-		metadata.ContentType = terminal.GetOutput().GetContentType()
-	}
-
-	if err := stream.Send(&wirev1.ReadExecutionOutputResponse{Frame: &wirev1.OutputFrame{Frame: &wirev1.OutputFrame_Header{Header: metadata}}}); err != nil {
-		return err
-	}
-
-	if terminal != nil {
-		var total uint64
-
-		if content := terminal.GetOutput(); content != nil {
-			total = uint64(len(content.GetContent()))
-			if err := stream.Send(&wirev1.ReadExecutionOutputResponse{Frame: &wirev1.OutputFrame{Frame: &wirev1.OutputFrame_Chunk{Chunk: content.GetContent()}}}); err != nil {
-				return err
-			}
-		}
-
-		result := &wirev1.OutputTerminal{TransferredBytes: total, Failure: terminal.GetFailure(), Cancelled: terminal.GetState() == wirev1.ExecutionState_EXECUTION_STATE_CANCELLED}
-		if terminal.GetState() == wirev1.ExecutionState_EXECUTION_STATE_FAILED && result.Failure == nil {
-			return status.Error(codes.Internal, "missing failure details")
-		}
-
-		if terminal.GetState() == wirev1.ExecutionState_EXECUTION_STATE_UNSPECIFIED || terminal.GetState() > wirev1.ExecutionState_EXECUTION_STATE_CANCELLED {
-			return status.Error(codes.Internal, "invalid execution state")
-		}
-
-		if err := stream.Send(&wirev1.ReadExecutionOutputResponse{Frame: &wirev1.OutputFrame{Frame: &wirev1.OutputFrame_Terminal{Terminal: result}}}); err != nil {
+	for _, frame := range script.frames {
+		if err := stream.Send(&wirev1.ReadExecutionOutputResponse{Frame: frame}); err != nil {
 			return err
 		}
 	}
@@ -593,4 +510,19 @@ func (s *clientTestServer) ReadExecutionOutput(request *wirev1.ReadExecutionOutp
 	}
 
 	return script.err
+}
+
+func completedOutputFrames(contentType string, data []byte) []*wirev1.OutputFrame {
+	return []*wirev1.OutputFrame{
+		outputstream.Header(api.Metadata{ContentType: contentType}),
+		{Frame: &wirev1.OutputFrame_Chunk{Chunk: data}},
+		outputstream.End(&wirev1.OutputTerminal{TransferredBytes: uint64(len(data))}),
+	}
+}
+
+func failedOutputFrames(data []byte, failure *wirev1.Failure) []*wirev1.OutputFrame {
+	frames := completedOutputFrames("text/plain", data)
+	frames[2] = outputstream.End(&wirev1.OutputTerminal{TransferredBytes: uint64(len(data)), Failure: failure})
+
+	return frames
 }

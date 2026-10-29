@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
@@ -39,7 +37,7 @@ func (d *executionDelivery) run(send func(*wirev1.ReadExecutionOutputResponse) e
 		case <-d.ctx.Done():
 			return
 		case message := <-d.messages:
-			if err := send(message); err != nil {
+			if err := protectedSend(send, message); err != nil {
 				d.err = err
 				close(d.done)
 				d.cancel(err)
@@ -59,7 +57,7 @@ func (d *executionDelivery) run(send func(*wirev1.ReadExecutionOutputResponse) e
 func (d *executionDelivery) send(frame *wirev1.OutputFrame) error {
 	message := &wirev1.ReadExecutionOutputResponse{Frame: frame}
 	if proto.Size(message) > d.limit {
-		return status.Error(codes.ResourceExhausted, "outbound message limit exceeded")
+		return outboundLimitError("outbound message limit exceeded")
 	}
 
 	select {
@@ -97,5 +95,5 @@ func (d *executionDelivery) abort(err error) error {
 	default:
 	}
 
-	return rpcError(err)
+	return deliveryRPCError(err)
 }

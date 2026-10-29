@@ -60,7 +60,7 @@ func (s *DebugService) WatchDebug(request *wirev1.WatchDebugRequest, stream wire
 					func(frame *wirev1.OutputFrame) proto.Message { return &wirev1.WatchDebugResponse{OutputFrame: frame} },
 					func(frame *wirev1.OutputFrame) error { return send(&wirev1.WatchDebugResponse{OutputFrame: frame}) })
 				if err != nil {
-					return rpcError(err)
+					return deliveryRPCError(err)
 				}
 
 				return writer.content(operation, content, semanticErr)

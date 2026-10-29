@@ -30,7 +30,7 @@ func (s *ExecutionService) ReadExecutionOutput(request *wirev1.ReadExecutionOutp
 
 	size, err := s.outputChunkSize()
 	if err != nil {
-		return rpcError(err)
+		return deliveryRPCError(err)
 	}
 
 	delivery := newExecutionDelivery(stream.Context(), execution.Context(), s.maxOutbound)
@@ -46,7 +46,7 @@ func (s *ExecutionService) ReadExecutionOutput(request *wirev1.ReadExecutionOutp
 	}
 
 	if !writer.header {
-		return rpcError(err)
+		return deliveryRPCError(err)
 	}
 
 	if err := writer.finish(err); err != nil {
@@ -63,6 +63,10 @@ func (s *ExecutionService) outputChunkSize() (int, error) {
 		s.chunkSize, s.chunkErr = outputstream.MaxChunk(s.maxOutbound, func(frame *wirev1.OutputFrame) proto.Message {
 			return &wirev1.ReadExecutionOutputResponse{Frame: frame}
 		})
+
+		if s.chunkErr != nil {
+			s.chunkErr = outboundLimitError("outbound message limit cannot fit an output chunk")
+		}
 	})
 
 	return s.chunkSize, s.chunkErr

@@ -424,6 +424,12 @@ func TestMessageLimitsRemainAtTheGRPCBoundary(t *testing.T) {
 func newIntegrationEnv(t testing.TB, runtime api.Runtime, options ...server.Option) *integrationEnv {
 	t.Helper()
 
+	return newIntegrationEnvWithDialOptions(t, runtime, nil, options...)
+}
+
+func newIntegrationEnvWithDialOptions(t testing.TB, runtime api.Runtime, dialOptions []grpc.DialOption, options ...server.Option) *integrationEnv {
+	t.Helper()
+
 	server, err := server.New(runtime, options...)
 	if err != nil {
 		t.Fatal(err)
@@ -433,13 +439,14 @@ func newIntegrationEnv(t testing.TB, runtime api.Runtime, options ...server.Opti
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- server.Serve(context.Background(), listener) }()
 
-	conn, err := grpc.NewClient(
-		"passthrough:///ferret-wire-test",
+	dialOptions = append([]grpc.DialOption{
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
 			return listener.DialContext(ctx)
 		}),
-	)
+	}, dialOptions...)
+
+	conn, err := grpc.NewClient("passthrough:///ferret-wire-test", dialOptions...)
 	if err != nil {
 		t.Fatal(err)
 	}

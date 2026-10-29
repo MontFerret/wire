@@ -68,7 +68,7 @@ func (s *DebugService) RunCommand(request *wirev1.RunCommandRequest, stream wire
 					func(frame *wirev1.OutputFrame) proto.Message { return &wirev1.RunCommandResponse{OutputFrame: frame} },
 					func(frame *wirev1.OutputFrame) error { return send(&wirev1.RunCommandResponse{OutputFrame: frame}) })
 				if err != nil {
-					return rpcError(err)
+					return deliveryRPCError(err)
 				}
 
 				if err := writer.content(operation, result.Event.Output, errors.Join(result.Error, result.Event.Error)); err != nil {

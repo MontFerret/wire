@@ -3,6 +3,7 @@ package grpcserver
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -13,6 +14,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/MontFerret/api"
+	"github.com/MontFerret/api/diagnostics"
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
 	"github.com/MontFerret/wire/server/internal/core"
 )
@@ -347,4 +349,87 @@ func TestExecutionOutputWaitsForTerminalSend(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("terminal Send prevented cancellation")
 	}
+}
+
+func TestExecutionOutputOutboundLimitFailures(t *testing.T) {
+	for _, stage := range []string{"header", "terminal", "chunk budget"} {
+		t.Run(stage, func(t *testing.T) {
+			var consumed atomic.Int32
+			hosted := &executionOutputSpy{metadata: api.Metadata{}, produce: func(context.Context, api.Consumer) error {
+				consumed.Add(1)
+
+				return diagnostics.Diagnostics{{Message: strings.Repeat("diagnostic", 512)}}
+			}}
+
+			if stage == "header" {
+				hosted.metadata.ContentType = strings.Repeat("x", 2048)
+			}
+
+			service, execution, request := newOutputExecution(t, func(context.Context) (api.Output, error) { return hosted, nil })
+
+			if stage == "chunk budget" {
+				service.maxOutbound = 1
+			}
+
+			stream := &executionOutputStream{ctx: testDeliveryContext(t), send: func(*wirev1.ReadExecutionOutputResponse) error { return nil }}
+
+			err := service.ReadExecutionOutput(request, stream)
+			if status.Code(err) != codes.ResourceExhausted {
+				t.Fatalf("%s limit=%v", stage, err)
+			}
+
+			if err := execution.Release(testDeliveryContext(t)); err != nil {
+				t.Fatal(err)
+			}
+
+			if hosted.closes.Load() != 1 || stage != "terminal" && consumed.Load() != 0 {
+				t.Fatalf("closes=%d consumes=%d", hosted.closes.Load(), consumed.Load())
+			}
+		})
+	}
+}
+
+func TestExecutionOutputHostedStatusesRemainPrivate(t *testing.T) {
+	for _, stage := range []string{"preparation", "consumption"} {
+		t.Run(stage, func(t *testing.T) {
+			secret := status.Error(codes.ResourceExhausted, "private hosted status")
+			hosted := &executionOutputSpy{produce: func(context.Context, api.Consumer) error { return secret }}
+			service, execution, request := newOutputExecution(t, func(context.Context) (api.Output, error) {
+				if stage == "preparation" {
+					return nil, secret
+				}
+
+				return hosted, nil
+			})
+			var terminal *wirev1.OutputTerminal
+			stream := &executionOutputStream{ctx: testDeliveryContext(t), send: func(response *wirev1.ReadExecutionOutputResponse) error {
+				if value := response.GetFrame().GetTerminal(); value != nil {
+					terminal = value
+				}
+
+				return nil
+			}}
+
+			err := service.ReadExecutionOutput(request, stream)
+			if stage == "preparation" && (status.Code(err) != codes.Internal || strings.Contains(err.Error(), "private")) {
+				t.Fatalf("hosted status escaped: %v", err)
+			}
+
+			if stage == "consumption" && (err != nil || terminal.GetFailure() == nil || strings.Contains(terminal.GetFailure().GetMessage(), "private")) {
+				t.Fatalf("hosted terminal=%v error=%v", terminal, err)
+			}
+
+			if err := execution.Release(testDeliveryContext(t)); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func testDeliveryContext(t *testing.T) context.Context {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	t.Cleanup(cancel)
+
+	return ctx
 }

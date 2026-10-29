@@ -8,7 +8,6 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/MontFerret/api"
 	"github.com/MontFerret/api/debugger"
 	"github.com/MontFerret/api/source"
 	wiredebugger "github.com/MontFerret/wire/pkg/debugger"
@@ -599,13 +598,6 @@ func (d *DebugSession) finishCommand(event *debugger.Event, commandErr error) {
 			d.publishLocked(wiredebugger.EventStopped, false)
 		case debugger.ReasonCompleted:
 			d.state.status = wiredebugger.StateCompleted
-
-			if event.Output != nil {
-				d.state.output = &api.Content{
-					Metadata: event.Output.Metadata,
-					Data:     append(event.Output.Data[:0:0], event.Output.Data...),
-				}
-			}
 
 			d.publishLocked(wiredebugger.EventCompleted, true)
 			terminal = true

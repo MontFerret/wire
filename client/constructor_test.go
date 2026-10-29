@@ -61,9 +61,7 @@ func TestFromFailureReturnsNilRuntimeAndClosesHandshake(t *testing.T) {
 }
 
 func TestFromBorrowsTransportAndDetachesConstructionContext(t *testing.T) {
-	server := &clientTestServer{watchScripts: []executionWatchScript{{events: []*wirev1.WatchExecutionResponse{
-		executionCompletedEvent("execution-1", "text/plain", []byte("done")),
-	}}}}
+	server := &clientTestServer{outputScripts: []executionOutputScript{{frames: completedOutputFrames("text/plain", []byte("done"))}}}
 	connection := startClientTestServer(t, server)
 	ctx, cancel := context.WithCancel(testClientContext(t))
 	defer cancel()

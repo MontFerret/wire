@@ -146,7 +146,7 @@ func (p *Plan) NewDebugSession(ctx context.Context, options ...api.SessionOption
 
 	created := newDebugSession(p, hosted)
 	if err := p.store.registerDebugSession(ctx, created); err != nil {
-		return nil, errors.Join(err, created.Close(context.Background()))
+		return nil, errors.Join(err, created.Release(context.Background()))
 	}
 
 	committed = true
@@ -231,6 +231,7 @@ func (p *Plan) settleClose() {
 	p.creating.Wait()
 	p.store.mu.Lock()
 	var constructors []<-chan struct{}
+
 	for _, execution := range p.executions {
 		if execution.constructed != nil {
 			constructors = append(constructors, execution.constructed)

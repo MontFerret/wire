@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 
-	"github.com/MontFerret/api"
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
 )
 
@@ -54,17 +53,6 @@ func (e *executionHandle) Watch(ctx context.Context) (*executionEvents, error) {
 	}
 
 	return &executionEvents{stream: stream, cancel: cancel}, nil
-}
-
-// Wait consumes the execution's one-shot output and releases its resources.
-// Available partial content accompanies terminal and cleanup failures.
-func (e *executionHandle) Wait(ctx context.Context) (*api.Content, error) {
-	output, err := e.openOutput(ctx, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	return output.Collect(ctx)
 }
 
 // Close commits cancellation and remote execution cleanup. Concurrent and

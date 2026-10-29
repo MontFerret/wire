@@ -66,6 +66,8 @@ func WithUnaryInterceptors(interceptors ...grpc.UnaryServerInterceptor) Option {
 // Validation errors identify entries by relative index and omit the list value.
 // The interceptor list is copied; middleware itself must support concurrent calls.
 // Authentication here applies at stream establishment; later revocation is host policy.
+// Framed output responses use identity compression, selected before middleware;
+// interceptors must preserve that selection, including when sending early headers.
 func WithStreamInterceptors(interceptors ...grpc.StreamServerInterceptor) Option {
 	captured := append([]grpc.StreamServerInterceptor(nil), interceptors...)
 

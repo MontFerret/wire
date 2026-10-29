@@ -27,7 +27,7 @@ type outputWriter struct {
 func newOutputWriter(limit int, envelope func(*wirev1.OutputFrame) proto.Message, send func(*wirev1.OutputFrame) error) (*outputWriter, error) {
 	size, err := outputstream.MaxChunk(limit, envelope)
 	if err != nil {
-		return nil, err
+		return nil, outboundLimitError("outbound message limit cannot fit an output chunk")
 	}
 
 	return &outputWriter{send: send, size: size}, nil

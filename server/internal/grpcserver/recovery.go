@@ -8,6 +8,18 @@ import (
 	"github.com/MontFerret/wire/server/internal/core"
 )
 
+// protectedSend applies transport recovery in detached sender goroutines, where
+// the handler interceptor cannot recover a host SendMsg middleware panic.
+func protectedSend[T any](send func(T) error, message T) (err error) {
+	defer func() {
+		if recover() != nil {
+			err = rpcError(&core.DomainError{Kind: core.ErrorKindInternal})
+		}
+	}()
+
+	return send(message)
+}
+
 // UnaryRecoveryInterceptor replaces recovered handler panics with sanitized internal statuses.
 func UnaryRecoveryInterceptor(
 	ctx context.Context,

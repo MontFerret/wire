@@ -23,6 +23,7 @@ type (
 		ctx        context.Context
 		client     wirev1.DebugServiceClient
 		connection *wirev1.ConnectionId
+		plan       *wirev1.PlanId
 		session    *wirev1.DebugSessionId
 	}
 )
@@ -66,7 +67,7 @@ func newDebugOutputFixture(t testing.TB, data []byte, limit int) *debugOutputFix
 		t.Fatal(err)
 	}
 
-	return &debugOutputFixture{ctx: ctx, client: remote, connection: header.GetConnectionId(), session: created.GetSession().GetId()}
+	return &debugOutputFixture{ctx: ctx, client: remote, connection: header.GetConnectionId(), plan: compiled.GetPlan().GetId(), session: created.GetSession().GetId()}
 }
 
 func (f *debugOutputFixture) watch(t testing.TB) wirev1.DebugService_WatchDebugClient {
@@ -226,5 +227,44 @@ func BenchmarkDebuggerOutputReplay(b *testing.B) {
 				f.completion(b, f.watch(b), payload)
 			}
 		})
+	}
+}
+
+func BenchmarkDebuggerOutputFanout(b *testing.B) {
+	payload := make([]byte, 8<<20)
+
+	f := newDebugOutputFixture(b, payload, 4<<20)
+	if _, err := f.client.ReleaseDebugSession(f.ctx, &wirev1.ReleaseDebugSessionRequest{ConnectionId: f.connection, DebugSessionId: f.session}); err != nil {
+		b.Fatal(err)
+	}
+
+	b.SetBytes(int64(len(payload)))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		created, err := f.client.CreateDebugSession(f.ctx, &wirev1.CreateDebugSessionRequest{ConnectionId: f.connection, PlanId: f.plan})
+		if err != nil {
+			b.Fatal(err)
+		}
+
+		f.session = created.GetSession().GetId()
+		watchers := make([]wirev1.DebugService_WatchDebugClient, 4)
+		for i := range watchers {
+			watchers[i] = f.watch(b)
+			if _, err := watchers[i].Recv(); err != nil {
+				b.Fatal(err)
+			}
+		}
+
+		f.start(b, payload)
+		for _, watcher := range watchers {
+			f.completion(b, watcher, payload)
+		}
+
+		f.completion(b, f.watch(b), payload)
+
+		if _, err := f.client.ReleaseDebugSession(f.ctx, &wirev1.ReleaseDebugSessionRequest{ConnectionId: f.connection, DebugSessionId: f.session}); err != nil {
+			b.Fatal(err)
+		}
 	}
 }

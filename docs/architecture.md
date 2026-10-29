@@ -108,13 +108,20 @@ admission never claims or disrupts a handle. Metadata is local and immutable.
 `internal/outputstream` owns output-specific framing, splitting, validation and
 actual-byte accumulation. The transport sends a header, bounded ordered chunks,
 and an explicit terminal with byte accounting and sanitized failure/context flags.
-The size calculation includes each RPC envelope. No aggregate cap or allocation
-from advertised total length is used. Normal delivery caches its chunk budget per
-execution service. Its handler coordinates ReadOutput and terminal framing, with
+The size calculation includes each RPC envelope. Framed execution, command, and
+debugger-watch responses use identity compression, selected inside recovery and
+before host middleware can send headers. This makes protobuf size an exact
+transport payload budget even when a request uses gzip. Host middleware must
+preserve that selection. No aggregate cap or allocation from advertised total
+length is used. Normal delivery caches its chunk budget per execution service. Its handler coordinates ReadOutput and terminal framing, with
 one dedicated sender and the existing execution goroutine producing chunks across
 an unbuffered handoff. At most one detached message is being sent and one is held
 by the producer. Success waits for the terminal Send to finish; send failures
-remain transport errors even when they also cancel hosted consumption.
+remain transport errors even when they also cancel hosted consumption. Detached
+senders recover host SendMsg panics using the same sanitized transport status as
+the handler interceptor; they do not cross the hosted UAPI panic boundary.
+Wire-generated framing-limit errors retain ResourceExhausted across execution
+callbacks without allowing arbitrary hosted statuses through sanitization.
 
 ReadOutput joins request and execution cancellation once for hosted consumption.
 Cancellation returns the handler independently of a stalled Send or hosted
@@ -125,17 +132,24 @@ accounting until cleanup settles. Hosted code must still honor cancellation;
 Wire cannot forcibly stop it. On the client, the output's existing lifetime callback
 cancels active consumption; its consumption context preserves caller values and
 the earlier of the invocation and consumption deadlines without duplicate links.
+Cancellation marks active output as stopping before requesting interruption.
+Admission also observes active-context cancellation directly so asynchronous
+cancellation callbacks cannot admit a competing consumer as ordinary active use.
 Execution event history contains metadata and failures, never bulk bytes.
 
 Debugger output remains fully materialized `*api.Content`. After dequeueing each
 semantic event, RunCommand and WatchDebug send the same output frames. Frames have
-no event sequence and never enter event queues. One payload serves both snapshot
-and command-result projections. Each observer delivers independently; a stalled
+no event sequence and never enter event queues. One framed transfer serves both
+snapshot and command-result projections. Each observer delivers independently; a stalled
 observer cannot block commands or other observers. Terminal content stays owned by
 the server for replay until release. A separate delivery lifetime survives normal
-debugger completion and ends on resource release or connection shutdown. The client
-publishes an event only after complete reconstruction, joins observed semantic errors
-with transfer errors, and returns detached content that survives session closure.
+debugger completion and ends on resource release or connection shutdown. Failed
+publication uses full resource release to detach both debugger lifetimes before
+returning its pending reservation. Snapshot and command-result projections retain
+separate detached payload copies, as do independently mutable watcher snapshots. Sharing immutable internal storage
+would require a distinct ownership change; completion does not copy state.output
+again after its initial capture. The client publishes an event only after complete
+reconstruction, joins observed semantic errors with transfer errors, and returns detached content that survives session closure.
 
 Wire preserves content presence separately from size: no chunks means absent;
 an empty chunk means present empty. Fully transferred partial content retains its
@@ -504,8 +518,9 @@ objects remain behind the sanitization boundary.
 
 `WithTransportCredentials` passes validated non-nil host credentials to gRPC;
 without them, Wire provides no encryption or authentication. Host unary and
-stream middleware applies globally with recovery outermost, then host registration
-order, then Wire handlers. Empty lists are no-ops, nil entries fail construction,
+stream middleware applies globally with recovery outermost, then the framed-output
+compression policy, host registration order, and Wire handlers. Empty lists are
+no-ops, nil entries fail construction,
 and captured lists are copied. Middleware contexts, metadata, and authenticated
 peer information retain gRPC semantics. Message/resource limits cannot be replaced
 through these options.
