@@ -41,6 +41,7 @@ type (
 		metadata api.Metadata
 		failure  error
 		data     []byte
+		consume  func(context.Context, api.Consumer) error
 		closes   atomic.Int32
 		consumes atomic.Int32
 	}
@@ -73,6 +74,10 @@ func (o *transportOutput) Metadata() api.Metadata { return o.metadata }
 
 func (o *transportOutput) Consume(ctx context.Context, consume api.Consumer) error {
 	o.consumes.Add(1)
+
+	if o.consume != nil {
+		return o.consume(ctx, consume)
+	}
 
 	return errors.Join(consume(ctx, o.data), o.failure)
 }
@@ -470,20 +475,72 @@ func TestFramedOutputRejectsOversizedTerminalAndSemanticMessages(t *testing.T) {
 				receive, release = f.debugger(t, method == "watch envelope")
 			}
 
-			data, err := collectTransportFrames(receive)
+			_, err := collectTransportFrames(receive)
 			release()
 
 			if status.Code(err) != codes.ResourceExhausted {
 				t.Fatalf("oversized message=%v", err)
 			}
 
-			if method == "execution terminal" && string(data) != "prefix" {
-				t.Fatalf("partial bytes=%q", data)
-			}
-
 			if method == "execution terminal" && output.closes.Load() != 1 || method != "execution terminal" && hosted.closes.Load() != 1 {
 				t.Fatal("hosted cleanup did not settle once")
 			}
 		})
+	}
+}
+
+func TestExecutionOutputPreservesReceivedPrefixWhenTerminalExceedsLimit(t *testing.T) {
+	received := make(chan struct{})
+	cleanup := make(chan struct{})
+	defer close(cleanup)
+	acknowledge := sync.OnceFunc(func() { close(received) })
+	oversized := diagnostics.Diagnostics{{Message: strings.Repeat("portable diagnostic", 256)}}
+	output := &transportOutput{consume: func(ctx context.Context, consume api.Consumer) error {
+		if err := consume(ctx, []byte("prefix")); err != nil {
+			return err
+		}
+
+		select {
+		case <-received:
+			return oversized
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-cleanup:
+			return context.Canceled
+		}
+	}}
+	f := newOutputTransportFixture(t, output, &transportDebugger{}, 1024)
+	receive, release := f.execution(t)
+
+	// Producer-accepted chunks may still be in flight. Acknowledge client receipt
+	// to test retention of bytes already received before a later transfer failure.
+	data, err := collectTransportFrames(func() (*wirev1.OutputFrame, error) {
+		frame, err := receive()
+		if err != nil {
+			return frame, err
+		}
+
+		if chunk := frame.GetChunk(); chunk != nil {
+			if string(chunk) != "prefix" {
+				t.Fatalf("received prefix=%q", chunk)
+			}
+
+			acknowledge()
+		}
+
+		return frame, nil
+	})
+	release()
+
+	if status.Code(err) != codes.ResourceExhausted {
+		t.Fatalf("oversized terminal=%v", err)
+	}
+
+	if string(data) != "prefix" {
+		t.Fatalf("partial bytes=%q", data)
+	}
+
+	if output.consumes.Load() != 1 || output.closes.Load() != 1 {
+		t.Fatalf("consumes=%d closes=%d", output.consumes.Load(), output.closes.Load())
 	}
 }
