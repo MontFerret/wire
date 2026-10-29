@@ -245,16 +245,15 @@ func (o *remoteOutput) settle() {
 }
 
 func outputContext(ctx, invocation context.Context) (context.Context, context.CancelFunc) {
-	operation, cancel := context.WithCancel(ctx)
-	var cancelDeadline context.CancelFunc = func() {}
-
 	if deadline, ok := invocation.Deadline(); ok {
-		operation, cancelDeadline = context.WithDeadline(operation, deadline)
+		if current, present := ctx.Deadline(); !present || deadline.Before(current) {
+			return context.WithDeadline(ctx, deadline)
+		}
 	}
 
-	stop := context.AfterFunc(invocation, cancel)
-
-	return operation, func() { stop(); cancelDeadline(); cancel() }
+	// lifetimeEnded already cancels active consumption when the invocation or
+	// connection ends. Only the consumer lifetime and earliest deadline remain.
+	return context.WithCancel(ctx)
 }
 
 func outputTerminalError(value *wirev1.OutputTerminal) error {

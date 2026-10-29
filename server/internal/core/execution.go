@@ -113,6 +113,8 @@ func (e *Execution) Context() context.Context { return e.ctx }
 
 // ReadOutput claims the only delivery. Header and consumer run outside resource
 // locks. The consumer must honor its context; it must not retain borrowed bytes.
+// Cancellation stops waiting, while the execution retains callbacks and hosted
+// cleanup until settlement. Callers must not inspect callback state on that path.
 func (e *Execution) ReadOutput(ctx context.Context, header func(api.Metadata) error, consumer api.Consumer) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -127,14 +129,18 @@ func (e *Execution) ReadOutput(ctx context.Context, header func(api.Metadata) er
 
 	e.claimed = true
 	e.mu.Unlock()
-	stop := context.AfterFunc(ctx, func() { e.cancel(ctx.Err()) })
-	defer stop()
+	operation, cancel := OperationContext(ctx, e.ctx)
+	defer func() {
+		if operation.Err() != nil {
+			e.cancel(context.Cause(operation))
+		}
+
+		cancel()
+	}()
 	select {
 	case <-e.ready:
-	case <-ctx.Done():
-		e.cancel(ctx.Err())
-
-		return ctx.Err()
+	case <-operation.Done():
+		return errors.Join(operation.Err(), context.Cause(operation))
 	}
 
 	e.mu.Lock()
@@ -151,13 +157,18 @@ func (e *Execution) ReadOutput(ctx context.Context, header func(api.Metadata) er
 	}
 
 	select {
-	case e.delivery <- outputDelivery{ctx: ctx, header: header, consume: consumer}:
+	case e.delivery <- outputDelivery{ctx: operation, header: header, consume: consumer}:
 	case <-e.done:
-	case <-ctx.Done():
-		e.cancel(ctx.Err())
+	case <-operation.Done():
+		return errors.Join(operation.Err(), context.Cause(operation))
 	}
 
-	<-e.done
+	select {
+	case <-e.done:
+	case <-operation.Done():
+		return errors.Join(operation.Err(), context.Cause(operation))
+	}
+
 	e.mu.Lock()
 	err = e.outcome
 	e.mu.Unlock()
@@ -222,12 +233,10 @@ func (e *Execution) run() {
 	close(e.ready)
 	select {
 	case delivery := <-e.delivery:
-		operation, cancel := OperationContext(delivery.ctx, e.ctx)
-
 		err = delivery.header(metadata)
 		if err == nil {
 			err = panicboundary.Do(func() error {
-				return output.Consume(operation, func(ctx context.Context, chunk []byte) (result error) {
+				return output.Consume(delivery.ctx, func(ctx context.Context, chunk []byte) (result error) {
 					completed := false
 					defer func() {
 						if !completed {
@@ -242,7 +251,6 @@ func (e *Execution) run() {
 			})
 		}
 
-		cancel()
 	case <-e.ctx.Done():
 		err = context.Cause(e.ctx)
 	}

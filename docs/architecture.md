@@ -74,6 +74,9 @@ embeds its corresponding generated service base and adapts one protocol domain.
 an ordinary `context.Context`. The context preserves request values and deadlines
 and joins connection cancellation; each handler cancels it to detach the lifetime
 callback. There is no dependency-carrying operation context.
+Normal output delivery resolves the same connection-scoped store directly and
+lets `Execution.ReadOutput` join the request to the execution lifetime, which
+already inherits connection and durable-session cancellation.
 
 Services convert protobuf sources and options to canonical API types before
 calling core. Source/diagnostic, option/value, output, execution, debugger, and
@@ -106,10 +109,22 @@ admission never claims or disrupts a handle. Metadata is local and immutable.
 actual-byte accumulation. The transport sends a header, bounded ordered chunks,
 and an explicit terminal with byte accounting and sanitized failure/context flags.
 The size calculation includes each RPC envelope. No aggregate cap or allocation
-from advertised total length is used. A delivery has one sender and one producer
-with an unbuffered handoff. Cancellation returns the handler independently of a
-stalled Send, unblocking transport delivery while the resource owner settles hosted
-cleanup. Hosted code must still honor cancellation; Wire cannot forcibly stop it.
+from advertised total length is used. Normal delivery caches its chunk budget per
+execution service. Its handler coordinates ReadOutput and terminal framing, with
+one dedicated sender and the existing execution goroutine producing chunks across
+an unbuffered handoff. At most one detached message is being sent and one is held
+by the producer. Success waits for the terminal Send to finish; send failures
+remain transport errors even when they also cancel hosted consumption.
+
+ReadOutput joins request and execution cancellation once for hosted consumption.
+Cancellation returns the handler independently of a stalled Send or hosted
+cleanup, unblocking transport delivery while the execution owner settles cleanup.
+Callbacks may outlive the canceled handler, so the handoff channel is never closed
+and the handler does not inspect writer state on that path. Release retains quota
+accounting until cleanup settles. Hosted code must still honor cancellation;
+Wire cannot forcibly stop it. On the client, the output's existing lifetime callback
+cancels active consumption; its consumption context preserves caller values and
+the earlier of the invocation and consumption deadlines without duplicate links.
 Execution event history contains metadata and failures, never bulk bytes.
 
 Debugger output remains fully materialized `*api.Content`. After dequeueing each

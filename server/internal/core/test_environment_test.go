@@ -368,6 +368,8 @@ func (e *testEnvironment) collectExecution(execution *Execution) {
 
 			return nil
 		})
+		// Cancellation can end ReadOutput before the owning execution settles.
+		<-execution.done
 	}()
 }
 
