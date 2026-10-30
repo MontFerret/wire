@@ -58,7 +58,9 @@ func (w *outputWriter) consume(ctx context.Context, data []byte) error {
 			return errors.New("output byte count overflow")
 		}
 
-		frame.Frame = &wirev1.OutputFrame_Chunk{Chunk: append([]byte(nil), chunk...)}
+		// Chunks supplies a fresh, unsent wrapper. Detach its borrowed payload
+		// before handoff; neither the wrapper nor its bytes may change afterward.
+		frame.GetFrame().(*wirev1.OutputFrame_Chunk).Chunk = append([]byte(nil), chunk...)
 		if err := w.send(frame); err != nil {
 			return err
 		}

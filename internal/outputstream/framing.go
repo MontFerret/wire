@@ -79,7 +79,11 @@ func Chunks(data []byte, size int, send func(*wirev1.OutputFrame) error) error {
 
 	for {
 		n := min(len(data), size)
-		if err := send(&wirev1.OutputFrame{Frame: &wirev1.OutputFrame_Chunk{Chunk: data[:n]}}); err != nil {
+		owner := &chunkFrame{}
+		owner.chunk.Chunk = data[:n]
+		owner.frame.Frame = &owner.chunk
+
+		if err := send(&owner.frame); err != nil {
 			return err
 		}
 
@@ -90,14 +94,23 @@ func Chunks(data []byte, size int, send func(*wirev1.OutputFrame) error) error {
 	}
 }
 
-// Decoder validates one ordered transfer. It retains only metadata and counters;
-// callers decide whether to deliver borrowed chunks or accumulate detached data.
-type Decoder struct {
-	metadata api.Metadata
-	header   bool
-	ended    bool
-	bytes    uint64
-}
+type (
+	// Each frame and its wrapper share one fresh allocation. Initialize them in
+	// place: protobuf state must not be copied, and send may retain the frame.
+	chunkFrame struct {
+		frame wirev1.OutputFrame
+		chunk wirev1.OutputFrame_Chunk
+	}
+
+	// Decoder validates one ordered transfer. It retains only metadata and counters;
+	// callers decide whether to deliver borrowed chunks or accumulate detached data.
+	Decoder struct {
+		metadata api.Metadata
+		header   bool
+		ended    bool
+		bytes    uint64
+	}
+)
 
 // Metadata returns the immutable descriptor received in the header.
 func (d *Decoder) Metadata() api.Metadata { return d.metadata }

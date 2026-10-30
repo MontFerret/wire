@@ -1,6 +1,7 @@
 package grpcserver
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"strings"
@@ -18,6 +19,97 @@ import (
 	wirev1 "github.com/MontFerret/wire/gen/ferret/wire/v1"
 	"github.com/MontFerret/wire/server/internal/core"
 )
+
+func TestExecutionOutputDetachesReusedBufferWhileSendIsStalled(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	held := make(chan *wirev1.ReadExecutionOutputResponse, 1)
+	reused, unblock := make(chan struct{}), make(chan struct{})
+	releaseSend := sync.OnceFunc(func() { close(unblock) })
+	defer releaseSend()
+	hosted := &executionOutputSpy{metadata: api.Metadata{Length: 3 * 128, LengthKnown: true}, produce: func(ctx context.Context, consumer api.Consumer) error {
+		buffer := bytes.Repeat([]byte{1}, 128)
+		for value := byte(1); value <= 3; value++ {
+			for i := range buffer {
+				buffer[i] = value
+			}
+
+			if value == 2 {
+				close(reused)
+			}
+
+			if err := consumer(ctx, buffer); err != nil {
+				return err
+			}
+		}
+
+		clear(buffer)
+
+		return nil
+	}}
+	service, execution, request := newOutputExecution(t, func(context.Context) (api.Output, error) { return hosted, nil })
+	var retained []*wirev1.ReadExecutionOutputResponse
+	stream := &executionOutputStream{ctx: ctx, send: func(message *wirev1.ReadExecutionOutputResponse) error {
+		if len(message.GetFrame().GetChunk()) == 0 {
+			return nil
+		}
+
+		retained = append(retained, message)
+		if len(retained) == 1 {
+			held <- message
+			select {
+			case <-unblock:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+
+		return nil
+	}}
+	result := make(chan error, 1)
+	go func() { result <- service.ReadExecutionOutput(request, stream) }()
+	var first *wirev1.ReadExecutionOutputResponse
+	select {
+	case first = <-held:
+	case <-ctx.Done():
+		t.Fatal("sender never stalled")
+	}
+
+	select {
+	case <-reused:
+	case <-ctx.Done():
+		t.Fatal("producer could not reuse its buffer after handoff")
+	}
+
+	if !bytes.Equal(first.GetFrame().GetChunk(), bytes.Repeat([]byte{1}, 128)) {
+		t.Fatal("stalled message aliases the reused producer buffer")
+	}
+
+	releaseSend()
+
+	select {
+	case err := <-result:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-ctx.Done():
+		t.Fatal("delivery did not finish")
+	}
+
+	if len(retained) != 3 {
+		t.Fatalf("retained %d chunks", len(retained))
+	}
+
+	for i, message := range retained {
+		if !bytes.Equal(message.GetFrame().GetChunk(), bytes.Repeat([]byte{byte(i + 1)}, 128)) {
+			t.Fatal("later delivery changed an earlier message")
+		}
+	}
+
+	if err := execution.Release(ctx); err != nil || hosted.closes.Load() != 1 {
+		t.Fatalf("cleanup=%v closes=%d", err, hosted.closes.Load())
+	}
+}
 
 type (
 	executionOutputRuntime struct {

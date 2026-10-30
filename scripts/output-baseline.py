@@ -2,7 +2,10 @@
 """Freeze and measure streaming fixtures; keep all generated files outside Git.
 
 Usage: python3 scripts/output-baseline.py PHASE OUTPUT_DIRECTORY [CLI_DIRECTORY]
-PHASE is build, timing, profiles, or diagnostics. Run phases serially in that order.
+PHASE is build, timing, profiles, diagnostics, or compare.
+For compare, add --before FROZEN_DIRECTORY --after FROZEN_DIRECTORY.
+Comparisons alternate ten ordinary samples of each frozen binary, including replay.
+Use --suite wire, cli, or server to repeat just one inconclusive comparison.
 The CLI directory defaults to ../cli. Go and Python 3 must be on PATH.
 """
 
@@ -11,6 +14,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import platform
 import shlex
 import shutil
 import subprocess
@@ -19,9 +23,12 @@ import tarfile
 
 WIRE = Path(__file__).resolve().parent.parent
 parser = argparse.ArgumentParser(description=__doc__)
-parser.add_argument("phase", choices=("build", "timing", "profiles", "diagnostics"))
+parser.add_argument("phase", choices=("build", "timing", "profiles", "diagnostics", "compare"))
 parser.add_argument("output_directory", type=Path)
 parser.add_argument("cli_directory", type=Path, nargs="?", default=WIRE.parent / "cli")
+parser.add_argument("--before", type=Path)
+parser.add_argument("--after", type=Path)
+parser.add_argument("--suite", choices=("wire", "cli", "server"))
 arguments = parser.parse_args()
 PHASE = arguments.phase
 OUT = arguments.output_directory.resolve()
@@ -33,19 +40,40 @@ ENV = dict(os.environ, GOMAXPROCS="12", GOWORK="off")
 for setting in ("GOFLAGS", "GOGC", "GOMEMLIMIT", "GODEBUG"):
     ENV.pop(setting, None)
 
-if PHASE != "build":
-    hashes = json.loads((OUT / "binaries.json").read_text())
-    for name in ("wire.test", "cli.test"):
-        if hashlib.sha256((OUT / name).read_bytes()).hexdigest() != hashes[name]:
+
+def verify_binaries(directory):
+    hashes = json.loads((directory / "binaries.json").read_text())
+    if not {"wire.test", "cli.test"}.issubset(hashes):
+        parser.error("frozen manifest must include wire.test and cli.test")
+    for name, expected in hashes.items():
+        if hashlib.sha256((directory / name).read_bytes()).hexdigest() != expected:
             parser.error(f"frozen binary changed: {name}")
+    return hashes
 
 
-def run(command, destination, cwd=WIRE, timeout=300):
+if PHASE == "compare":
+    if arguments.before is None or arguments.after is None:
+        parser.error("compare requires --before and --after")
+    variants = {"before": arguments.before.resolve(), "after": arguments.after.resolve()}
+    provenance = {}
+    for label, directory in variants.items():
+        hashes = verify_binaries(directory)
+        if "server.test" not in hashes:
+            parser.error("compare requires a build including server.test")
+        provenance[label] = {"directory": str(directory), "binaries": hashes}
+    if list(OUT.glob("*-before.txt")) or list(OUT.glob("*-after.txt")):
+        parser.error("comparison output already exists; use a fresh directory")
+    (OUT / "comparison.json").write_text(json.dumps(provenance, indent=2) + "\n")
+elif PHASE != "build":
+    verify_binaries(OUT)
+
+
+def run(command, destination, cwd=WIRE, timeout=300, append=False):
     """Record the exact invocation and fail on incomplete or failed runs."""
     with (OUT / "commands.txt").open("a") as commands:
         commands.write(f"cd {shlex.quote(str(cwd))} && {shlex.join(map(str, command))}\n")
     print(f"{PHASE}: {destination}", flush=True)
-    with (OUT / destination).open("w") as output:
+    with (OUT / destination).open("a" if append else "w") as output:
         subprocess.run(list(map(str, command)), cwd=cwd, env=ENV, stdout=output,
                        stderr=subprocess.STDOUT, check=True, timeout=timeout)
 
@@ -73,6 +101,7 @@ def snapshot(repo, label):
 
 if PHASE == "build":
     (OUT / "environment.txt").write_text(
+        f"Platform={platform.platform()}\n"
         "GOMAXPROCS=12\nGOWORK=off\nGOFLAGS,GOGC,GOMEMLIMIT,GODEBUG unset\n"
         "Both endpoints in-process; plaintext loopback TCP; default gRPC buffers/windows.\n"
     )
@@ -82,12 +111,13 @@ if PHASE == "build":
     run(["go", "env", "-json", "GOOS", "GOARCH", "GOHOSTOS", "GOHOSTARCH", "GOTOOLCHAIN", "GOEXPERIMENT", "CGO_ENABLED"], "go-env.json")
     run(["go", "list", "-mod=readonly", "-m", "-json", "all"], "wire-modules.json")
     run(["go", "test", "-mod=readonly", "-c", "-o", OUT / "wire.test", "./test/integration"], "wire-build.txt")
+    run(["go", "test", "-mod=readonly", "-c", "-o", OUT / "server.test", "./server"], "server-build.txt")
     shutil.copyfile(CLI / "go.mod", OUT / "cli.mod")
     shutil.copyfile(CLI / "go.sum", OUT / "cli.sum")
     run(["go", "mod", "edit", f"-modfile={OUT / 'cli.mod'}", f"-replace=github.com/MontFerret/wire={WIRE}"], "cli-modfile.txt", CLI)
     run(["go", "list", "-mod=readonly", f"-modfile={OUT / 'cli.mod'}", "-m", "-json", "all"], "cli-modules.json", CLI)
     run(["go", "test", "-mod=readonly", f"-modfile={OUT / 'cli.mod'}", "-c", "-o", OUT / "cli.test", "./internal/output"], "cli-build.txt", CLI)
-    hashes = {name: hashlib.sha256((OUT / name).read_bytes()).hexdigest() for name in ("wire.test", "cli.test")}
+    hashes = {name: hashlib.sha256((OUT / name).read_bytes()).hexdigest() for name in ("wire.test", "cli.test", "server.test")}
     (OUT / "binaries.json").write_text(json.dumps(hashes, indent=2) + "\n")
 elif PHASE == "timing":
     for label, name in (("wire", "BenchmarkExecutionOutputDelivery"), ("cli", "BenchmarkWireOutputDelivery")):
@@ -111,3 +141,15 @@ elif PHASE == "profiles":
                 run(["go", "tool", "pprof", f"-{metric}", "-list=internal/output.Write|Benchmark.*Delivery.func1.1|openOutput|newExecutionDelivery|core.newExecution", binary, profile], f"{stem}-owners-{metric}.txt")
 elif PHASE == "diagnostics":
     run([OUT / "wire.test", "-test.run=^TestOutputDelivery", "-test.v", "-test.count=1", "-test.timeout=1m"], "wire-diagnostics.txt", timeout=75)
+elif PHASE == "compare":
+    for suite, benchmark in (("wire", "BenchmarkExecutionOutputDelivery"),
+                             ("cli", "BenchmarkWireOutputDelivery"),
+                             ("server", "BenchmarkDebuggerOutputReplay")):
+        if arguments.suite is not None and suite != arguments.suite:
+            continue
+        for sample in range(10):
+            order = ("before", "after") if sample % 2 == 0 else ("after", "before")
+            for label in order:
+                run([variants[label] / f"{suite}.test", "-test.run=^$",
+                     f"-test.bench=^{benchmark}$", "-test.benchmem", "-test.benchtime=1s",
+                     "-test.count=1", "-test.timeout=2m"], f"{suite}-{label}.txt", timeout=150, append=True)

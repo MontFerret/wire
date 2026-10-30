@@ -123,6 +123,11 @@ the handler interceptor; they do not cross the hosted UAPI panic boundary.
 Wire-generated framing-limit errors retain ResourceExhausted across execution
 callbacks without allowing arbitrary hosted statuses through sanitization.
 
+Each outgoing chunk has a fresh shared allocation for its protobuf frame and
+chunk wrapper. The writer detaches borrowed payload bytes before handoff; the
+frame, wrapper, and payload remain stable even after Send returns, because
+transport observers may retain them. RPC envelopes remain transport-owned.
+
 ReadOutput joins request and execution cancellation once for hosted consumption.
 Cancellation returns the handler independently of a stalled Send or hosted
 cleanup, unblocking transport delivery while the execution owner settles cleanup.
