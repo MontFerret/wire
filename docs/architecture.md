@@ -557,7 +557,8 @@ unchanged. Wire owns structural protocol checks; hosted implementations own sour
 validity, filesystem interpretation, and codec validation.
 
 Preparation failures before an output metadata header use an RPC status. Canonical
-query diagnostics retain the execution-failure category and diagnostic status
-detail, matching terminal output failures. Existing domain classifications and
-Wire delivery-limit provenance take precedence; arbitrary host errors remain
-sanitized internal failures.
+query diagnostics normally carry the execution-failure category. If closing an
+output during preparation also panics, both the RPC and execution snapshot report
+an internal-runtime failure and retain the canonical diagnostics. Existing domain
+classifications, context statuses, and Wire delivery-limit provenance keep their
+precedence. Private host errors and panic values remain behind the boundary.
