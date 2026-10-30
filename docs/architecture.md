@@ -123,6 +123,11 @@ the handler interceptor; they do not cross the hosted UAPI panic boundary.
 Wire-generated framing-limit errors retain ResourceExhausted across execution
 callbacks without allowing arbitrary hosted statuses through sanitization.
 
+Each outgoing chunk has a fresh shared allocation for its protobuf frame and
+chunk wrapper. The writer detaches borrowed payload bytes before handoff; the
+frame, wrapper, and payload remain stable even after Send returns, because
+transport observers may retain them. RPC envelopes remain transport-owned.
+
 ReadOutput joins request and execution cancellation once for hosted consumption.
 Cancellation returns the handler independently of a stalled Send or hosted
 cleanup, unblocking transport delivery while the execution owner settles cleanup.
@@ -550,3 +555,10 @@ fallible parameter metadata before publication; metadata error or panic closes t
 Anonymous sources and explicitly empty filesystem roots/content types pass through
 unchanged. Wire owns structural protocol checks; hosted implementations own source
 validity, filesystem interpretation, and codec validation.
+
+Preparation failures before an output metadata header use an RPC status. Canonical
+query diagnostics normally carry the execution-failure category. If closing an
+output during preparation also panics, both the RPC and execution snapshot report
+an internal-runtime failure and retain the canonical diagnostics. Existing domain
+classifications, context statuses, and Wire delivery-limit provenance keep their
+precedence. Private host errors and panic values remain behind the boundary.

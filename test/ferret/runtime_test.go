@@ -179,3 +179,37 @@ func requireDetachedParams(t *testing.T, plan api.Plan) {
 		t.Fatalf("Params after caller mutation = %v, %v; want [value]", again, err)
 	}
 }
+
+func TestRuntimePreparationDiagnostics(t *testing.T) {
+	h := newHarness(t)
+	src := api.NewSource("invalid.fql", "RETURN )")
+
+	direct, directErr := h.hosted.Run(h.ctx, src)
+	if direct != nil {
+		h.own(direct)
+		t.Fatal("invalid source produced a hosted output")
+	}
+
+	var expected diagnostics.Diagnostics
+	if !errors.As(directErr, &expected) || len(expected) == 0 {
+		t.Fatalf("hosted preparation lacks portable diagnostics: %v", directErr)
+	}
+
+	output, err := h.runtime.Run(h.ctx, src)
+	if output != nil {
+		h.own(output)
+		t.Fatal("invalid source produced a remote output")
+	}
+
+	var remote *client.Error
+	if !errors.As(err, &remote) || remote.Category != failure.CategoryExecution || !reflect.DeepEqual(remote.Diagnostics, expected) {
+		t.Fatalf("preparation diagnostics changed: error=%v remote=%+v expected=%+v", err, remote, expected)
+	}
+
+	content, err := testoutput.Collect(h.runtime.Run(h.ctx, api.NewAnonymousSource("RETURN 42")))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	requireJSONOutput(t, content, "42")
+}

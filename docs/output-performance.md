@@ -1,5 +1,11 @@
 # Alpha.21 output measurements
 
+The historical `BenchmarkExecutionOutput` retained every hosted call and scanned
+the growing call history. Its RPC wrapper also retained unary call order.
+`BenchmarkExecutionOutputDelivery` uses a different fixture and transport, so
+its results cannot be compared directly with the execution-output timings and
+allocations below.
+
 Measured on 2026-10-28 on an Apple M2 Max, darwin/arm64, Go 1.27.3, with
 GOMAXPROCS fixed at 12. These are in-process gRPC benchmarks, not network
 service-level guarantees. All comparisons report median ns/op, B/op, and
