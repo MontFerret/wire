@@ -406,12 +406,25 @@ func TestDeferredRuntimeCloseRetainsItsResult(t *testing.T) {
 		t.Fatalf("runtime admission=%v", err)
 	}
 
+	lifetime := h.Runtime().(client.ConnectionLifetime)
+	select {
+	case <-lifetime.ConnectionDone():
+		t.Fatal("root close ended a connection with a retained plan")
+	default:
+	}
+
 	cleanupErr := status.Error(codes.Unavailable, "late teardown failed")
 	h.Faults().FailResponse(harness.CloseRuntime, cleanupErr)
 	h.ExpectCleanupError(cleanupErr)
 
 	if err := plan.Close(); !errors.Is(err, cleanupErr) {
 		t.Fatalf("final child lost cleanup error: %v", err)
+	}
+
+	harness.Await(t, lifetime.ConnectionDone())
+
+	if err := lifetime.ConnectionError(); err != nil {
+		t.Fatalf("local teardown failure was reported as host loss: %v", err)
 	}
 
 	if err := h.Runtime().Close(); err != nil {

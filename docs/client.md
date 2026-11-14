@@ -56,7 +56,7 @@ All implementations remain private. Sources, options, output, diagnostics,
 breakpoints, locations, frames, variables, reasons, and debugger events use
 their canonical Universal API types directly. The constructor surface is `New`,
 `From`, `Option`, `WithTransportCredentials`, `WithPerRPCCredentials`, and
-`WithInsecure`; the remaining exports are `Error`, `ErrClosed`, and
+`WithInsecure`; the remaining exports are `ConnectionLifetime`, `Error`, `ErrClosed`, and
 `ErrExecutionCancelled`.
 
 `Runtime.Run` invokes the hosted `api.Runtime.Run` directly, once per call.
@@ -263,6 +263,12 @@ logical cleanup and cancels the Connect stream before closing a `New`-owned chan
 Channel closure still occurs when cleanup fails or times out; independent errors
 are joined. Definitive Connect termination follows the same exactly-once teardown.
 Borrowed physical transport and the hosted runtime stay open.
+
+Both constructors return runtimes implementing the optional `client.ConnectionLifetime`
+interface. Wait on `ConnectionDone()`, then read `ConnectionError()` for the retained
+cause. Unexpected EOF yields `client.ErrClosed`; other stream failures retain their
+decoded error. Local connection teardown yields nil. This signal precedes final
+cleanup and belongs to one logical connection, including on a shared gRPC channel.
 
 `ReleasePlan`, `CloseConnection`, disconnect, and lost-allocation recovery
 retain cascading semantics. Child admission ignores ordinary ancestor API

@@ -315,13 +315,30 @@ func TestTerminalConnectLossReleasesOwnedTransportAndRetainsCause(t *testing.T) 
 			return &constructorStream{ctx: ctx, terminal: terminal}, nil
 		}
 
-		handle, err := newConnection(testClientContext(t), connection, connection.Close)
+		remote, err := newRuntime(testClientContext(t), connection, connection.Close)
 		if err != nil {
 			t.Fatal(err)
 		}
 
+		lifetime := remote.(ConnectionLifetime)
+		if lifetime.ConnectionError() != nil {
+			t.Fatal("open connection reported loss")
+		}
+
 		terminal <- terminalErr
+		awaitConstructor(t, lifetime.ConnectionDone())
+
+		err = lifetime.ConnectionError()
+		if terminalErr == io.EOF && !errors.Is(err, ErrClosed) || terminalErr != io.EOF && status.Code(err) != codes.Unavailable { //nolint:errorlint // The EOF fixture has a distinct public result.
+			t.Fatalf("published loss = %v for %v", err, terminalErr)
+		}
+
+		handle := remote.(*remoteRuntime).client
 		awaitConstructor(t, handle.closeDone)
+
+		if !errors.Is(lifetime.ConnectionError(), err) {
+			t.Fatal("late observer lost the original cause")
+		}
 
 		err = handle.checkOpen()
 		if terminalErr == io.EOF && !errors.Is(err, ErrClosed) || terminalErr != io.EOF && status.Code(err) != codes.Unavailable { //nolint:errorlint // Distinguish the exact EOF fixture from the injected transport status.

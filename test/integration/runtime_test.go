@@ -189,12 +189,27 @@ func TestRuntimeCloseBorrowsTransportAndHostedRuntime(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	lifetime := h.Runtime().(client.ConnectionLifetime)
+	sibling := other.(client.ConnectionLifetime)
+
 	if err := h.Runtime().Close(); err != nil {
 		t.Fatal(err)
 	}
 
 	if err := h.Runtime().Close(); err != nil {
 		t.Fatal(err)
+	}
+
+	harness.Await(t, lifetime.ConnectionDone())
+
+	if err := lifetime.ConnectionError(); err != nil {
+		t.Fatalf("local close reported connection loss: %v", err)
+	}
+
+	select {
+	case <-sibling.ConnectionDone():
+		t.Fatal("closing one logical connection ended its sibling")
+	default:
 	}
 
 	if _, err := testoutput.Collect(h.Runtime().Run(h.Context(), api.Source{Content: "RETURN 1"})); !errors.Is(err, client.ErrClosed) {

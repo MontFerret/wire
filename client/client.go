@@ -29,8 +29,6 @@ type (
 		stream          wirev1.RuntimeService_ConnectClient
 		streamCancel    context.CancelFunc
 		streamDone      chan struct{}
-		streamMu        sync.Mutex
-		streamErr       error
 		lifecycleCtx    context.Context
 		lifecycleCancel context.CancelFunc
 
@@ -39,7 +37,7 @@ type (
 		closeMu        sync.Mutex
 		closeErr       error
 		closing        bool
-		terminal       bool // Connect ended before close committed; preserve its error.
+		connectionErr  error // Set only when Connect ends before local teardown commits.
 		transportClose func() error
 	}
 )
@@ -155,18 +153,22 @@ func (c *connectionHandle) Close(ctx context.Context) error {
 func (c *connectionHandle) monitorConnect() {
 	_, err := c.stream.Recv()
 
-	c.streamMu.Lock()
-	if err == nil {
-		c.streamErr = errors.New("Wire server returned an unexpected Connect response")
-	} else if !errors.Is(err, io.EOF) {
-		c.streamErr = decodeError(err)
+	switch {
+	case err == nil:
+		err = errors.New("Wire server returned an unexpected Connect response")
+	case errors.Is(err, io.EOF):
+		err = ErrClosed
+	default:
+		err = decodeError(err)
 	}
 
-	c.streamMu.Unlock()
-
 	c.closeMu.Lock()
+
 	terminal := !c.closing
-	c.terminal = terminal
+	if terminal {
+		c.connectionErr = err
+	}
+
 	c.closeMu.Unlock()
 
 	c.lifecycleCancel()
@@ -185,37 +187,17 @@ func (c *connectionHandle) checkOpen() error {
 	}
 
 	c.closeMu.Lock()
-	closing, terminal := c.closing, c.terminal
-	c.closeMu.Unlock()
+	defer c.closeMu.Unlock()
 
-	if closing || terminal {
-		if terminal {
-			c.streamMu.Lock()
-			err := c.streamErr
-			c.streamMu.Unlock()
+	if c.connectionErr != nil {
+		return c.connectionErr
+	}
 
-			if err != nil {
-				return err
-			}
-		}
-
+	if c.closing {
 		return ErrClosed
 	}
 
-	select {
-	case <-c.streamDone:
-		c.streamMu.Lock()
-		err := c.streamErr
-		c.streamMu.Unlock()
-
-		if err != nil {
-			return err
-		}
-
-		return ErrClosed
-	default:
-		return nil
-	}
+	return nil
 }
 
 func (c *connectionHandle) closeResult(ctx context.Context) (bool, error) {

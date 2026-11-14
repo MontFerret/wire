@@ -413,7 +413,8 @@ remain stable. Optional channel ownership is attached to that connection teardow
 not to Runtime.Close itself. Logical cleanup is attempted before stream cancellation
 and owned channel closure, including failure and timeout paths. Definitive Connect
 termination commits the same teardown after publishing stream-reader completion;
-transient RPC failures retain their existing classification. No lifecycle lock spans
+the optional client ConnectionLifetime exposes that reader completion and its
+retained unexpected-loss cause. Transient RPC failures retain their existing classification. No lifecycle lock spans
 RPCs, channel closure, or cleanup waits. Recovery explicitly uses cascading transport
 release, never ordinary API Close. All server admission and parent links remain under the
 store mutex; hosted calls and cleanup waits remain outside it.

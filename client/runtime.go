@@ -18,7 +18,21 @@ type remoteRuntime struct {
 	close      closeState
 }
 
-var _ api.Runtime = (*remoteRuntime)(nil)
+var (
+	_ api.Runtime        = (*remoteRuntime)(nil)
+	_ ConnectionLifetime = (*remoteRuntime)(nil)
+)
+
+func (r *remoteRuntime) ConnectionDone() <-chan struct{} {
+	return r.client.streamDone
+}
+
+func (r *remoteRuntime) ConnectionError() error {
+	r.client.closeMu.Lock()
+	defer r.client.closeMu.Unlock()
+
+	return r.client.connectionErr
+}
 
 // Version returns the immutable hosted version captured during Connect, including
 // after Close or transport loss. Reading it does not retain the connection.
