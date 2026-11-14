@@ -61,7 +61,7 @@ func TestPublicSurface(t *testing.T) {
 
 	slices.Sort(exported)
 
-	want := []string{"ErrClosed", "ErrExecutionCancelled", "Error", "From", "New", "Option", "WithInsecure", "WithPerRPCCredentials", "WithTransportCredentials"}
+	want := []string{"ConnectionLifetime", "ErrClosed", "ErrExecutionCancelled", "Error", "From", "New", "Option", "WithInsecure", "WithPerRPCCredentials", "WithTransportCredentials"}
 	if !slices.Equal(exported, want) {
 		t.Fatalf("public client surface = %v, want %v", exported, want)
 	}
